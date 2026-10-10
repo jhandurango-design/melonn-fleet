@@ -1,0 +1,4 @@
+backups/
+*.md
+.git
+.gitignore

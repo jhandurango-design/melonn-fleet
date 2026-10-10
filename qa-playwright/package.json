@@ -1,0 +1,23 @@
+{
+  "name": "melonn-fleet-qa-playwright",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Suite de QA automatizada (Playwright + TypeScript, Page Object Model) para Melonn Fleet. No modifica el codigo fuente de la aplicacion (app.js/index.html/styles.css/auth.js) -- solo la ejercita como caja negra via el navegador.",
+  "main": "index.js",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:security": "playwright test tests/01-security-gate.spec.ts",
+    "test:seed": "playwright test tests/02-seed-users.spec.ts",
+    "test:rbac": "playwright test tests/03-rbac-navigation.spec.ts",
+    "report": "playwright show-report"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^7.0.2"
+  }
+}

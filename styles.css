@@ -1,0 +1,1221 @@
+/* ==========================================================================
+   Melonn Fleet — Control y Programación de Flota
+   Design tokens + component system
+   Paleta y tipografía alineadas al Design System oficial de Melonn (Sora, #14095B, Paper plano)
+   ========================================================================== */
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&display=swap');
+:root{
+  --header:#14095B;
+  --header-alt:#14095B;
+  --header-text-soft:#EAE9F5;
+  --bg-app:#FCFCFC;
+  --bg-card:#FFFFFF;
+  --bg-card-soft:#FBFBFD;
+  --text-primary:#111111;
+  --text-secondary:#6C757D;
+  --border:#E1E1E1;
+  --btn-primary-bg:#14095B;
+  --btn-primary-hover:#1B1566;
+  --yellow:#FFC700;
+  --yellow-text:#4A3800;
+  --cyan:#4CD8E1;
+  --cyan-deep:#38C1B3;
+  --green:#00D084;
+  --green-deep:#10B981;
+  --lilac:#C084FC;
+  --lilac-soft:#E9D5FF;
+  --lilac-deep:#8B5CF6;
+  --danger:#E5484D;
+  --danger-soft:#FDEBEC;
+  --warn-soft:#FFF7E0;
+  --muted:#94A3B8;
+  --muted-soft:#F1F2F6;
+  --shadow-sm:0 2px 4px rgba(15,12,82,0.04);
+  --shadow-md:0 4px 16px rgba(15,12,82,0.08);
+  --shadow-lg:0 20px 48px rgba(15,12,82,0.22);
+  --radius-card:6px;
+  --radius-btn:6px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg-app:#0E0C1F; --bg-card:#181530; --bg-card-soft:#1D1A38;
+    --text-primary:#F1EEFB; --text-secondary:#A7A2C9; --border:#2D2A52;
+    --header-alt:#0B0940; --muted-soft:#231F44; --danger-soft:#3A1720; --warn-soft:#332A0A;
+    --shadow-sm:0 2px 4px rgba(0,0,0,0.25); --shadow-md:0 8px 24px rgba(0,0,0,0.35); --shadow-lg:0 24px 60px rgba(0,0,0,0.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg-app:#0E0C1F; --bg-card:#181530; --bg-card-soft:#1D1A38;
+  --text-primary:#F1EEFB; --text-secondary:#A7A2C9; --border:#2D2A52;
+  --header-alt:#0B0940; --muted-soft:#231F44; --danger-soft:#3A1720; --warn-soft:#332A0A;
+  --shadow-sm:0 2px 4px rgba(0,0,0,0.25); --shadow-md:0 8px 24px rgba(0,0,0,0.35); --shadow-lg:0 24px 60px rgba(0,0,0,0.5);
+}
+
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;height:100%;}
+body{
+  background:var(--bg-app);color:var(--text-primary);
+  font-family:'Sora',sans-serif;
+  font-size:12px;font-weight:500;line-height:1.43;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+}
+::selection{background:var(--lilac-soft);color:var(--header);}
+button,input,select,textarea{font-family:inherit;}
+a{color:inherit;}
+[hidden]{display:none !important;}
+
+/* ---------------- Scrollbar (Design System Melonn) ---------------- */
+*{scrollbar-width:thin;scrollbar-color:#d6dee1 transparent;}
+*::-webkit-scrollbar{width:9px;height:9px;}
+*::-webkit-scrollbar-track{background:transparent;}
+*::-webkit-scrollbar-thumb{background-color:#d6dee1;border-radius:20px;}
+*::-webkit-scrollbar-thumb:hover{background-color:#c2cdd1;}
+
+/* ---------------- Login ---------------- */
+.login-screen{
+  min-height:100vh;display:grid;grid-template-columns:1fr auto 1fr;align-items:start;align-content:center;column-gap:24px;
+  position:relative;overflow:hidden;padding:64px 24px 84px;
+  background:linear-gradient(160deg,var(--header) 0%, var(--header-alt) 65%, #1B1140 100%);
+}
+.login-bg-pattern{
+  display:block;
+  background-image:url('assets/login-bg-pattern.png');
+  background-size:auto 97.9vh;
+  background-position:100% 0%;
+  background-repeat:no-repeat;
+  transform:rotate(0deg);
+  opacity:1.00;
+  position:fixed;inset:0;z-index:0;pointer-events:none;overflow:hidden;
+}
+.login-corner-logo{
+  position:absolute;top:58px;right:119px;z-index:10;width:auto;height:75px;
+  opacity:0.96;transform:scale(0.93);transform-origin:top right;
+  filter:brightness(0) invert(1);
+}
+.login-fleet-art{
+  position:absolute;right:0;bottom:70px;z-index:0;max-width:min(560px,46vw);max-height:340px;
+  pointer-events:none;
+}
+.login-panel-col{
+  position:relative;z-index:10;grid-column:2;display:flex;flex-direction:column;align-items:center;
+}
+.login-panel{
+  background:var(--bg-card);padding:40px;display:flex;flex-direction:column;
+  width:440px;max-width:100%;margin:0 auto;border-radius:20px;box-shadow:var(--shadow-lg);
+}
+.login-brand-text{display:flex;align-items:baseline;gap:8px;margin-bottom:6px;text-transform:lowercase;letter-spacing:-0.01em;}
+.login-brand-main{font-size:30px !important;font-weight:800;color:#110b52;}
+.login-brand-suffix{font-size:30px !important;font-weight:800;color:#110b52;}
+.login-sub{margin:0 0 26px;color:#6b7280;font-size:13px !important;}
+.login-panel h1{margin:0 0 20px;font-size:20px;font-weight:700;letter-spacing:-0.01em;color:var(--header);}
+.login-form{display:flex;flex-direction:column;gap:14px;}
+.login-form .field label{font-size:11px;font-weight:600;color:#666666;text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;display:block;}
+.login-form input{width:100%;border:1px solid var(--border);border-radius:8px;padding:11px 13px;background:var(--bg-card-soft);color:var(--text-primary);outline:none;}
+.login-form input:focus{border-color:var(--lilac-deep);box-shadow:0 0 0 3px var(--lilac-soft);}
+.password-field-wrap{position:relative;}
+.password-field-wrap input{padding-right:38px;}
+.password-toggle-btn{
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  background:none;border:none;padding:0;margin:0;cursor:pointer;color:#888;
+  display:flex;align-items:center;justify-content:center;
+}
+.password-toggle-btn:hover{color:#555;}
+.password-toggle-btn .icon-eye{display:none;}
+.password-toggle-btn.is-visible .icon-eye{display:block;}
+.password-toggle-btn.is-visible .icon-eye-off{display:none;}
+.login-site-link{
+  margin:18px 0 0;display:flex;align-items:center;justify-content:center;gap:6px;
+  font-size:12.5px;color:#a855f7;
+}
+.login-site-link svg{flex-shrink:0;}
+.login-site-link a{color:#a855f7;font-weight:700;text-decoration:none;}
+.login-site-link a:hover{text-decoration:underline;}
+.login-info-banner{
+  position:relative;z-index:10;grid-column:3;justify-self:start;align-self:start;margin-top:110px;
+  max-width:340px;padding:22px 24px;border-radius:16px;
+  background:rgba(8,5,36,0.55);border:1px solid rgba(255,255,255,0.12);
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+}
+.login-info-banner h3{margin:0 0 8px;font-size:14px;font-weight:700;color:#fff;}
+.login-info-banner p{margin:0;font-size:12.5px;line-height:1.5;color:rgba(255,255,255,0.78);}
+.login-form .field-required-msg{display:none;font-size:12px !important;color:#e53e3e;font-style:italic;margin-top:4px;}
+.login-form .field.error label{color:#e53e3e;}
+.login-form .field.error input{border:1px solid #e53e3e;}
+.login-form .field.error .field-required-msg{display:block;}
+.login-forgot{align-self:flex-start;background:none;border:none;padding:0;margin-top:-10px;color:var(--btn-primary-bg);font-size:11.5px;font-weight:600;cursor:pointer;}
+.login-forgot:hover{text-decoration:underline;}
+.login-error{color:var(--danger);font-size:12px;margin:-6px 0 0;min-height:14px;}
+.btn-block{width:100%;justify-content:center;padding:11px 16px;font-size:13px;}
+.login-footer-ribbon{
+  position:fixed !important;left:0 !important;right:0 !important;bottom:0 !important;z-index:10 !important;
+  background-color:#111111 !important;padding:1px !important;height:38px !important;display:flex !important;
+  align-items:center !important;overflow:hidden !important;white-space:nowrap !important;
+}
+.login-footer-track{display:flex;width:max-content;animation:loginFooterScroll 26s linear infinite;}
+.login-footer-item{
+  margin:10px 10px 8px 10px !important;white-space:nowrap !important;
+  font-size:13px !important;font-weight:700 !important;color:#ffffff !important;
+}
+@keyframes loginFooterScroll{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+
+@media (prefers-reduced-motion: reduce){.login-footer-track{animation:none;}}
+.orbit{width:230px;height:230px;border-radius:50%;border:1px solid rgba(255,255,255,0.14);display:flex;align-items:center;justify-content:center;position:relative;}
+.orbit::before{content:"";position:absolute;inset:-38px;border-radius:50%;border:1px dashed rgba(255,255,255,0.1);}
+.orbit-core{
+  width:150px;height:150px;border-radius:50%;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.16);
+  display:flex;align-items:center;justify-content:center;text-align:center;color:#fff;font-weight:800;font-size:17px;line-height:1.3;letter-spacing:-0.02em;
+  box-shadow:0 0 0 10px rgba(255,255,255,0.03);
+}
+.orbit-logo{width:96px;height:auto;filter:brightness(0) invert(1);opacity:0.96;}
+/* ---------------- Loading overlay ---------------- */
+.loading-overlay{position:fixed;inset:0;background:#14095B;display:flex;align-items:center;justify-content:center;z-index:500;opacity:1;transition:opacity .35s ease;}
+.loading-overlay.fade-out{opacity:0;}
+.loading-pulse{animation:loadingPulse 1.4s ease-in-out infinite;}
+.loading-pulse .orbit-core{animation:loadingCoreGlow 1.4s ease-in-out infinite;}
+@keyframes loadingPulse{0%,100%{transform:scale(1);opacity:.85;}50%{transform:scale(1.08);opacity:1;}}
+@keyframes loadingCoreGlow{0%,100%{box-shadow:0 0 0 10px rgba(255,255,255,0.03);}50%{box-shadow:0 0 0 16px rgba(255,255,255,0.06);}}
+
+/* ---------------- Shell ---------------- */
+.shell{display:flex;flex-direction:column;min-height:100vh;}
+.topbar{
+  background:var(--header);color:#fff;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 20px;height:56px;flex-shrink:0;
+  position:sticky;top:0;z-index:40;
+}
+.topbar-left{display:flex;align-items:center;gap:14px;}
+.hamburger{
+  width:28px;height:32px;padding:0 !important;margin:0;border-radius:8px;background:transparent;background-color:transparent;border:none;outline:none;box-shadow:none;color:#FFFFFF !important;display:flex;align-items:center;justify-content:center;cursor:pointer;margin-left:20px;margin-right:6px !important;flex-shrink:0;
+}
+.hamburger:hover{background:rgba(255,255,255,0.1);}
+.hamburger:focus,.hamburger:focus-visible{outline:none;box-shadow:none;}
+.hamburger svg{width:24px !important;height:24px !important;color:#FFFFFF !important;flex-shrink:0;pointer-events:none;}
+.brand{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:16px !important;letter-spacing:-0.02em;height:15px;margin-left:0px !important;margin-right:24px;margin-bottom:-2px;cursor:pointer;}
+
+.topbar-right{display:flex;align-items:center;gap:14px;flex-shrink:0;position:relative;}
+
+.user-profile-topbar{display:flex;align-items:center;gap:10px;}
+
+.user-context-stack{display:flex;flex-direction:column;align-items:flex-end;gap:2px;line-height:1.25;}
+.user-name-row{display:flex;align-items:center;gap:7px;}
+
+.context-pill{display:flex;align-items:center;gap:4px;cursor:pointer;color:#fff;}
+.context-pill.static{cursor:default;}
+.context-pill .label{font-size:11px;color:#fff;}
+.context-pill .value{font-size:11px;font-weight:normal;color:var(--green);}
+
+.user-block{display:flex;align-items:center;cursor:pointer;}
+.user-icon-circle{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.user-name{font-size:14px !important;font-weight:600;color:#fff;cursor:pointer;}
+.user-role{font-size:9.5px;font-weight:700;letter-spacing:.05em;padding:1px 6px;border-radius:4px;display:inline-block;}
+.role-ADMIN{background:var(--yellow);color:var(--header);}
+.role-PLANNER{background:var(--lilac-deep);color:#fff;}
+.role-BODEGA{background:var(--cyan);color:var(--header);}
+.role-ALIADO{background:var(--lilac-soft);color:#5B21B6;}
+.role-AUDITOR{background:var(--green);color:var(--header);}
+
+/* User Drawer: panel a pantalla completa en alto (top:0 -> bottom:0, height:100vh), anclado a la derecha.
+   z-index:10000 (muy por encima de .cumplimiento-export-fab, 1000). OJO: el z-index solo compite en el mismo
+   contexto de apilamiento -- por eso el elemento vive en index.html como hijo directo de .shell y NO dentro de
+   <header class="topbar"> (sticky + z-index:40 = contexto propio que lo dejaba por debajo de la barra de
+   exportación, recortando visualmente su parte inferior). Ver requerimiento "Corrección obligatoria en CSS:
+   Ajustar alto del User Drawer". */
+.user-dropdown{position:fixed;top:0;right:0;bottom:0;height:100vh;width:220px;background-color:#110959;z-index:10000;display:none;flex-direction:column;box-shadow:-6px 0 24px rgba(0,0,0,0.3);}
+.user-dropdown.open{display:flex;}
+.user-dropdown-close{align-self:flex-start;background:none;border:none;color:#fff;font-size:20px !important;font-weight:700;cursor:pointer;padding:18px 20px;line-height:1;}
+.user-dropdown-divider{height:1px;background:rgba(255,255,255,0.12);margin:0 20px;}
+.user-dropdown button{width:100%;display:flex;align-items:center;gap:10px;padding:16px 20px;border:none;background:none;color:#fff;font-size:13px !important;font-weight:500;cursor:pointer;text-align:left;}
+.user-dropdown button:hover{background:rgba(255,255,255,0.06);}
+.app-version{margin-top:auto;font-size:11px;font-weight:500;color:rgba(255,255,255,0.5);text-align:center;padding:16px;}
+
+.sede-dropdown-menu{position:fixed;background:#ffffff;color:#1e1e1e;border-radius:8px;box-shadow:var(--shadow-lg);padding:6px;min-width:230px;z-index:1001;border:1px solid var(--border);}
+.sede-dropdown-header{display:flex;align-items:center;gap:6px;font-size:10.5px !important;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;padding:8px 10px 4px;}
+.sede-dropdown-menu button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:none;background:none;border-radius:7px;color:#1e1e1e;font-size:12.5px !important;font-weight:500;cursor:pointer;text-align:left;}
+.sede-dropdown-menu button:not(.disabled):hover{background:var(--muted-soft);}
+.sede-dropdown-menu button.selected{background:#E8F1FE;color:#1450B8;font-weight:700;}
+.sede-dropdown-menu button .check{color:#1450B8;font-weight:800;}
+.sede-dropdown-menu button.disabled{opacity:.5;cursor:not-allowed;}
+
+/* ---------------- Body: sidebar + main ---------------- */
+.body{display:flex;flex:1;min-height:0;}
+.sidebar{width:222px;flex-shrink:0;background-color:#f6f7f9;border-right:1px solid var(--border);padding:16px 12px;position:sticky;top:56px;align-self:flex-start;height:calc(100vh - 56px);overflow-y:auto;display:flex;flex-direction:column;transition:margin-left .18s ease;}
+.sidebar.collapsed{margin-left:-222px;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:var(--text-secondary);font-size:13px;font-weight:500;cursor:pointer;position:relative;margin-bottom:2px;border-right:4px solid transparent;transition:background .12s ease,color .12s ease;}
+.nav-item svg{flex-shrink:0;opacity:.85;}
+.nav-item:hover{background:var(--muted-soft);color:var(--text-primary);}
+/* border-right reservado siempre (transparente por defecto, arriba) en vez de aparecer solo en .active: así
+   el ancho de contenido disponible para el texto nunca cambia entre estados — antes, activar el ítem más
+   largo del sidebar ("Calculador de Rutas") le quitaba 4px justo en el punto donde el texto ya iba al límite
+   y lo hacía saltar a 2 líneas, deformando esa fila (36px -> 52px) sin que le pasara a sus hermanos más cortos. */
+.nav-item.active{background:var(--muted-soft);color:#4A154B;font-weight:600;border-right-color:#4A154B;border-radius:8px 0 0 8px;}
+:root[data-theme="dark"] .nav-item.active{color:#4A154B;}
+.nav-item .chip{margin-left:auto;font-size:10px;font-weight:700;background:var(--danger-soft);color:var(--danger);padding:1px 6px;border-radius:10px;}
+/* Categoría desplegable (prueba piloto: agrupa Consolidado + Programación bajo "Programación"). */
+.nav-category-header{justify-content:flex-start;}
+.nav-category-arrow{flex-shrink:0;margin-left:auto;transition:transform .15s ease;}
+.nav-category-arrow.open{transform:rotate(180deg);}
+.nav-category-items{display:flex;flex-direction:column;overflow:hidden;max-height:200px;opacity:1;transition:max-height .2s ease,opacity .15s ease;}
+.nav-category-items.collapsed{max-height:0;opacity:0;}
+/* 30px (antes 34px): a 34px, "Calculador de Rutas" (el label más largo del sidebar) quedaba ~3px por
+   encima del ancho disponible y se partía en 2 líneas, deformando esa fila frente a sus hermanas de una sola
+   línea (Consolidado/Despacho) — 30px sigue leyéndose como indentado bajo "Programación" y le devuelve el
+   margen justo para caber en una sola línea, igual que el resto de pestañas. */
+.nav-subitem{padding-left:30px;}
+.sidebar-footer{margin-top:auto;padding-top:12px;}
+.readonly-flag{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:600;color:var(--text-secondary);background:var(--muted-soft);padding:9px 10px;border-radius:8px;}
+
+main{flex:1;min-width:0;padding:26px 30px 60px;overflow-x:hidden;}
+.view{display:none;}
+.view.active{display:block;}
+
+/* ---------------- Page head / buttons ---------------- */
+.page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:20px;flex-wrap:wrap;}
+/* Ajuste Complementario — Reducción de Tamaño de Títulos de Módulo: escala agresivamente compacta (18px/700,
+   antes 20px/700, y 21px/800 en el corte original) — única regla global para el h1 de cada módulo (ver
+   .page-head), así que este cambio aplica a toda la plataforma sin excepciones por vista/rol. */
+.page-head h1{margin:0 0 4px;font-size:1.125rem;font-weight:700;letter-spacing:-0.01em;text-wrap:balance;}
+/* Ajuste de Tipografía en Título Principal: Consolidado es el ÚNICO módulo cuyo texto de título vive dentro
+   de un <span data-i18n="consolidado.title"> (necesario para la traducción ES/EN) en vez de texto plano
+   directo del h1 -- el resto de los módulos no envuelve su título en ningún span, así que heredan el tamaño/
+   peso del h1 sin problema. La regla global "Estilo Fino Melonn" (ver más abajo, "body,p,span,td,input,
+   select{font-size:12px !important;font-weight:500;...}") atrapa CUALQUIER <span>, incluido este, y lo
+   reduce a 12px/500 pese a estar dentro de un h1 de 18px/700. Se reinstauran aquí explícitamente esos 2
+   valores (con !important, para empatar y ganarle al !important de la regla de reset) solo sobre el span
+   con data-i18n dentro del título del módulo -- no toca la regla de reset global ni ningún otro span de la
+   plataforma (el ícono (?) vive en un span aparte, .info-tip, sin data-i18n, así que no lo afecta). */
+.page-head h1 [data-i18n]{font-size:1.125rem !important;font-weight:700 !important;}
+.page-head .sub{color:var(--text-secondary);font-size:12.5px;margin:0;}
+.page-head-actions{display:flex;align-items:center;gap:10px;}
+/* Ver "Corrección Definitiva de la Barra de Filtros y Botón Limpiar Filtro" (2): mismo tope de ancho que
+   .filter-bar, para los filtros de Bodega/Aliado/Mensajero que viven directo en .page-head-actions
+   (Consolidado, Despacho, Seguimiento) en vez de en un panel de filtros aparte. */
+.page-head-actions .field{max-width:240px;}
+/* CORRECCIÓN "Estandarización y Fijación de Pestañas" + "Eliminación de Overflow" (Módulo de Programación:
+   Consolidado, Despacho, Programar Flota, Seguimiento) — alinea el segmentado Día/Mes por el borde INFERIOR
+   con los <select> de los filtros vecinos (que llevan label encima y quedan más altos que el segmentado
+   solo), en vez de centrarlo respecto a toda su altura, y permite que la barra de filtros baje de línea
+   ANTES de forzar scroll horizontal de toda la ventana (el ancho de cada <select> ya es fijo vía su propio
+   min-width inline, así ninguno cambia de tamaño al envolver). */
+#view-consolidado .page-head-actions,
+#view-despacho .page-head-actions,
+#view-programacion .page-head-actions,
+#view-seguimiento .page-head-actions{align-items:flex-end;flex-wrap:wrap;max-width:100%;row-gap:10px;}
+/* REVERSIÓN (ver requerimiento "Prompt de Corrección: Restauración de Filtros, Fix de Bug y Estandarización
+   de Tooltips", punto 1): un intento anterior de fijar "Limpiar Filtro" a la derecha en Consolidado/Despacho
+   forzó flex-wrap:nowrap + achicó los 3 selectores -- funcionaba en "Operación del Día" (Desde/Hasta ocultos)
+   pero en "Historial del Mes" (con Desde/Hasta visibles, 2 campos más en la misma fila) el total ya no cabía
+   y, al no poder envolver, "Limpiar Filtro" quedaba empujado fuera del viewport (recortado/invisible) en vez
+   de solo desalineado -- regresión peor que el problema original. Se revierte por completo a la regla de
+   arriba (flex-wrap:wrap, sin nowrap ni angostar selectores ni margin-left:auto): el botón vuelve a fluir en
+   línea natural y, si la fila no cabe, salta entero a la siguiente línea (comportamiento estable ya validado
+   en el resto de la plataforma, ver .filter-bar-clear{margin-left:0 !important} más abajo). */
+/* CORRECCIÓN "Eliminación de Parpadeo y Salto Visual (Layout Shift)": .page-head usa
+   justify-content:space-between, así que el bloque de acciones queda anclado por su borde DERECHO — si el
+   campo de Fecha/Mes deja de ocupar espacio al ocultarse (comportamiento normal de [hidden]:display:none), el
+   bloque entero se angosta y su borde IZQUIERDO se recorre, arrastrando Bodega/Aliado/Mensajero con él al
+   alternar pestañas. Se reserva su espacio SIEMPRE (visibility:hidden en vez de display:none) para que el
+   ancho total del bloque — y por lo tanto la posición de los demás filtros — no cambie nunca entre "Operación
+   del Día" e "Historial del Mes". Mayor especificidad (id + atributo) que la regla UA [hidden]{display:none}.
+   Ver requerimiento "Corrección de Alineación en Filtros y Estandarización de Modales Custom", Parte 1:
+   Consolidado (#consolHistDesdeField/#consolHistHastaField) SALE de este grupo -- esa reserva fija era
+   precisamente lo que empujaba "Limpiar Filtro" a una segunda línea en "Operación del Día" a 1366-1500px de
+   ancho; se acepta un reflow leve y puntual al cambiar a "Historial del Mes" en Consolidado a cambio de que
+   "Operación del Día" quede siempre en una sola fila (decisión del usuario).
+   Ver requerimiento "Corrección Exclusiva y Quirúrgica: Alineación del Botón 'Limpiar Filtro' en
+   Programación": Despacho y Seguimiento (#despachoHistDesdeField/Hasta, #seguimientoHistDesdeField/Hasta)
+   SALEN ahora también de este grupo, por el mismo diagnóstico exacto -- esos ~320px reservados en invisible
+   (Desde+Hasta) eran los que, incluso en la vista de Aliado con solo 2 selectores y espacio de sobra, dejaban
+   "Limpiar Filtro" empujado lejos de "Mensajero" (visualmente "flotando" con un hueco en blanco antes), o lo
+   hacían saltar solo a su propia línea en la vista de Planner (3 selectores). Al caer al comportamiento nativo
+   [hidden]{display:none}, "Limpiar Filtro" vuelve a fluir justo después del último selector visible en
+   "Operación del Día", y queda anclado justo después de "Hasta" en "Historial del Mes" (su posición real en
+   el DOM) -- mismo reflow leve y puntual ya aceptado para Consolidado al cambiar de pestaña, ahora consistente
+   en los 3 módulos. */
+#consolHistPresets[hidden],
+#despachoHistPresets[hidden],
+#seguimientoHistPresets[hidden]{display:flex !important;visibility:hidden;pointer-events:none;}
+/* Fila de accesos rápidos del Selector de Rango de Fechas de Historial (Ayer/Última semana/Este mes/Mes
+   anterior, ver historialRangoPreset) — mismos botones .btn-ghost.btn-sm.btn-pill ya usados en el resto de
+   la app, alineados por el borde inferior con los <input type="date"> vecinos (misma altura ~36px). */
+.hist-presets{display:flex;align-items:flex-end;gap:6px;height:36px;}
+
+/* CORRECCIÓN "Corrección Crítica de CSS" (2): line-height:1 y flex-shrink:0 aíslan al ícono (?) de cualquier
+   line-height/ambiente heredado (que podría inflar su altura dentro del badge inline-flex) y evitan que un
+   flex-shrink implícito lo comprima -- su caja queda fija (13x13 del svg) tanto en reposo como en :hover;
+   :hover/:focus solo cambian color (currentColor, sin ancho de borde real), nunca dimensiones. */
+.info-tip{position:relative;display:inline-flex;vertical-align:middle;margin-left:8px;color:var(--muted);cursor:help;line-height:1;flex-shrink:0;}
+.info-tip:hover,.info-tip:focus{color:var(--lilac-deep);outline:none;}
+/* CORRECCIÓN "Corrección Técnica Urgente: Tooltip Cortado (Overflow) y Salto en Tablas": .info-tip-box ya NO
+   se posiciona ni se muestra in-place -- queda SIEMPRE display:none, vive solo como fuente de datos (su
+   innerHTML se clona dentro de #infoTipPortal, un <div> aparte anexado a document.body y posicionado con
+   position:fixed vía JS -- ver showInfoTipPortal/closeInfoTipPortal en app.js). Esto elimina de raíz el
+   recorte por .table-card{overflow:hidden}/.table-scroll{overflow-x:auto} de la tabla contenedora: el
+   tooltip ya no es descendiente de la celda, así que ningún overflow de ancestro puede recortarlo, y como no
+   ocupa espacio en el flujo del documento, mostrarlo nunca cambia el tamaño de la celda/fila (cero salto de
+   layout). Las variantes .info-tip-left/.info-tip-right de abajo quedan sin efecto (targetean un elemento que
+   ya nunca se muestra) -- se conservan sin tocar por si algún llamado futuro a metricTip(label, text,
+   placement) las retoma; no se eliminan sin confirmar con el usuario. */
+.info-tip-box{display:none;}
+.info-tip-right .info-tip-box{left:auto;right:0;}
+.info-tip-left .info-tip-box{top:auto;left:auto;right:22px;bottom:50%;transform:translateY(50%);width:max-content;max-width:280px;}
+/* #infoTipPortal: misma piel visual que .info-tip-box tenía, pero fixed + creado en tiempo real. max-width
+   260px + white-space:normal + word-break:break-word (punto 2 del prompt) evitan que un texto largo sin
+   espacios se desborde del recuadro; z-index:1000 y pointer-events:none igual que la corrección anterior.
+   CORRECCIÓN "Auditoría y Corrección Autónoma: Revisar Lógica de Tooltip y Eventos de Tabla" (2): pointer-
+   events:none reforzado con !important, y explícito también en los hijos (por si el contenido del tooltip
+   alguna vez incluyera un elemento con pointer-events propio, ej. un enlace) -- así el propio tooltip nunca
+   puede robarle el hover a lo que esté debajo ni a sí mismo. */
+.info-tip-portal{position:fixed;z-index:1000;max-width:260px;white-space:normal;word-break:break-word;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-lg);padding:14px 16px;font-size:11.5px;font-weight:400;color:var(--text-primary);line-height:1.5;pointer-events:none !important;}
+.info-tip-portal *{pointer-events:none !important;}
+.info-tip-portal strong{display:block;margin-bottom:8px;font-size:12px;}
+.info-tip-portal ul{margin:0;padding-left:16px;display:flex;flex-direction:column;gap:5px;}
+.info-tip-portal p{margin:0;}
+/* Ícono (?) compacto por badge (ver requerimiento "Ajustes UX/UI y Estandarización de Componentes", 2c) --
+   mismo componente .info-tip, versión más chica para no desbalancear una celda de tabla junto a un badge.
+   info-tip-portal-sm es el equivalente para el portal (showInfoTipPortal la agrega cuando el ícono de origen
+   es .info-tip-sm), ya que el portal no es descendiente del ícono y no puede heredar el tamaño vía CSS anidado. */
+.info-tip-sm{margin-left:4px;}
+.info-tip-portal-sm{width:220px;max-width:220px;padding:10px 12px;font-size:11px;}
+
+.btn{display:inline-flex;align-items:center;gap:7px;border-radius:var(--radius-btn);border:1px solid transparent;padding:9px 16px;font-size:12.5px;font-weight:600;cursor:pointer;transition:filter .12s ease, background .12s ease;white-space:nowrap;}
+.btn:active{transform:translateY(1px);}
+.btn-primary{background:var(--btn-primary-bg);color:#fff;}
+.btn-primary:hover{background:var(--btn-primary-hover);}
+.btn-ghost{background:var(--bg-card);color:var(--text-primary);border-color:var(--border);}
+.btn-ghost:hover{background:var(--muted-soft);}
+/* Ver requerimiento "Corrección Pendiente y Exclusiva: Estandarización y Comportamiento de 'Limpiar
+   Filtro'", punto 1: el botón principal de barra de filtros (antes .btn-limpiar-filtro, ver requerimiento
+   "Estandarización Visual...") quedaba más alto (38px) que los <select> adyacentes -- se revierte por
+   completo a su apariencia original .btn.btn-ghost (sin clase/alto/padding custom) en TODAS las barras
+   principales. .btn-limpiar-filtro-kpi (punto 2, botón compacto ligado a tarjetas KPI) SÍ se conserva --
+   ese patrón show/hide-al-filtrar es exactamente el que se pide extender a Cumplimiento y Calidad. */
+.btn.btn-limpiar-filtro-kpi{background:#fff;border:1px solid #CBD5E1;color:#334155;border-radius:6px;height:30px;padding:4px 12px;font-size:11.5px;}
+.btn.btn-limpiar-filtro-kpi:hover{background:#F8FAFC;border-color:#94A3B8;}
+.btn-danger{background:var(--danger-soft);color:var(--danger);}
+.btn-danger:hover{background:var(--danger);color:#fff;}
+.btn-sm{padding:6px 11px;font-size:11.5px;}
+.btn-pill{border-radius:999px;}
+.btn[disabled]{opacity:.45;cursor:not-allowed;}
+
+.segmented{display:flex;align-items:center;background:var(--muted-soft);border-radius:8px;padding:3px;gap:2px;height:38px;box-sizing:border-box;}
+.segmented button{border:none;background:transparent;padding:6px 14px;font-size:12px;font-weight:600;line-height:1.2;white-space:nowrap;color:var(--text-secondary);border-radius:6px;cursor:pointer;box-sizing:border-box;}
+.segmented button.active{background:var(--bg-card);color:var(--header);box-shadow:var(--shadow-sm);}
+/* Pestaña deshabilitada "EN CONSTRUCCIÓN" (ver "Rediseño Módulo Cumplimiento y Calidad", 1A/1B — "Calidad en
+   ofrecimiento") -- mismo criterio visual que .sede-dropdown-menu button.disabled, generalizado a cualquier
+   botón de .segmented (ver, p. ej., "Calidad en ofrecimiento" en Cumplimiento y Calidad -- sin badge/etiqueta
+   adicional además de esta atenuación, ver requerimiento "Reconstrucción de Interactividad y UI: Módulo
+   Cumplimiento y Calidad"). */
+.segmented button.disabled{opacity:.5;cursor:not-allowed;}
+/* Variante compacta de .segmented para micro-filtros anidados DENTRO de un desglose ya expandido (ver
+   requerimiento "Corrección de Scope de Filtros y Desglose Completo en 'Despachos A Tiempo'", punto 2 --
+   Todos/Solo A Tiempo/Solo Tardíos dentro de "Ver Detalle" de % Despachos A Tiempo) -- mismo componente, más
+   angosto para no competir visualmente con el .segmented principal de la cabecera de fecha/pestañas. */
+.segmented-sm{height:28px;padding:2px;margin-bottom:12px;}
+.segmented-sm button{padding:3px 10px;font-size:11px;}
+
+/* min-height: ver requerimiento "Ajustes UI/UX Consolidados...", punto 1 -- el texto varía de 1 a 2 líneas
+   según el estado (Hoy/Mañana/alert/cierre con botón de prolongación), lo que antes desplazaba Filtros y
+   Tabla en ~17px al alternar Hoy/Mañana. 59px cubre la variante más alta medida (el aviso de "Hoy" cerrado,
+   2 líneas) y mantiene la misma posición vertical en el resto de estados, más cortos, centrados por
+   align-items:center. */
+.cutoff-banner{display:flex;align-items:center;gap:10px;background:var(--lilac-soft);color:#5B21B6;border:1px solid #DDBBFB;border-radius:10px;padding:11px 16px;font-size:12.5px;font-weight:500;margin-bottom:18px;min-height:59px;}
+/* .cutoff-banner{display:flex} tiene la misma especificidad que la regla UA por defecto [hidden]{display:none}
+   y gana por venir de la hoja de estilos del autor — sin esto, poner .hidden=true en JS (ver openTurnoModal,
+   turnoBloqueado) no ocultaba visualmente el banner. */
+.cutoff-banner[hidden]{display:none;}
+:root[data-theme="dark"] .cutoff-banner{background:#2B2050;color:#D8B4FE;border-color:#4C3A80;}
+.cutoff-banner strong{font-weight:700;}
+.cutoff-banner.danger{background:var(--danger-soft);color:var(--danger);border-color:#F3B9BC;}
+
+/* ---------------- Metrics ---------------- */
+/* Simetría global de tarjetas KPI (ver requerimiento "Refactorización de UI/UX: Simetría de KPIs, Fechas
+   Duales, Agrupación por Bodega y Sticky Footer Bar de Exportación", punto 3): grid-template-columns con
+   fracciones iguales (1fr cada una) ya fuerza columnas de ancho idéntico -- align-items:stretch (explícito,
+   aunque ya es el valor por defecto de grid) hace que todas las tarjetas de la MISMA fila compartan el alto
+   de la más alta; min-height en .metric-card además nivela el alto entre tarjetas de MÓDULOS/vistas
+   distintas (Cumplimiento, Programación, Consolidado, Alertas, Seguimiento...), que son grids separados y
+   por tanto nunca se estiran entre sí de forma automática. */
+/* minmax(0,1fr), no 1fr a secas: con 1fr puro cada columna toma como mínimo el min-content de su tarjeta,
+   así que en pestañas donde las 4 etiquetas tienen longitudes muy dispares (p. ej. "Calidad en Programación":
+   "Ausentismo" vs. "Incumplimientos Confirmados") las columnas de etiqueta larga imponen su mínimo y las de
+   etiqueta corta se ven forzadas a encogerse de forma asimétrica al reducirse el ancho disponible (p. ej. al
+   expandir el sidebar) -- minmax(0,1fr) fuerza una base de 0 para las 4 columnas por igual, así el espacio se
+   reparte siempre exactamente 25%/25%/25%/25% sin importar el contenido. */
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:20px;align-items:stretch;}
+#alertasMetrics{grid-template-columns:repeat(2,minmax(0,1fr));max-width:620px;}
+.metric-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-card);padding:16px 18px;box-shadow:none;display:flex;flex-direction:column;gap:8px;min-height:116px;min-width:0;}
+/* Estandarización global de tarjetas KPI (ver requerimiento "Refactorización Integral UI/UX, Estandarización
+   de KPI Cards y Fix de Tests", punto 2): el ícono de ayuda (?) y el ícono de estado quedan ANCLADOS en la
+   esquina superior derecha de la tarjeta, en la MISMA coordenada en todas las tarjetas de la plataforma
+   (Cumplimiento, Programación, Consolidado, Despacho, Alertas, Seguimiento, etc. -- todas comparten este
+   mismo bloque de clases, así que el arreglo es automáticamente global sin tocar cada card individualmente).
+   position:relative en .metric-top + position:absolute en el (?) es lo que logra esto sin depender de que el
+   título quepa en una sola línea: .metric-label-row ya NO es una fila flex que empuja al (?) junto al texto --
+   ahora es solo el contenedor de ancho flexible del título (flex:1, min-width:0, padding-right reservado para
+   que el texto envuelto nunca corra por debajo de los íconos), y el (?) se posiciona de forma independiente
+   del alto que termine ocupando el título envuelto. */
+.metric-top{display:flex;justify-content:space-between;align-items:flex-start;position:relative;gap:8px;}
+.metric-label-row{display:block;min-width:0;flex:1 1 auto;padding-right:56px;}
+.metric-label-row .info-tip{position:absolute;top:6px;right:34px;margin-left:0;}
+.metric-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);overflow-wrap:break-word;}
+.metric-icon{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.metric-value{font-size:25px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;}
+.metric-foot{font-size:11.5px;color:var(--text-secondary);display:flex;align-items:center;gap:5px;}
+.metric-foot.warn{color:#946200;}
+.metric-foot.danger{color:var(--danger);}
+.metric-foot.ok{color:var(--green-deep);}
+.metric-card-clickable{cursor:pointer;transition:box-shadow .12s ease,border-color .12s ease;}
+.metric-card-clickable:hover{box-shadow:var(--shadow-lg);}
+.metric-card-clickable.active{border-color:var(--lilac-deep);box-shadow:0 0 0 2px var(--lilac-soft);}
+
+/* ---------------- Inicio ---------------- */
+.inicio-hero{background:linear-gradient(160deg,var(--header) 0%, var(--header-alt) 65%, #1B1140 100%);border-radius:var(--radius-card);padding:32px 34px;margin-bottom:24px;box-shadow:var(--shadow-md);}
+.inicio-hero h1{color:#fff;font-size:24px;margin:0 0 8px;}
+.inicio-hero p{color:var(--header-text-soft);font-size:14px;margin:0;}
+
+/* ---------------- Panels / filters ---------------- */
+.panel{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-card);padding:18px 20px;box-shadow:none;margin-bottom:20px;}
+.panel-title{font-size:13px;font-weight:700;margin:0 0 14px;display:flex;align-items:center;gap:8px;}
+/* .filter-grid: EXCLUSIVO de grids de formulario dentro de modales (2 columnas iguales, ver Nueva Ruta/
+   Confirmar Reemplazo/Parámetros de autenticación/etc.) -- las filas de FILTRO reales de tabla migraron a
+   .filter-bar (ver "Prompt de Ejecución Global - Ajustes de UI/UX y CSS en Plataforma", punto 1), que ya no
+   necesita el workaround de :has() que tenía este grid para el hueco de Bodega/Aliado ocultos en Alertas:
+   flexbox reordena solo, sin dejar huecos, cuando un .field se oculta. */
+.filter-grid{display:grid;grid-template-columns:1.3fr 1.3fr 1fr auto;gap:10px;align-items:end;}
+/* Filtros de historial "limpios" (Historial de Solicitudes en Solicitudes y Cambios; Historial de Alertas en
+   Alertas): flex compacto en vez de grid de 4 columnas — el segmentado Día/Mes, el campo de fecha/estado y
+   "Limpiar" quedan pegados con un gap fijo de 8px, en lugar de estirarse a columnas 1.3fr/1.3fr que dejaban
+   huecos grandes entre controles pequeños. */
+/* Ver requerimiento "Ajustes UX/UI y Estandarización de Componentes" (3b): align-items pasó de center a
+   flex-end -- con center, el botón "Limpiar Filtro" (sin label encima, más bajo) quedaba centrado respecto a
+   toda la altura de la fila en vez de alineado con la base de los <select> vecinos (que sí llevan label +
+   input, más altos). Mismo criterio que ya usa .page-head-actions para Consolidado/Despacho/Seguimiento. */
+.filter-grid-clean{display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px;}
+.filter-grid-clean .field{flex:1 1 200px;min-width:180px;max-width:260px;}
+/* CORRECCIÓN "Reestructuración de 'Limpiar Filtro' en Solicitudes y Cambios (Historial)": esta regla
+   achataba el botón a 29px (padding:6px) en vez de los 33px estándar de .btn -- afecta por igual a
+   solicitudesHistFilterClear y alertasHistFilterClear (los 2 únicos .btn-ghost dentro de .filter-grid-clean,
+   ver comentario de esa clase más arriba), así que se retira para ambos, dejando que .btn/.btn-ghost base
+   gobiernen su tamaño igual que en el resto de la plataforma -- ya no hace falta un estilo propio aquí: el
+   salto de línea limpio y la alineación los resuelve .filter-bar-clear (ver más abajo), que ahora SÍ se les
+   aplica en el HTML (antes ninguno de los 2 llevaba esa clase). */
+/* Ver "Prompt de Ejecución Global - Ajustes de UI/UX y CSS en Plataforma" (1): estándar único de barra de
+   filtros para toda la plataforma. .filter-grid se CONSERVA sin cambios para sus usos como grid de
+   formulario dentro de modales (Nueva Ruta, Confirmar Reemplazo, Parámetros de autenticación, etc., donde 2
+   columnas iguales SÍ son el layout correcto) -- .filter-bar es una clase nueva, exclusiva de filas de
+   FILTRO reales de tabla (Alertas, Auditoría, Usuarios, Seguridad, Cuotas, Programar Flota), migradas desde
+   .filter-grid. A diferencia del grid con columnas "fr" (que estiraba un <select> de 3 opciones a 400-500px+
+   en pantallas anchas -- el <select> ocupa el 100% de su columna, y la columna crece con el espacio
+   disponible), .filter-bar es flexbox con cada .field a un ancho fijo razonable, así el ancho de un filtro ya
+   no depende de cuánto espacio sobre en la fila. */
+.filter-bar{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:flex-start;gap:12px 16px;}
+/* Ver requerimiento "Implementación Integral: Homologación de Filtros...", Parte 1: los "slots" de Indicador/
+   Aliado/Bodega/Mensajero/Limpiar Filtro de cada pestaña de Cumplimiento y Calidad viven dentro del MISMO
+   .filter-bar que la fecha -- display:contents para que sus hijos (.field/botón) sean flex-items directos de
+   .filter-bar (mismo wrap/gap/orden que el resto de la barra), sin introducir una caja propia. */
+.cumplimiento-filtros-slot{display:contents;}
+.cumplimiento-filtros-slot[hidden]{display:none;}
+.filter-bar .field:not(.filter-bar-clear){flex:0 0 auto;width:auto;min-width:180px;max-width:240px;}
+/* CORRECCIÓN "Corrección Definitiva de la Barra de Filtros y Botón Limpiar Filtro": el margin-left:auto
+   anterior anclaba "Limpiar Filtro" a la extrema derecha, lo que dejaba huecos gigantes o lo hacía "flotar"
+   solo cuando la fila envolvía. Ahora fluye en secuencia natural, inmediatamente después del último
+   selector (mismo gap de la fila) -- y si no cabe, salta limpio al inicio de la siguiente línea como un
+   .field más. Funciona igual dentro de .filter-bar, .filter-grid-clean o .page-head-actions (cualquier
+   contenedor flex), por eso no depende de la clase del padre. Se aplica tanto al <button> suelto con esta
+   clase directamente (Alertas, Auditoría, Usuarios, Programar Flota) como al .field wrapper con label vacío
+   que lo envuelve (Consolidado, Despacho, Seguimiento, Solicitudes, Cuotas). */
+/* CORRECCIÓN "Prompt de Corrección: Botón Limpiar Filtro y Tooltip Flotante" (1): reforzado con !important --
+   .field{display:flex} y otros contenedores de columna no deben poder re-estirar este botón bajo ninguna
+   circunstancia; align-self:flex-end asegura la base alineada con los inputs vecinos sin depender de que el
+   contenedor padre declare align-items:flex-end. */
+.filter-bar-clear{flex:0 0 auto !important;width:auto !important;max-width:fit-content !important;margin-left:0 !important;align-self:flex-end;}
+.filter-bar-clear.btn,.filter-bar-clear .btn{padding:8px 16px;}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0;}
+.field label{font-size:10.5px;font-weight:600;color:#666666;text-transform:uppercase;letter-spacing:.04em;}
+.input-wrap{position:relative;}
+.input-wrap svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none;}
+/* Botón "✕ Limpiar" dentro de un input con icono (ver requerimiento "Buscador en Seguridad y Accesos"). */
+.input-wrap-clearable input{padding-right:28px;}
+.input-wrap-clearable .input-clear-btn{position:absolute;right:5px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:var(--muted);cursor:pointer;font-size:12px;line-height:1;padding:5px 6px;border-radius:6px;}
+.input-wrap-clearable .input-clear-btn:hover{background:var(--muted-soft);color:var(--text-primary);}
+.field input,.field select,.field textarea{width:100%;border:1px solid var(--border);border-radius:7px;padding:8px 10px 8px 32px;font-size:12.5px;background:var(--bg-card-soft);color:var(--text-primary);outline:none;transition:border-color .12s ease;}
+.field select,.field textarea{padding-left:10px;}
+.field textarea{resize:vertical;}
+.field select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236C757D' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--lilac-deep);box-shadow:0 0 0 3px var(--lilac-soft);}
+.field select:disabled,.field input:disabled{opacity:.6;cursor:not-allowed;}
+
+/* ---------------- Table ---------------- */
+.table-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-card);box-shadow:none;overflow:hidden;}
+.table-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:10px;}
+.table-head h2{font-size:14.5px;font-weight:700;margin:0;}
+.table-head .count{font-size:12px;color:var(--text-secondary);margin-top:2px;}
+/* Ver requerimiento "Nueva Funcionalidad UI: Conmutador Tabla / Gráfica en el Bloque de Cada Tabla
+   (Cumplimiento y Calidad)": conmutador discreto en la esquina superior derecha de cada .table-card --
+   mismo lenguaje visual que .segmented (ver arriba) pero más compacto, pensado para convivir con el título
+   y el contador a la izquierda dentro de .table-head. */
+.table-view-toggle{display:flex;align-items:center;background:var(--muted-soft);border-radius:8px;padding:3px;gap:2px;flex-shrink:0;}
+.table-view-toggle button{border:none;background:transparent;padding:5px 10px;font-size:11.5px;font-weight:600;line-height:1.2;white-space:nowrap;color:var(--text-secondary);border-radius:6px;cursor:pointer;}
+.table-view-toggle button.active{background:var(--bg-card);color:var(--header);box-shadow:var(--shadow-sm);}
+/* Ver requerimiento "Corrección de Layout y Estandarización Global de Banderola de Filtro Activo en
+   Tarjetas KPI": patrón reutilizable para TODA tabla ligada a tarjetas KPI (Consolidado, Despacho, Alertas,
+   Seguimiento, Cumplimiento y Calidad) -- antes el botón "Limpiar Filtro" compacto vivía DENTRO de
+   .table-head, al lado de [Tabla|Ver Gráfica] en Cumplimiento, generando confusión visual entre "cambiar de
+   vista" y "quitar un filtro". Ahora es su propia franja, INMEDIATAMENTE ARRIBA de .table-head. Oculta por
+   defecto vía max-height:0 (no [hidden]/display:none) para poder animar su aparición -- display:none no se
+   puede transicionar, así que "se despliega suavemente" (ver requerimiento) exige mantener display:flex
+   siempre y animar max-height/opacity/padding en su lugar; overflow:hidden recorta el contenido mientras
+   max-height es 0, así la tabla de abajo "sube" sin dejar ningún hueco reservado. */
+.kpi-active-filter-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;max-height:0;opacity:0;padding:0 20px;overflow:hidden;border-bottom:1px solid transparent;transition:max-height .18s ease,opacity .18s ease,padding .18s ease;}
+.kpi-active-filter-bar.is-active{max-height:50px;opacity:1;padding:10px 20px;border-bottom-color:var(--border);}
+.kpi-active-filter-bar-text{font-size:12px;color:var(--text-secondary);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kpi-active-filter-bar-text strong{color:var(--text-primary);font-weight:600;}
+/* Gráfica de barras genérica (sin dependencias externas, ver renderBarChart en app.js) -- sustituye SOLO el
+   área de filas de la tabla activa (.table-scroll) cuando el conmutador está en "Ver Gráfica"; el resto del
+   bloque (título, contador, filtros) permanece igual. */
+.chart-container{padding:20px;}
+.chart-container[hidden]{display:none;}
+.chart-bars{display:flex;align-items:flex-end;gap:14px;min-height:220px;padding:8px 4px 0;overflow-x:auto;}
+.chart-bar-col{display:flex;flex-direction:column;align-items:center;flex:1 0 56px;max-width:96px;cursor:default;}
+.chart-bar-value{font-size:11.5px;font-weight:700;color:var(--text-primary);margin-bottom:4px;white-space:nowrap;}
+.chart-bar-track{width:100%;max-width:44px;height:180px;display:flex;align-items:flex-end;background:var(--muted-soft);border-radius:6px 6px 2px 2px;overflow:hidden;}
+.chart-bar-fill{width:100%;background:var(--lilac-deep);border-radius:6px 6px 0 0;transition:height .2s ease;min-height:4px;}
+.chart-bar-col:hover .chart-bar-fill{background:#5B21B6;}
+/* height fijo (no solo line-height) -- el cálculo en px de la línea de umbral (ver renderBarChart,
+   LABEL_RESERVED_PX=24) asume que esta fila mide siempre lo mismo sin importar el largo del texto de cada
+   etiqueta (ya truncado a 1 línea vía nowrap/ellipsis). margin-top 8px + height 16px = los 24px reservados. */
+.chart-bar-label{height:16px;font-size:10.5px;color:var(--text-secondary);margin-top:8px;text-align:center;line-height:1.3;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.chart-bar-tooltip{position:fixed;z-index:1000;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow-lg);padding:8px 12px;font-size:11.5px;font-weight:600;color:var(--text-primary);pointer-events:none;white-space:nowrap;}
+/* Tooltip/Popover custom global -- ver requerimiento "Prompt de Corrección: Restauración de Filtros, Fix de
+   Bug y Estandarización de Tooltips", punto 3, y el portal en app.js (data-tip="...", reemplaza el title
+   nativo). 2 estilos clasificados automáticamente por longitud de texto en JS, no por clase a mano. */
+.app-tooltip{position:fixed;z-index:1200;pointer-events:none;}
+.app-tooltip-pill{background:#1E293B;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;white-space:nowrap;box-shadow:0 4px 10px rgba(0,0,0,.22);}
+.app-tooltip-popover{background:#fff;color:#334155;border:1px solid #E2E8F0;border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.14);padding:10px;font-size:12px;font-weight:500;line-height:1.45;max-width:260px;white-space:normal;}
+/* Línea de umbral límite sobre las barras -- ver requerimiento "Tipos de Gráfico Adaptativos...", punto (b),
+   y renderBarChart/opts.threshold en app.js. .chart-bars-outer es el contenedor posicionado (position:relative)
+   que ancla la línea absoluta exactamente a la altura proporcional calculada en JS. */
+.chart-bars-outer{position:relative;}
+.chart-threshold-line{position:absolute;left:4px;right:4px;border-top:2px dashed var(--danger);z-index:1;cursor:default;}
+.chart-threshold-line span{position:absolute;right:0;top:-17px;font-size:10px;font-weight:700;color:var(--danger);background:var(--bg-card);padding:0 5px;border-radius:4px;white-space:nowrap;box-shadow:var(--shadow-sm);}
+/* Gráfico de Anillo (Donut) -- ver requerimiento "Tipos de Gráfico Adaptativos...", punto (a), y
+   renderDonutChart en app.js. Sustituye al gráfico de barras en las tablas de Afectaciones/Causales (observar
+   PROPORCIÓN de cada fila sobre el total, no magnitud comparada entre filas -- eso ya lo cubre el Ranking). */
+.chart-donut-row{display:flex;align-items:center;gap:28px;flex-wrap:wrap;padding:8px 4px;}
+.chart-donut-wrap{position:relative;width:150px;height:150px;flex-shrink:0;}
+.chart-donut-svg{width:100%;height:100%;transform:rotate(-90deg);}
+.chart-donut-seg{cursor:default;transition:opacity .15s ease;}
+.chart-donut-seg:hover{opacity:.82;}
+.chart-donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;}
+.chart-donut-center-value{font-size:20px;font-weight:700;color:var(--text-primary);line-height:1.1;}
+.chart-donut-center-label{font-size:10px;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;margin-top:2px;}
+.chart-donut-legend{display:flex;flex-direction:column;gap:9px;min-width:0;flex:1 1 220px;}
+.chart-donut-legend-item{display:flex;align-items:center;gap:8px;font-size:11.5px;cursor:default;border-radius:6px;padding:3px 6px;margin:-3px -6px;}
+.chart-donut-legend-item:hover{background:var(--muted-soft);}
+.chart-donut-swatch{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+.chart-donut-legend-label{color:var(--text-primary);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;min-width:0;}
+.chart-donut-legend-value{color:var(--text-secondary);white-space:nowrap;flex-shrink:0;}
+.legend{display:flex;gap:12px;font-size:10.5px;color:var(--text-secondary);flex-wrap:wrap;}
+.legend span{display:flex;align-items:center;gap:5px;}
+.legend i{width:8px;height:8px;border-radius:50%;display:inline-block;}
+.table-scroll{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;min-width:1080px;}
+/* Tablas de contenido acotado (Usuarios, Vehículos/Tipologías, Seguridad) — ver requerimiento "Ajuste de
+   Tablas y Textos Truncados": no necesitan el min-width:1080px pensado para las tablas operativas anchas
+   (Consolidado/Programación/Despacho, con más columnas) — ese mínimo forzaba un scrollbar horizontal
+   innecesario en viewports de laptop estándar (~1280-1366px) aun cuando el contenido cabía sin problema, y
+   apretaba etiquetas/botones de acción como "Restablecer clave" contra el borde de su columna. */
+table.table-compact{min-width:0;}
+table.table-compact thead th,table.table-compact tbody td{padding-left:14px;padding-right:14px;}
+thead th{text-align:left;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#666666;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg-card-soft);white-space:nowrap;}
+tbody td{padding:12px 16px;border-bottom:1px solid var(--border);vertical-align:middle;font-size:12.5px;}
+tbody tr:last-child td{border-bottom:none;}
+/* CORRECCIÓN "Diagnóstico y Corrección Crítica de Interacción: Parpadeo Continuo en Tabla al Mover el
+   Puntero" (2): se quitó transition:background .1s ease -- las filas se recrean por innerHTML cada segundo
+   (gravityTick), así que mientras el mouse quedaba quieto sobre una fila, cada recreación reiniciaba esta
+   transición desde cero (el nodo nuevo nace sin :hover "asentado" un instante, la re-evaluación de hover lo
+   vuelve a activar, y el fade de 100ms se repite una y otra vez, una vez por segundo, mientras la fila sigue
+   bajo el cursor) -- un parpadeo sutil pero continuo y sincronizado con el reloj, exactamente lo reportado.
+   El cambio de background ahora es instantáneo (sin transition ni transform), un solo color plano. */
+tbody tr:hover{background:var(--bg-card-soft);}
+.cell-route{font-weight:700;}
+.courier{display:flex;align-items:center;gap:9px;}
+.mini-avatar{width:26px;height:26px;border-radius:50%;background:var(--muted-soft);color:var(--text-secondary);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;}
+.courier-name{font-weight:600;}
+.courier-sub{font-size:11px;color:var(--text-secondary);}
+/* Ver requerimiento "Corrección Crítica de Bugs, Eliminación de Modal Incorrecto, Banners y Control de
+   Observaciones", punto 5: celda "Observaciones" de Despacho -- flexbox explícito (texto a la izquierda,
+   ícono de edición fijo a la derecha) para que el ajuste de línea de un texto largo nunca empuje el ícono
+   fuera de su sitio ni lo parta a mitad de palabra (overflow-wrap:break-word SOLO corta tokens
+   anormalmente largos tipo URL; word-break:normal preserva el corte natural por espacio). Nota automática
+   del sistema y nota manual de Bodega quedan en líneas separadas, diferenciada solo por el prefijo "Nota
+   manual:" en negrita (ver requerimiento "Mejora UI/UX... Estética Menos Llamativa y Sutil para Notas
+   Manuales": el fondo lila/bloque llamativo se retiró -- ahora luce igual de discreta que la nota automática
+   del sistema). Cada línea trunca a 1 sola línea con "…" si no entra (ver requerimiento "Control de Texto
+   Largo"), con el texto completo disponible vía data-tip (mismo portal custom de tooltips de toda la app,
+   ver observacionesDespachoCellHtml) al pasar el cursor. */
+.obs-cell{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;}
+.obs-cell-text{flex:1 1 auto;min-width:0;max-width:220px;display:flex;flex-direction:column;gap:4px;}
+.obs-linea{line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.obs-linea-manual strong{font-weight:700;}
+.copy-btn{
+  flex-shrink:0;width:32px !important;height:32px !important;padding:0 !important;
+  border:1px solid #E1E1E1 !important;border-radius:6px !important;background-color:#FFFFFF !important;
+  display:flex !important;align-items:center !important;justify-content:center !important;
+  color:#14095B !important;font-size:14px !important;cursor:pointer;margin-left:auto;transition:background .12s ease,color .12s ease;
+}
+.copy-btn svg{width:16px;height:16px;flex-shrink:0;pointer-events:none;}
+.copy-btn:hover{background:var(--muted-soft);color:var(--text-primary);}
+.copy-btn.copied{background:var(--green) !important;border-color:var(--green) !important;color:#fff !important;}
+.maleta-toggle{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-secondary);cursor:pointer;white-space:nowrap;}
+.maleta-toggle input{width:15px;height:15px;accent-color:var(--lilac-deep);cursor:pointer;}
+.maleta-toggle input:disabled{cursor:not-allowed;opacity:.5;}
+/* Filas de la modal "Permisos y módulos activos" (ver requerimiento "Motor de Asignación Dinámica de
+   Módulos"): cada módulo adicional agregado fuera del rol base lleva un botón "✕" para quitarlo por completo. */
+.permisos-modulo-row{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.permisos-modulo-quitar{border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:13px;line-height:1;padding:4px 6px;border-radius:6px;}
+.permisos-modulo-quitar:hover{background:var(--danger-soft);color:var(--danger);}
+
+/* CORRECCIÓN "Corrección Crítica de CSS: Salto de Layout (Reflow) en Badge y Celda al Hacer Hover": auditado
+   contra .badge/td/tr en tiempo real (getBoundingClientRect antes/después de hover) -- ningún :hover existente
+   en la hoja de estilos toca padding/margin/border/height/font-size de badge, celda o fila (solo hay cambios
+   de color/background, que no alteran caja). box-sizing:border-box explícito (ya lo cubre el "*" global, se
+   deja explícito aquí por claridad) y line-height:1 (en vez de heredar el 1.43 ambiental de body/td) fijan la
+   altura del badge exclusivamente a padding + font-size, sin depender de ningún ancestro. */
+/* Ver requerimiento "Estandarización Obligatoria y Cobertura 100% de Tooltips en Badges de Toda la
+   Plataforma", punto 1: display:inline-flex/align-items:center/justify-content:center/gap:4px/white-space:
+   nowrap explícitos -- el ícono (?) de ayuda (.info-tip) se concatena SIEMPRE dentro del nodo .badge (ver
+   estadoInfoTipHtml/solicitudTipoInfoTipHtml), nunca como hermano fuera de él, para que quede alineado
+   dentro del mismo contorno sin importar el contenido. */
+.badge{display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap;box-sizing:border-box;line-height:1;}
+.badge i{width:6px;height:6px;border-radius:50%;display:inline-block;}
+.badge-dock{background:#E5FBFA;color:var(--cyan-deep);} .badge-dock i{background:var(--cyan-deep);}
+.badge-dispatched{background:#E7FBF3;color:var(--green-deep);} .badge-dispatched i{background:var(--green-deep);}
+.badge-pending{background:var(--muted-soft);color:var(--text-secondary);} .badge-pending i{background:var(--muted);}
+.badge-warn{background:var(--warn-soft);color:#946200;} .badge-warn i{background:var(--yellow);}
+.badge-critical{background:var(--danger-soft);color:var(--danger);} .badge-critical i{background:var(--danger);}
+.badge-justified{background:var(--lilac-soft);color:#5B21B6;} .badge-justified i{background:var(--lilac-deep);}
+.badge-disabled{background:#E9EAEE;color:#5C6470;} .badge-disabled i{background:#8A8F98;}
+:root[data-theme="dark"] .badge-disabled{background:#2A2745;color:#B5B1D6;}
+
+.sla-wrap{display:flex;flex-direction:column;gap:4px;min-width:130px;}
+.sla-track{height:6px;border-radius:4px;background:var(--muted-soft);overflow:hidden;}
+.sla-fill{height:100%;border-radius:4px;}
+.sla-time{font-size:11px;color:var(--text-secondary);font-variant-numeric:tabular-nums;}
+.sla-time strong{color:var(--text-primary);}
+
+td:has(> .row-actions){white-space:nowrap;min-width:max-content;}
+.row-actions{display:flex;flex-direction:row;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:nowrap;white-space:nowrap;}
+/* Auditoría autónoma de UI/UX (ver requerimiento "Ajustes de UX por Rol..."): notas informativas largas como
+   "Solicitud en curso — gestiónala desde Solicitudes y Cambios" o "Pendiente de Aprobación por Planner" (ver
+   rowHtmlConsolidado/rowHtmlDespacho/rowHtmlSeguimiento) heredaban el white-space:nowrap de .row-actions —
+   pensado para que los BOTONES de acción no se partan raro — y forzaban toda esa oración a una sola línea,
+   estirando la columna ESTADO (y con ella la tabla completa, vía td:has(> .row-actions){min-width:max-content})
+   mucho más allá del ancho visible, obligando a un scroll horizontal excesivo en TODAS las filas de la tabla
+   por causa de una sola nota larga. Se le da un ancho máximo y se le permite volver a su comportamiento
+   normal de texto (envuelve en 2-3 líneas cortas) — los botones reales de la misma fila no se tocan. */
+.row-actions .courier-sub{white-space:normal;max-width:220px;line-height:1.4;text-align:right;}
+.row-actions button{height:28px;border-radius:var(--radius-btn);border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0 9px;gap:5px;font-size:11px;font-weight:600;flex-shrink:0;white-space:nowrap;}
+.row-actions button:hover{background:var(--muted-soft);color:var(--text-primary);}
+.row-actions button.raised{background:var(--header);color:#fff;border-color:var(--header);}
+.row-actions button.raised:hover{background:var(--btn-primary-hover);}
+/* Ver requerimiento "Refactor de Arquitectura...", punto 7 ("Estandarización Global de Botones de
+   Cancelación y Retractación"): este ya era el patrón "Outline Destructivo" de referencia que el
+   requerimiento pide igualar ("Eliminar Mensajero" en Programar Flota lo usa tal cual) -- solo se ajusta el
+   radio de esquina al valor pedido explícitamente (8px), sin tocar var(--radius-btn) global (afectaría TODO
+   botón de la plataforma, no solo esta familia "Cancelar/Eliminar/Retractar"). */
+.row-actions button.danger{color:var(--danger);border-color:#F3B9BC;border-radius:8px;}
+.row-actions button.danger:hover{background:var(--danger-soft);}
+.row-actions button[disabled]{opacity:.45;cursor:not-allowed;}
+.row-actions button[disabled]:hover{background:var(--bg-card);color:var(--text-secondary);}
+.row-actions button.danger[disabled]:hover{background:var(--bg-card);color:var(--danger);}
+/* Botón "Eliminar" unificado (ver requerimiento "Directiva de Gobernanza UI Global — Estandarización de
+   Componentes y Copywriting", punto 2): antes Bodegas/Aliados usaba ".btn.btn-danger.btn-sm" (fondo rosado
+   var(--danger-soft)) mientras Gestión de Vehículos usaba una simple clase "danger" dentro de .row-actions
+   (borde rojo, fondo blanco heredado de ".row-actions button") -- 2 looks distintos para la MISMA acción.
+   Selector "button.btn-danger-subtle" (no solo ".btn-danger-subtle") para igualar la especificidad de
+   ".row-actions button" y colocado DESPUÉS de esas reglas en el archivo para ganar el empate por orden de
+   aparición (mismo criterio que ya resolvió el bug de ".row-menu-toggle" más abajo) -- con estilos propios y
+   completos (no depende de heredar nada de ".btn" ni de ".row-actions button") para verse IDÉNTICO sin
+   importar en qué contenedor viva (.row-actions en Vehículos, .config-row-actions en Bodegas/Aliados). */
+button.btn-danger-subtle{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;padding:0 12px;border:none;border-radius:var(--radius-btn);background:var(--danger-soft);color:var(--danger);font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;flex-shrink:0;}
+button.btn-danger-subtle:hover{background:var(--danger);color:#fff;}
+/* Estandarización estética global (ver requerimiento "Estandarización Estética Global y Auditoría de
+   Contenido" — Botones de Acción "Acciones..."): button.row-menu-toggle (no solo .row-menu-toggle) iguala la
+   especificidad de ".row-actions button" (clase+etiqueta) -- antes perdía el empate de especificidad contra
+   esa regla y el botón "Acciones •••" se veía blanco/neutro en vez de su lila/morado propio en cualquier fila
+   que vive dentro de un contenedor .row-actions (Consolidado, Programación, Alertas...). */
+button.row-menu-toggle{
+  height:auto;background:#EFEEFC;color:#635BFF;border:none;border-radius:8px;padding:6px 10px;
+  font-size:11px;font-weight:600;letter-spacing:.02em;white-space:nowrap;
+  display:inline-flex;align-items:center;justify-content:center;gap:4px;flex-shrink:0;
+}
+button.row-menu-toggle:hover{background:#E3E1FB;color:#635BFF;}
+
+/* Menú "⋮" de acciones secundarias de fila (ver rowMenuToggleHtml/toggleRowMenu en app.js) — mismo tratamiento
+   visual que el selector de bodega del Header (sede-dropdown-menu): siempre claro, independiente del tema. */
+.row-actions-menu{position:fixed;background:#ffffff;color:#1e1e1e;border-radius:8px;box-shadow:var(--shadow-lg);padding:6px;min-width:190px;z-index:1001;border:1px solid var(--border);display:flex;flex-direction:column;gap:2px;}
+.row-actions-menu button{width:100%;height:32px;border:none;background:none;border-radius:6px;padding:0 10px;font-size:12px;font-weight:600;color:#1e1e1e;display:flex;align-items:center;gap:8px;cursor:pointer;text-align:left;white-space:nowrap;}
+.row-actions-menu button svg{flex-shrink:0;}
+.row-actions-menu button:not([disabled]):hover{background:var(--muted-soft);}
+.row-actions-menu button.danger{color:var(--danger);}
+.row-actions-menu button.danger:not([disabled]):hover{background:var(--danger-soft);}
+.row-actions-menu button[disabled]{opacity:.45;cursor:not-allowed;}
+.row-actions-menu .info-tip{margin-left:auto;color:var(--muted);}
+
+/* Buscador Autocomplete de Mensajero (ver requerimiento "Buscador Dinámico Autocomplete para Mensajero" /
+   initMensajeroTypeahead en app.js) — envuelve un <select> ya existente (oculto visualmente, sigue siendo la
+   fuente de datos/valor) con un <input> de texto tipo Typeahead + lista de sugerencias filtradas en vivo. */
+/* Ver requerimiento "Bloque Final de Correcciones...", punto 2 (Ancho y Truncamiento en Filtros de
+   Mensajero): min-width consistente en los 6+ módulos que usan este mismo componente (antes variaba entre
+   140px/220px/sin definir según el módulo, inline en cada .field de index.html) -- se fija aquí, en un solo
+   lugar, en vez de tocar cada HTML; min-width en vez de width para no angostar los módulos que ya reservan
+   más espacio (220px), solo garantiza un piso para los que tenían menos (140px o nada). */
+.mensajero-typeahead{position:relative;min-width:180px;}
+.mensajero-typeahead select.mensajero-typeahead-native{position:absolute;width:1px;height:1px;padding:0;margin:0;border:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;}
+/* overflow/text-overflow/white-space: el nombre del mensajero seleccionado ahora trunca con "…" en vez de
+   desbordar la caja (antes solo los ÍTEMS de la lista desplegable truncaban, ver .mensajero-typeahead-item
+   abajo -- el <input> visible con el valor YA elegido no tenía ninguna de estas 3 reglas). El `title` con el
+   nombre completo (ver initMensajeroTypeahead/syncMensajeroTypeaheadInput en app.js) cubre el hover. */
+.mensajero-typeahead-input{width:100%;height:36px;padding:0 10px;border:1px solid var(--border);border-radius:8px;font-size:12.5px;font-family:inherit;color:var(--text-primary);background:var(--bg-card);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;}
+.mensajero-typeahead-input:focus{outline:none;border-color:var(--lilac-deep);box-shadow:0 0 0 3px var(--lilac-soft);}
+.mensajero-typeahead-input:disabled{opacity:.6;cursor:not-allowed;background:var(--muted-soft);}
+.mensajero-typeahead-menu{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#ffffff;color:#1e1e1e;border-radius:8px;box-shadow:var(--shadow-lg);border:1px solid var(--border);z-index:1001;max-height:240px;overflow-y:auto;padding:4px;}
+.mensajero-typeahead-item{padding:8px 10px;border-radius:6px;font-size:12.5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mensajero-typeahead-item.highlighted,.mensajero-typeahead-item:hover{background:var(--lilac-soft);color:#5B21B6;}
+.mensajero-typeahead-empty{padding:8px 10px;font-size:12px;color:var(--text-secondary);font-style:italic;}
+
+.consol-group-row td{background:var(--muted-soft);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);padding:8px 16px;border-bottom:1px solid var(--border);}
+/* Sub-header de Bodega (Level 2) del agrupamiento jerárquico Aliado -> Bodega de Consolidado, visible solo
+   con el filtro local en "Todas las bodegas" — más claro y con sangría respecto al header de Aliado (Level 1)
+   para que la jerarquía se lea de un vistazo. */
+.consol-subgroup-row td{background:var(--bg-card-soft);font-weight:600;font-size:10.5px;text-transform:none;letter-spacing:.02em;color:var(--text-secondary);padding:6px 16px 6px 30px;border-bottom:1px solid var(--border);}
+.consol-group-count{font-weight:500;text-transform:none;letter-spacing:0;color:var(--muted);margin-left:4px;}
+/* Acordeón Inteligente por Umbrales (ver requerimiento del mismo nombre y acordeonHeaderRowHtml en app.js) --
+   modificador de .consol-subgroup-row que hace la fila entera clicable para colapsar/expandir su grupo. */
+.consol-subgroup-row-toggle{cursor:pointer;}
+.consol-subgroup-row-toggle:hover td{background:var(--muted-soft);}
+.consol-group-chevron{display:inline-block;width:10px;margin-right:4px;font-size:9px;color:var(--muted);}
+/* Resumen por Aliado/Bodega con "Ver Detalle" propio (ver requerimiento "Refactorización de Módulo
+   Cumplimiento y Calidad...", punto 4 -- drill-down de la tarjeta "Posicionamiento de Flota" en
+   renderCumplimientoAliadoTab): modificador de .consol-subgroup-row que agrega el botón alineado a la
+   derecha, sin tocar el resto de encabezados de agrupamiento (solo texto) que ya usan esa misma clase base en
+   Consolidado/Despacho/Cumplimiento. */
+/* display:flex va en un <div> INTERNO (.subgroup-action-row), no directo en el <td> -- un <td> con
+   display:flex deja de participar en el algoritmo de ancho de columna de la tabla (colspan ya no lo estira
+   al ancho combinado de las columnas que cubre; ni siquiera width:100% en el propio <td> lo corrige, porque
+   dentro de un <tr> con display:table-row un <td> que ya no es table-cell pierde su containing block
+   definido). El <td> se queda con su comportamiento nativo (colspan lo estira correctamente) y el <div> hijo,
+   con width:100%, hereda ese ancho ya correcto -- bug visible sobre todo ahora que esta fila resumen es la
+   vista por defecto de "Calidad en Programación" (ver requerimiento "Refactorización de UX: Tabla Única
+   Interactiva..."). */
+.subgroup-action-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;width:100%;box-sizing:border-box;}
+/* Sub-fila expandible de "Ver Detalle" (Cumplimiento y Calidad, pestaña Bodega) — ver requerimiento
+   "Reconstrucción de Interactividad y UI: Módulo Cumplimiento y Calidad", punto 3 ("Vista Integrada en
+   Tabla"): reemplaza el modal/drawer aislado que existía antes por una fila hija, integrada directamente bajo
+   la fila de la bodega clicada. Reutiliza .historial-item/.historial-list (mismo lenguaje visual que el
+   modal anterior) dentro de una celda de ancho completo. */
+.detalle-inline-row td{background:var(--bg-card-soft);padding:14px 20px;border-bottom:1px solid var(--border);}
+.detalle-inline-row .historial-list{max-height:320px;}
+/* Columna condicional "Hora de Citación" de la Tabla de Afectaciones por Mensajero (ver requerimiento
+   "Refactorización de UI/UX: Simetría de KPIs, Fechas Duales, Agrupación por Bodega y Sticky Footer Bar de
+   Exportación", punto 5) -- oculta por defecto; #cumplimientoAliadoTable.mostrar-hora la revela cuando la
+   tarjeta KPI "Posicionamiento de Flota" o "Ausentismo / Pendientes" está activa (ver
+   renderCumplimientoAliadoTab). Ocultar/mostrar por CSS evita reescribir el <thead> por JS solo para
+   cambiar el número de columnas. */
+.cumplimiento-col-hora{display:none;}
+#cumplimientoAliadoTable.mostrar-hora .cumplimiento-col-hora{display:table-cell;}
+/* Vista en cascada de Cuotas de Flota (selección múltiple: "Todas las bodegas"/"Todos los aliados") — un
+   bloque por combinación Bodega+Aliado, cada uno con su propia tabla completa. La etiqueta reutiliza la
+   misma paleta que .consol-subgroup-row (mismo lenguaje visual que Consolidado/Despacho para agrupamientos),
+   solo que aquí encabeza un <table> independiente en vez de una fila dentro de una tabla única. */
+.cuotas-cascada-bloque{margin-bottom:22px;}
+.cuotas-cascada-bloque:last-child{margin-bottom:0;}
+.cuotas-cascada-label{background:var(--bg-card-soft);font-weight:600;font-size:11px;letter-spacing:.02em;color:var(--text-secondary);padding:7px 16px;border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;margin:0;}
+.cuotas-cascada-bloque .table-scroll table{border:1px solid var(--border);border-top:none;}
+.badge-propio{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap;background:var(--lilac-soft);color:#5B21B6;}
+
+.empty-state{padding:48px 20px;text-align:center;color:var(--text-secondary);display:none;}
+.empty-state.show{display:block;}
+.empty-state svg{margin-bottom:10px;opacity:.5;}
+
+/* ---------------- Calculador de Rutas (PLANNER) ---------------- */
+#calculadorBody{display:flex;flex-direction:column;gap:20px;}
+.calculador-sede-head{align-items:flex-start;}
+/* Bloque de resumen limpio (ver calculadorSedeCardHtml): una columna por tipo de vehículo + una columna
+   final "Total Bodega", cada una con sus 4 cifras crudas y el balance de Rutas Pendientes ya resuelto —
+   reemplaza la vieja línea de texto con paréntesis acumulados debajo del nombre de la bodega. */
+.calculador-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:10px 0 18px;}
+.calculador-summary-col{background:var(--bg-card-soft);border:1px solid var(--border);border-radius:10px;padding:10px 12px;}
+.calculador-summary-col.calculador-summary-total{border-color:var(--lilac-deep);border-left-width:3px;}
+.csg-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--text-secondary);margin-bottom:6px;}
+.csg-row{display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-primary);padding:1px 0;}
+.csg-row span{color:var(--text-secondary);}
+/* Solo 2 estados posibles (ver calculadorBrechaDisplay): "danger" (Faltan N) o "neutral" (Completo) — ya no
+   existe un 3er estado "ok"/Sobrantes bajo la fórmula de Rutas Pendientes corregida. */
+.csg-balance{margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;}
+.csg-balance.danger{color:var(--danger);}
+.csg-balance.neutral{color:var(--text-secondary);}
+/* Ver requerimiento "Bloque Final de Correcciones...", punto 4 (Alertas de Sobrecupo) -- mismo tono
+   ámbar/naranja ya usado por .badge-warn (#946200), para que la celda de Brecha y el resumen coincidan
+   visualmente con el badge "⚠️ Sobrecupo" de la misma fila/tarjeta. */
+.csg-balance.warn{color:#946200;}
+.calculador-brecha-cell{font-weight:700;font-variant-numeric:tabular-nums;}
+.calculador-brecha-cell.danger{color:var(--danger);}
+.calculador-brecha-cell.neutral{color:var(--text-secondary);font-weight:400;}
+.calculador-brecha-cell.warn{color:#946200;}
+.calculador-matrix-table{min-width:900px;}
+.calculador-advance-input{width:76px;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12.5px;font-variant-numeric:tabular-nums;background:var(--bg-card-soft);color:var(--text-primary);outline:none;transition:border-color .12s ease;}
+.calculador-advance-input:focus{border-color:var(--lilac-deep);box-shadow:0 0 0 3px var(--lilac-soft);}
+/* Fila anidada por tipo de vehículo dentro de cada franja (ver requerimiento "Segmentación por Tipo de
+   Vehículo") — la celda de Franja Horaria usa rowspan y queda centrada verticalmente sobre sus 3 sub-filas; un
+   borde superior más marcado en la 1ª sub-fila de cada franja separa visualmente un grupo del siguiente. */
+.calculador-franja-cell{vertical-align:middle;font-weight:700;background:var(--bg-card-soft);border-right:1px solid var(--border);}
+.calculador-matrix-table tbody tr:has(.calculador-franja-cell){border-top:2px solid var(--border);}
+.calculador-perfil-cell{color:var(--text-secondary);font-size:11.5px;}
+/* Enlace de Bajas/Retiros (ver requerimiento "Modal Flotante de Detalle de Bajas") — solo se pinta como
+   botón/hipervínculo cuando bajas > 0 (calculadorBajasCellHtml); en 0 sigue siendo un número plano. */
+.calculador-bajas-link{background:none;border:none;padding:0;margin:0;color:var(--btn-primary-bg);font-weight:700;font-size:inherit;font-variant-numeric:tabular-nums;text-decoration:underline;cursor:pointer;}
+.calculador-bajas-link:hover{color:var(--lilac-deep);}
+.calculador-bajas-table{min-width:480px;}
+
+/* ---------------- Fleet cards ---------------- */
+.cards-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:16px;}
+.fleet-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-card);padding:16px 18px;box-shadow:none;display:flex;flex-direction:column;gap:12px;}
+.fleet-card-top{display:flex;align-items:flex-start;gap:12px;}
+.fleet-avatar{width:42px;height:42px;border-radius:50%;background:linear-gradient(135deg,var(--lilac-soft),var(--cyan));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:var(--header);flex-shrink:0;}
+.fleet-name{font-weight:700;font-size:13.5px;}
+.fleet-sub{font-size:11.5px;color:var(--text-secondary);}
+.fleet-tags{display:flex;flex-wrap:wrap;gap:6px;}
+.tag{font-size:10.5px;font-weight:600;background:var(--muted-soft);color:var(--text-secondary);padding:3px 8px;border-radius:6px;}
+
+/* ---------------- Modals ---------------- */
+.modal-overlay{position:fixed;inset:0;background:rgba(11,9,30,0.55);display:none;align-items:center;justify-content:center;z-index:100;padding:20px;}
+.modal-overlay.open{display:flex;}
+.modal{display:none;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-card);width:100%;max-width:440px;box-shadow:none;max-height:90vh;overflow:auto;}
+.modal.open{display:block;}
+.modal-wide{max-width:640px;}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg-card);z-index:2;}
+.modal-head h3{margin:0;font-size:15px;font-weight:700;}
+.modal-close{background:none;border:none;font-size:20px;color:var(--text-secondary);cursor:pointer;line-height:1;}
+.modal-body{padding:20px;display:flex;flex-direction:column;gap:14px;}
+.modal-note{font-size:12px;color:var(--text-secondary);background:var(--muted-soft);padding:10px 12px;border-radius:8px;margin:0;}
+.modal-foot{display:flex;justify-content:flex-end;gap:10px;padding-top:6px;}
+
+/* Foto de evidencia -- "Notificar Ya Llegó" (ver requerimiento "Adición de Campo de Foto en Modal..."). */
+.foto-evidencia-dropzone{display:flex;align-items:center;justify-content:center;gap:8px;padding:18px 12px;border:1.5px dashed var(--border);border-radius:10px;background:var(--muted-soft);color:var(--text-secondary);font-size:12.5px;font-weight:600;cursor:pointer;text-align:center;}
+.foto-evidencia-dropzone:hover{border-color:var(--btn-primary-bg);color:var(--btn-primary-bg);}
+.foto-evidencia-preview{position:relative;display:inline-block;width:fit-content;}
+.foto-evidencia-preview img{display:block;max-width:160px;max-height:160px;border-radius:10px;border:1px solid var(--border);object-fit:cover;}
+.foto-evidencia-remove{position:absolute;top:-8px;right:-8px;width:22px;height:22px;border-radius:50%;border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.foto-evidencia-remove:hover{color:var(--danger);border-color:var(--danger);}
+/* Ver requerimiento "Auditoría Integral: Visibilidad de Evidencias, Transmisión Bodega-Aliado...": enlace
+   discreto a la foto adjunta, reutilizado en Alertas Activas y en el Historial del Turno. */
+.btn-link-evidencia{background:none;border:none;padding:0;margin-left:4px;color:var(--btn-primary-bg);font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline;}
+.btn-link-evidencia:hover{opacity:.8;}
+/* Ver requerimiento "Auditoría Integral de Alertas, Cierre Nocturno y Regularización Obligatoria de Demora en
+   Despacho": lista de turnos del modal obligatorio #modalRegularizacionJornada, una tarjeta por turno con sus
+   3 acciones o el mini-formulario de confirmación activo. */
+.regularizacion-fila{border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:var(--bg-card);}
+.regularizacion-fila-info{font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:10px;}
+.regularizacion-fila-acciones{display:flex;gap:8px;flex-wrap:wrap;}
+.regularizacion-fila-form{display:flex;flex-direction:column;gap:8px;}
+.regularizacion-fila-form label{font-size:12px;font-weight:600;color:var(--text-secondary);}
+.regularizacion-fila-form input,.regularizacion-fila-form textarea{border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;}
+.regularizacion-fila-form-botones{display:flex;gap:8px;}
+.perfil-opciones{display:flex;flex-direction:column;gap:8px;margin:14px 0;}
+.perfil-opciones button{width:100%;}
+.checkbox-group{display:flex;flex-wrap:wrap;gap:10px 16px;}
+
+.confirmar-aviso-resumen{display:flex;flex-direction:column;gap:10px;margin-bottom:14px;}
+.confirmar-aviso-row{font-size:13px;color:var(--text-primary);background:var(--muted-soft);padding:10px 12px;border-radius:8px;line-height:1.5;}
+.confirmar-aviso-row strong{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--text-secondary);margin-bottom:2px;}
+.confirmar-aviso-advertencia{font-size:12px;font-weight:600;color:#946200;background:var(--warn-soft);padding:10px 12px;border-radius:8px;margin:0 0 14px;}
+
+.historial-list{display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow:auto;}
+.historial-item{border:1px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--bg-card-soft);}
+.historial-item-top{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;}
+.historial-item-top strong{font-weight:700;}
+.historial-item-time{font-size:11px;color:var(--text-secondary);font-variant-numeric:tabular-nums;flex-shrink:0;}
+.historial-item-meta{font-size:11.5px;color:var(--text-secondary);margin-top:2px;}
+.historial-item-motivo{font-size:12px;margin-top:6px;color:var(--text-primary);font-style:italic;}
+
+/* ---------------- Config ---------------- */
+.config-panel{display:flex;flex-direction:column;gap:0;}
+.config-row{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 4px;border-bottom:1px solid var(--border);}
+.config-row:last-child{border-bottom:none;}
+.config-label{font-weight:600;font-size:13px;}
+.config-help{font-size:11.5px;color:var(--text-secondary);margin-top:2px;max-width:480px;}
+.config-value{font-weight:700;font-size:14px;background:var(--muted-soft);padding:6px 14px;border-radius:8px;flex-shrink:0;}
+.config-row-actions{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+/* Botón-ícono "Editar" circular con tooltip (ver requerimiento "Estandarización de Botones Editar a Botón
+   Icono con Tooltip"): reemplaza el botón de texto "Editar" en Bodegas y Aliados y Gestión de Vehículos por
+   un círculo de fondo neutro suave con el lápiz (ver iconEditButtonHtml), sin texto visible salvo el tooltip
+   oscuro flotante que aparece solo en hover/focus. Selector "button.icon-btn-edit" (no solo ".icon-btn-edit")
+   para empatar la especificidad de ".row-actions button" (mismo criterio que ya resolvió el bug de
+   ".row-menu-toggle" — ver Estandarización Estética Global) y así no perder su forma circular dentro de la
+   tabla de Vehículos, que sí vive dentro de un contenedor .row-actions. */
+button.icon-btn-edit{position:relative;width:30px;height:30px;flex-shrink:0;border:none;border-radius:50%;background:var(--muted-soft);color:var(--text-primary);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+button.icon-btn-edit:hover{background:var(--border);}
+.icon-btn-edit .icon-btn-tip{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1F2937;color:#fff;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .12s ease;z-index:30;}
+.icon-btn-edit:hover .icon-btn-tip,.icon-btn-edit:focus-visible .icon-btn-tip{opacity:1;visibility:visible;}
+.config-input{width:90px;border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px !important;font-weight:700;text-align:right;background:var(--muted-soft);color:var(--text-primary);outline:none;}
+.config-input:focus{border-color:var(--lilac-deep);box-shadow:0 0 0 3px var(--lilac-soft);}
+.config-input[type="time"]{width:120px;text-align:left;}
+.config-input-text{width:220px;text-align:left;}
+.config-actions{display:flex;justify-content:flex-end;gap:10px;padding-top:16px;margin-top:4px;border-top:1px solid var(--border);}
+.toggle-switch{position:relative;display:inline-block;width:40px;height:22px;flex-shrink:0;}
+.toggle-switch input{opacity:0;width:0;height:0;position:absolute;}
+.toggle-slider{position:absolute;inset:0;background:var(--muted);border-radius:999px;cursor:pointer;transition:background .15s ease;}
+.toggle-slider::before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:transform .15s ease;box-shadow:var(--shadow-sm);}
+.toggle-switch input:checked + .toggle-slider{background:var(--green);}
+.toggle-switch input:checked + .toggle-slider::before{transform:translateX(18px);}
+/* Tooltip flotante oscuro del switch (ver requerimiento "Ajustes UX/UI y Estandarización de Componentes",
+   punto 1a): "Desactivar" cuando está activo/verde, "Activar" cuando está inactivo/gris -- el color
+   verde/gris del switch en sí ya existía (.toggle-slider de arriba), solo se agregó el tooltip. Mismo patrón
+   visual que .icon-btn-tip (fondo oscuro fijo, texto blanco, aparece solo en hover) -- 2 spans, uno por
+   estado, alternados vía :checked ~ (sibling) para no depender de JS. */
+.toggle-switch .toggle-tip{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1F2937;color:#fff;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s ease;z-index:30;}
+.toggle-switch:hover .toggle-tip{opacity:1;}
+.toggle-tip-on{display:none;}
+.toggle-switch input:checked ~ .toggle-tip-off{display:none;}
+.toggle-switch input:checked ~ .toggle-tip-on{display:block;}
+
+/* Acordeones de Configuración (Perfil Admin) — mismo lenguaje visual de flecha giratoria y colapso por
+   max-height que el acordeón "Programación de Rutas" del sidebar (ver .nav-category-arrow/.nav-category-items),
+   adaptado a una tarjeta de contenido en vez de un ítem de navegación. */
+.config-accordion{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:16px;overflow:hidden;}
+.config-accordion-header{width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:18px 20px;background:none;border:none;cursor:pointer;text-align:left;font:inherit;}
+.config-accordion-title{font-size:14px;font-weight:700;color:var(--text-primary);}
+.config-accordion-sub{font-size:11.5px;font-weight:500;color:var(--text-secondary);margin-top:2px;}
+.config-accordion-arrow{flex-shrink:0;transition:transform .15s ease;color:var(--text-secondary);}
+.config-accordion-arrow.open{transform:rotate(180deg);}
+.config-accordion-body{max-height:0;opacity:0;overflow:hidden;transition:max-height .25s ease,opacity .2s ease;padding:0 20px;}
+.config-accordion-body.open{max-height:5000px;opacity:1;padding:0 20px 20px;}
+.config-subtitle{font-size:12.5px;font-weight:700;color:var(--text-primary);margin:18px 0 4px;padding-top:14px;border-top:1px solid var(--border);}
+.config-subtitle:first-child{margin-top:0;padding-top:0;border-top:none;}
+
+/* Cuotas de Flota — matriz Hora x Tipo Vehículo x Día (ver cuotasMatrizTablaHtml en app.js). Selector por
+   CLASE (.cuotas-matriz-tabla), no por #cuotasMatrizTable: la vista en cascada (ver requerimiento "Extensión
+   de Vistas — Agrupamiento Dinámico") apila VARIAS tablas independientes, ninguna con ese id, así que un
+   selector de id las dejaba sin ningún estilo — sin padding ni centrado — y la fila de TOTAL quedaba
+   desalineada respecto a los encabezados de día (ver requerimiento "Fix de Alineación en Fila de Totales").
+   table-layout:fixed + colgroup (ver cuotasMatrizTablaHtml) fuerza el MISMO ancho de columna en cabecera,
+   cuerpo y pie — y entre bloques distintos de la cascada — sin depender del contenido de cada celda. */
+.cuotas-matriz-tabla{table-layout:fixed;}
+.cuotas-matriz-tabla thead th.cuotas-dia-critico{background:var(--warn-soft);color:#946200;}
+.cuotas-matriz-tabla tfoot td{background:var(--muted-soft);font-weight:700;border-top:2px solid var(--border);}
+.cuotas-matriz-tabla td,.cuotas-matriz-tabla th{padding:8px 10px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cuotas-matriz-tabla th:first-child,.cuotas-matriz-tabla th:nth-child(2){text-align:left;}
+/* Alineación por CLASE, no por :nth-child: las subfilas de vehículo que no llevan la celda Hora (rowspan,
+   ver renderCuotasMatriz) tienen una columna DOM menos, así que :nth-child(2) caía sobre la celda de datos
+   de Lunes en vez de sobre Tipo Vehículo, desplazando esa columna. cuotas-hora-cell/cuotas-col-tipo identifican
+   la columna real sin importar cuántas celdas tenga la fila. */
+.cuotas-matriz-tabla td.cuotas-hora-cell,.cuotas-matriz-tabla td.cuotas-col-tipo{text-align:left;white-space:normal;}
+/* Fix Visual — Solapamiento en "Tipo Vehículo" (ver requerimiento "Fix Visual y Estilos en Tabla de Cuotas
+   de Flota"): 8px verticales eran insuficientes cuando la etiqueta (p.ej. "Moto Estándar o periferia") envuelve
+   a 2 líneas junto al botón "✕ quitar" — el contenido quedaba montado sobre el borde inferior de la fila.
+   Más padding vertical + min-height + line-height explícito garantizan una caja con aire suficiente sin
+   depender de cuántas líneas ocupe el texto; vertical-align:middle centra el contenido dentro de esa caja. */
+.cuotas-matriz-tabla td.cuotas-col-tipo{padding:12px 10px;min-height:40px;line-height:1.4;vertical-align:middle;}
+.cuotas-hora-cell{font-weight:700;background:var(--bg-card-soft);vertical-align:middle;white-space:normal;padding:12px 10px;}
+.cuotas-hora-linea{white-space:nowrap;line-height:1.4;}
+.cuotas-franja-remove{margin-left:6px;border:none;background:none;color:var(--danger);cursor:pointer;font-size:11px;font-weight:700;padding:0;vertical-align:middle;}
+/* Ajuste de Espaciado en Celdas de Edición (Admin) — agrupa hora+botón ✕ de franja y el control "+ Agregar
+   vehículo" (select+botón) dentro de esta celda de Hora (con o sin rowspan, según la franja tenga o no
+   tipologías activas — ver cuotasMatrizTablaHtml). Causa real del desbordamiento reportado: la columna Hora
+   mide 130px (ver colgroup) y .cuotas-hora-add antes ponía el <select> y el botón "+ Agregar vehículo" EN
+   FILA (side by side) — ninguno de los dos cabía en ese ancho, así que el texto del select quedaba truncado
+   y el botón directamente se recortaba/desaparecía por el overflow:hidden de la celda, dando la impresión de
+   franjas "colapsadas" unas sobre otras. flex-column en AMBOS contenedores les da a cada control (hora+✕,
+   select, botón) el ANCHO COMPLETO de la celda en su propia línea en vez de competir por espacio horizontal;
+   el padding interno y el gap entre bloques evitan que se pisen entre sí o con el borde de la celda. Exclusivo
+   del modo edición Admin — en modo lectura no se renderiza este contenedor (ver cuotasMatrizTablaHtml), la
+   vista estática de los demás roles queda intacta. */
+.admin-cuotas-edit{display:flex;flex-direction:column;gap:12px;padding:12px 8px;}
+/* Select y botón ahora en columna (antes en fila, ver comentario de arriba) — cada uno usa el ancho completo
+   disponible en vez de compartirlo, así el texto de la tipología ya no se trunca ni el botón se recorta. */
+.cuotas-hora-add{display:flex;flex-direction:column;gap:8px;align-items:stretch;white-space:normal;}
+/* Estilo de Selector: mismo sistema de diseño que .field select/.config-input (borde redondeado, fondo claro,
+   flecha SVG propia en vez de la nativa del navegador, focus ring corporativo lila) — antes usaba el estilo
+   nativo del navegador (azul, sin formato) al no definir background/appearance/focus. */
+.cuotas-hora-add select{width:100%;font-size:11px;padding:6px 24px 6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg-card-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236C757D' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 8px center;color:var(--text-primary);appearance:none;-webkit-appearance:none;-moz-appearance:none;outline:none;cursor:pointer;transition:border-color .12s ease;}
+.cuotas-hora-add select:focus{border-color:var(--lilac-deep);box-shadow:0 0 0 3px var(--lilac-soft);}
+.cuotas-hora-add button{width:100%;font-size:10.5px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;white-space:normal;line-height:1.3;font-weight:600;}
+.cuotas-hora-add button:hover{background:var(--lilac-soft);}
+.cuotas-vehiculo-remove{margin-left:6px;border:none;background:none;color:var(--danger);cursor:pointer;font-size:11px;font-weight:700;padding:0;vertical-align:middle;}
+.cuotas-vehiculo-remove:hover{text-decoration:underline;}
+.cuotas-franja-remove:hover{text-decoration:underline;}
+
+/* Cuotas de Flota — pestañas Cuota Vigente / Próxima Cuota (ver renderCuotasTabs en app.js). */
+#cuotasTabSegment button[data-cuotas-tab="proxima"] span{margin-left:4px;}
+
+/* Cuotas de Flota — Banner Unificado de Día Crítico (ver renderCuotasBanner en app.js), mismo tratamiento
+   visual de solo-lectura que las Observaciones. */
+#cuotasBannerCOInput[readonly]{background:var(--bg-card-soft);color:var(--text-secondary);cursor:default;}
+/* Homologación visual (ver requerimiento "Homologación Visual de Banner en Cuotas de Flota"): cuando el
+   contenedor pasa a estilo .cutoff-banner (roles distintos a Admin), el texto debe heredar su color morado
+   en vez del color-primary que usa .cuotas-banner-texto por defecto para la tarjeta blanca de Admin. */
+.cutoff-banner .cuotas-banner-texto{color:inherit;}
+
+/* Cuotas de Flota — cabecera formal tipo "comunicado" (ver cuotasComunicadoHtml en app.js). */
+.cuotas-comunicado-head{display:flex;flex-wrap:wrap;gap:24px;padding-bottom:14px;border-bottom:1px solid var(--border);margin-bottom:14px;}
+.cuotas-comunicado-label{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--text-secondary);margin-bottom:4px;}
+.cuotas-comunicado-value{font-size:14px;font-weight:700;color:var(--text-primary);}
+.cuotas-comunicado-fechas{display:flex;flex-wrap:wrap;gap:22px;}
+.cuotas-comunicado-fechas>div{display:flex;flex-direction:column;gap:3px;font-size:12px;}
+.cuotas-comunicado-fechas span{color:var(--text-secondary);font-size:10.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;}
+.cuotas-comunicado-fechas strong{font-size:13px;color:var(--text-primary);}
+.cuotas-leyenda{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-top:8px;}
+.cuotas-leyenda-item{display:flex;flex-direction:column;gap:4px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card-soft);font-size:12px;}
+.cuotas-leyenda-item span{color:var(--text-secondary);font-size:11px;}
+
+/* Cuotas de Flota — notas del pie ("Observaciones VANs" / "Observaciones Motos"). */
+.cuotas-observaciones{display:flex;flex-wrap:wrap;gap:14px;padding:16px;border-top:1px solid var(--border);}
+.cuotas-observaciones .field{flex:1 1 260px;}
+.cuotas-observaciones textarea{resize:vertical;}
+/* Cabecera de edición explícita (lápiz "✏️ Editar") — Observaciones y Banner de Día Crítico, ver
+   renderCuotasObservaciones/renderCuotasBanner. */
+.cuotas-obs-head,.cuotas-banner-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+/* Texto plano de solo lectura (Planner/Aliado) — sin caja editable ni asa de redimensionado, ver
+   renderCuotasBanner/renderCuotasObservaciones. */
+.cuotas-banner-texto,.cuotas-obs-texto{margin:0;font-size:12.5px;line-height:1.5;color:var(--text-primary);white-space:pre-wrap;}
+.cuotas-obs-texto{color:var(--text-secondary);}
+
+/* ---------------- Centro de Ayuda ---------------- */
+.help-glossary{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;}
+.help-item{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-card-soft);}
+.help-item p{margin:0;font-size:12px;color:var(--text-secondary);line-height:1.5;}
+.help-steps{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;font-size:12.5px;color:var(--text-secondary);line-height:1.5;}
+.help-steps strong{color:var(--text-primary);}
+.faq-list{display:flex;flex-direction:column;gap:8px;}
+.faq-item{border:1px solid var(--border);border-radius:8px;background:var(--bg-card-soft);overflow:hidden;}
+.faq-item summary{padding:11px 14px;font-size:12.5px;font-weight:700;color:var(--text-primary);cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;}
+.faq-item summary::-webkit-details-marker{display:none;}
+.faq-item summary::before{content:"+";color:var(--header);font-weight:800;width:12px;flex-shrink:0;}
+.faq-item[open] summary::before{content:"–";}
+.faq-item p{margin:0;padding:0 14px 12px 34px;font-size:12px;color:var(--text-secondary);line-height:1.55;}
+#ayudaTabBar{margin-bottom:16px;}
+#ayudaTabBar .segmented{height:auto;flex-wrap:wrap;}
+.help-quickpills{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
+.help-pill{background:#EFEEFC;color:#635BFF;border:none;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:600;white-space:nowrap;cursor:pointer;}
+.help-pill:hover{background:#E3E1FB;}
+
+/* ---------------- Cumplimiento y Calidad: Sticky Footer Bar de "Exportar Informe" ---------------- */
+/* Ver requerimiento "Refactorización de UI/UX: Simetría de KPIs, Fechas Duales, Agrupación por Bodega y
+   Sticky Footer Bar de Exportación", punto 2 (evoluciona el botón flotante simple del requerimiento anterior
+   "Refactorización de Cumplimiento y Calidad...", punto 2, hacia una barra de acciones inferior completa):
+   contenedor blanco fijo en la esquina inferior, con el botón alineado a la derecha, visible en las 3 vistas
+   del módulo (Planner/Auditor y Aliado) y en las 3 pestañas. left:222px dtiene en cuenta el ancho fijo del
+   sidebar de escritorio (ver .sidebar) para no superponerse a él; en el breakpoint donde el sidebar pasa a
+   overlay (ver @media max-width:860px más abajo) la barra ocupa el ancho completo. z-index por debajo de
+   modales (.modal-overlay usa z-index:100) -- el guard body:has() lo oculta mientras haya un modal abierto,
+   para que nunca quede flotando sobre uno (p. ej. Recuperar contraseña) mientras el usuario está en este
+   módulo. */
+/* pointer-events:none en la barra + :auto en el botón: la barra es un <div> a todo lo ancho (left:222px..
+   right:0) pero visualmente solo se ve el botón alineado a la derecha (justify-content:flex-end) -- sin este
+   par, el resto de la franja (transparente pero con área de clic real) intercepta el hover/click de CUALQUIER
+   elemento que quede debajo al hacer scroll (p. ej. el ícono de fórmula (ℹ️) de una tabla larga, ver
+   requerimiento "Incorporación de Tabla de Ranking Comparativo y Detalle Multinivel por Indicador" -- la
+   tabla de Ranking nueva estira la página lo suficiente para que esto se notara). */
+.cumplimiento-export-fab{position:fixed;left:222px;right:0;bottom:0;z-index:1000;background:#FFFFFF;border-top:1px solid #E5E7EB;box-shadow:0 -2px 10px rgba(17,15,55,.06);padding:14px 30px;display:flex;justify-content:flex-end;transition:left .3s ease,width .3s ease;pointer-events:none;}
+.cumplimiento-export-fab>*{pointer-events:auto;}
+body:has(#modalOverlay.open) .cumplimiento-export-fab{display:none;}
+/* #sidebar y #mainContent son hermanos directos dentro de .shell -- cuando el sidebar de escritorio se
+   colapsa (botón "sidebarToggle", ver app.js) la barra debe extenderse a left:0 para cubrir todo el ancho
+   liberado en vez de conservar el hueco de 222px del sidebar abierto. */
+#sidebar.collapsed ~ #mainContent .cumplimiento-export-fab{left:0;}
+/* Espacio reservado al final de la vista para que la barra fija nunca tape la última fila de datos durante
+   el scroll (equivalente a un padding-bottom "pb-20"). */
+#view-cumplimiento{padding-bottom:76px;}
+
+/* ---------------- Banner de Anuncios Operativos (Aliado) ---------------- */
+/* Ver requerimiento "Nueva Funcionalidad: Banner de Anuncios Operativos con Plantillas y Filtro Avanzado de
+   Aliados" -- vive fuera de #mainContent (ver index.html), así que un único bloque de estilos cubre su
+   aparición en cualquier vista del rol Aliado. [hidden] gana sobre display:flex por especificidad idéntica +
+   orden de declaración (mismo patrón ya documentado en .cutoff-banner[hidden]). */
+/* Rediseño alineado con la línea gráfica del "Banner de Día Crítico" de Cuotas de Flota (ver requerimiento
+   "Corrección de Bugs Visuales, Ubicación de Avisos y Mejoras en Cumplimiento y Calidad", punto 1) -- tono
+   lila/púrpura suave para el CONTENEDOR, sin importar el tipo de aviso; el badge interno conserva su propia
+   codificación de color por severidad (Informativa/Urgente), que es lo único que el requerimiento pide
+   mantener distinguible. Colores literales (no --lilac-soft/--lilac-deep, que son un tono más saturado ya
+   usado en otros componentes) para calzar exactamente con los hex dados: #F3E8FF/#FAF5FF contenedor,
+   #E9D5FF borde, morado oscuro de texto. */
+.aviso-aliado-banner{display:flex;align-items:center;gap:14px;padding:10px 20px;font-size:12.5px;font-weight:600;background:#F3E8FF;color:#581C87;border:1px solid #E9D5FF;border-radius:12px;margin:10px 20px 0;}
+.aviso-aliado-banner[hidden]{display:none;}
+:root[data-theme="dark"] .aviso-aliado-banner{background:#2B2050;color:#E9D5FF;border-color:#4C3A80;}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .aviso-aliado-banner{background:#2B2050;color:#E9D5FF;border-color:#4C3A80;}}
+.aviso-aliado-banner-inner{display:flex;align-items:center;gap:10px;flex:1;flex-wrap:wrap;min-width:0;}
+/* Pill de severidad (ver requerimiento "Confirmación de Implementación y Validación Final de UI/UX", punto 1):
+   casing normal (sin uppercase) y tonos pastel + texto oscuro, en vez de azul/rojo brillante con texto
+   blanco -- mismo lenguaje visual que el resto de badges pastel de la plataforma (p. ej. .badge-justified,
+   que ya usa este mismo #5B21B6 sobre --lilac-soft). Colores literales para calzar exactamente con los hex
+   dados: Informativa #E9D5FF/#5B21B6, Urgente #FEE2E2/#991B1B (ninguno de los dos coincide con un token de
+   badge de severidad ya existente -- --danger-soft es un rosa distinto y --danger no es este rojo oscuro). */
+.aviso-aliado-banner-badge{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;flex-shrink:0;}
+.aviso-aliado-banner-text{flex:1 1 260px;min-width:0;}
+.aviso-aliado-banner-vigencia{font-size:11px;font-weight:600;opacity:.8;flex-shrink:0;white-space:nowrap;}
+.aviso-aliado-banner-close{background:none;border:none;font-size:19px;line-height:1;cursor:pointer;flex-shrink:0;color:inherit;opacity:.65;padding:0;}
+.aviso-aliado-banner-close:hover{opacity:1;}
+.aviso-aliado-banner.informativa .aviso-aliado-banner-badge{background:#E9D5FF;color:#5B21B6;}
+.aviso-aliado-banner.urgente .aviso-aliado-banner-badge{background:#FEE2E2;color:#991B1B;}
+
+/* Checklist de "Aliados específicos" del Gestor de Avisos -- mismo lenguaje visual compacto que
+   .mensajero-typeahead-menu (caja con borde + scroll), pero como lista fija en el propio formulario en vez
+   de un menú flotante. */
+.aviso-aliados-checklist{display:flex;flex-direction:column;gap:7px;max-height:160px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:10px 12px;}
+/* Fix de bug (ver requerimiento "Corrección de Bugs Visuales, Ubicación de Avisos y Mejoras en Cumplimiento y
+   Calidad", punto 1): sin el selector input[type="checkbox"] dedicado, .field input,.field select,.field
+   textarea{width:100%} (más genérico, pensado para <input type="text">/<select>) también alcanzaba a estos
+   checkboxes -- al ser descendientes de un .field -- y los estiraba al ancho completo de la fila, empujando
+   visualmente el check al centro y el nombre del aliado a la derecha. input[type="checkbox"] (especificidad
+   0-2-1) gana sobre .field input (0-1-1) sin depender del orden de declaración en la hoja de estilos. */
+.aviso-aliados-checklist label{display:flex;align-items:center;gap:8px;justify-content:flex-start;text-align:left;font-size:12.5px;font-weight:500;}
+.aviso-aliados-checklist input[type="checkbox"]{width:auto;flex-shrink:0;accent-color:var(--lilac-deep);cursor:pointer;}
+
+/* ---------------- Toasts ---------------- */
+.toast-container{position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:10px;z-index:9999;max-width:340px;pointer-events:none;overflow:visible;}
+.toast{background:var(--bg-card);border:1px solid var(--border);border-left:4px solid var(--muted);border-radius:10px;box-shadow:var(--shadow-md);padding:12px 14px;font-size:12.5px;display:flex;gap:10px;align-items:flex-start;animation:toastIn .18s ease;}
+.toast.warn{border-left-color:var(--yellow);}
+.toast.critical{border-left-color:var(--danger);}
+.toast.ok{border-left-color:var(--green-deep);}
+.toast svg{flex-shrink:0;margin-top:1px;}
+.toast-title{font-weight:700;margin-bottom:2px;}
+.toast-msg{color:var(--text-secondary);}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+
+/* "Ver Detalle" en Cumplimiento y Calidad (ver requerimiento "Reestructuración y Conexión de Datos..."):
+   resalta brevemente la fila/grupo de destino en la Tabla 3 tras el scroll, para que el usuario ubique de
+   inmediato dónde aterrizó -- mismo tono --lilac-soft que el resto de banners informativos de la plataforma. */
+.row-highlight-flash{animation:rowHighlightFlash 1.6s ease-out;}
+@keyframes rowHighlightFlash{0%{background-color:var(--lilac-soft);}100%{background-color:transparent;}}
+
+/* Auditoría: recuadro de diagnóstico rápido del indicador "Cobros de Standby" (aliado con mayor/menor
+   concentración de eventos), sobre la tabla. */
+.audit-diagnostico{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--bg-card-soft);}
+.audit-diagnostico[hidden]{display:none;}
+.audit-diagnostico-item{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px 14px;min-width:0;}
+.audit-diagnostico-label{font-size:10.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--text-secondary);}
+.audit-diagnostico-valor{margin-top:4px;font-size:15px;font-weight:700;color:var(--text-primary);overflow-wrap:anywhere;}
+.audit-diagnostico-valor span{font-weight:500;font-size:12px;color:var(--muted);margin-left:6px;}
+/* ---------------- Responsive ---------------- */
+@media (max-width:1080px){
+  .filter-grid{grid-template-columns:1fr 1fr;}
+  .metrics{grid-template-columns:1fr 1fr;}
+  .audit-diagnostico{grid-template-columns:1fr;}
+  .login-screen{grid-template-columns:1fr;justify-items:center;row-gap:18px;padding:32px 20px 84px;}
+  .login-corner-logo{display:none;}
+  .login-fleet-art{display:none;}
+  .login-panel{grid-column:1;order:1;max-width:460px;margin:0 auto;padding:32px 26px 28px;}
+}
+@media (max-width:860px){
+  .sidebar{position:fixed;left:0;top:56px;z-index:35;box-shadow:var(--shadow-lg);}
+  .sidebar.collapsed{margin-left:-222px;}
+  /* El sidebar pasa a overlay fijo en este ancho (ver arriba) -- la Sticky Footer Bar de Cumplimiento y
+     Calidad ya no necesita reservarle espacio y ocupa el ancho completo. */
+  .cumplimiento-export-fab{left:0;}
+}
+
+/* ---------------- Ajuste fino tipográfico (Estilo Fino Melonn) ---------------- */
+body,p,span,td,input,select{font-size:12px !important;font-weight:500;line-height:1.43;}
+th,label{font-size:11px !important;font-weight:600;color:#666666;}
+button,.btn{font-size:12px !important;font-weight:600;padding:6px 12px;}
