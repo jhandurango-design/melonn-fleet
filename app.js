@@ -13374,6 +13374,9 @@ function reexpedirActivationToken(userId) {
   u.activationToken = generarActivationToken();
   u.activationTokenExpiraEn = Date.now() + ACTIVATION_TOKEN_VIGENCIA_MS;
   persistUsers();
+  /* Ver nota "Supabase": este token solo sirve si llega a la nube ANTES de que el usuario lo abra desde
+     otro dispositivo -- no puede esperar al autoguardado periódico de 30s ni al logout. */
+  scPushRows('app_users', [u]);
   return u;
 }
 /* Copia el enlace vigente -- solo genera uno NUEVO si no existía o si ya venció, para no invalidar en
@@ -13406,7 +13409,7 @@ function copiarEnlaceActivacion(userId) {
    ese token) / vencido (token encontrado pero ya pasó activationTokenExpiraEn, con "Reexpedir enlace" de
    autoservicio) / ya activa (token encontrado pero ese usuario ya completó su activación antes -- enlace
    reutilizado). */
-function activationEstadoIds() { return ['activationFormState', 'activationInvalidState', 'activationExpiredState', 'activationYaActivaState']; }
+function activationEstadoIds() { return ['activationFormState', 'activationInvalidState', 'activationExpiredState', 'activationYaActivaState', 'activationLoadingState']; }
 function mostrarEstadoActivacion(u, token) {
   activationEstadoIds().forEach(function (id) { document.getElementById(id).hidden = true; });
   document.getElementById('activationToken').value = token || '';
@@ -13424,15 +13427,27 @@ function mostrarEstadoActivacion(u, token) {
 /* Se llama al arrancar la app (ver DOMContentLoaded), ANTES del restauro de sesión guardada -- un enlace de
    activación en la URL siempre tiene prioridad sobre cualquier sesión previa del mismo navegador. Limpia el
    query param de la URL en cuanto el token queda capturado en el campo oculto del formulario: el resto de
-   esta pantalla ya no depende de la URL, así que no hace falta conservarlo visible ahí. */
+   esta pantalla ya no depende de la URL, así que no hace falta conservarlo visible ahí.
+   Ver nota "Supabase": un enlace de activación casi siempre se abre en un navegador/dispositivo que JAMÁS
+   vio a este usuario -- fue invitado desde la sesión de Admin en OTRA máquina. state.users en este primer
+   render es solo el roster local (seed), que nunca va a contener a alguien recién invitado; declarar
+   "inválido" contra esa foto desactualizada era el bug real (ver requerimiento "Corrección de Enlaces de
+   Activación"). Si el token no aparece en memoria, se intenta un refresco desde Supabase UNA vez antes de
+   rendirse -- scPullAll ya cae de vuelta a "nada cambia" si Supabase no responde. */
 function resolverActivacionDesdeUrl() {
   var token = new URLSearchParams(location.search).get('activate');
   if (!token) return false;
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('activationScreen').hidden = false;
-  var u = state.users.find(function (x) { return x.activationToken === token; });
-  mostrarEstadoActivacion(u, token);
   history.replaceState(null, '', location.pathname);
+  var u = state.users.find(function (x) { return x.activationToken === token; });
+  if (u) { mostrarEstadoActivacion(u, token); return true; }
+  activationEstadoIds().forEach(function (id) { document.getElementById(id).hidden = true; });
+  document.getElementById('activationLoadingState').hidden = false;
+  scPullAll().then(function () {
+    var u2 = state.users.find(function (x) { return x.activationToken === token; });
+    mostrarEstadoActivacion(u2, token);
+  });
   return true;
 }
 function volverAPantallaLogin() {
@@ -16099,6 +16114,9 @@ document.addEventListener('DOMContentLoaded', function () {
     delete u.activationToken;
     delete u.activationTokenExpiraEn;
     persistUsers();
+    /* Ver nota "Supabase": la contraseña recién definida tiene que llegar a la nube de inmediato -- un
+       login desde otro dispositivo justo después no puede depender del autoguardado de 30s. */
+    scPushRows('app_users', [u]);
     registrarEventoSeguridad('activacion', u.email, 'Cuenta activada por el propio usuario a través de su enlace de activación -- definió su contraseña por primera vez.');
     document.getElementById('activationScreen').hidden = true;
     startSession(u);
@@ -17068,6 +17086,9 @@ document.addEventListener('DOMContentLoaded', function () {
       if (aliado !== undefined) nuevo.aliado = aliado;
       state.users.push(nuevo);
       persistUsers();
+      /* Ver nota "Supabase": igual que reexpedirActivationToken -- el enlace que Admin va a copiar y
+         compartir debe existir en la nube de inmediato, no 30s después. */
+      scPushRows('app_users', [nuevo]);
       registrarEventoSeguridad('creacion', email, 'Se creó la cuenta de ' + nombre + ' (' + roles.join(' + ') + '), pendiente de activación -- solicitado por ' + state.user.nombre + '. Deberá definir su propia contraseña a través de su enlace de activación.');
       toast('ok', 'Usuario invitado', nombre + ' fue registrado como ' + roles.join(' + ') + ', pendiente de activación. Copia su enlace de activación desde la tabla para compartirlo.');
     }
