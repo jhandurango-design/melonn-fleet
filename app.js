@@ -341,10 +341,30 @@ var supabaseClient = (typeof window !== 'undefined' && window.supabase)
   : null;
 function scPullTable(table) {
   if (!supabaseClient) return Promise.resolve(null);
-  return supabaseClient.from(table).select('data').then(function (res) {
+  /* Ver requerimiento "Duplicación de Nelly Molano en Gestión de Usuarios": se trae también updated_at (no
+     solo data) -- deduplicarUsuariosPorEmail lo necesita para decidir, entre 2 filas con distinto id pero el
+     mismo correo (ver ese caso real: u3 y u8, ambos n.molano@cordiandina.com -- quedaron así por más de un
+     INSERT manual contra la tabla desde el SQL Editor, cada uno con su propio id), cuál de las 2 es la más
+     reciente y debe prevalecer. Se devuelve como { value, updatedAt } en vez de la fila "data" pelada -- scPullTable
+     es de uso interno exclusivo de scPullAll, así que este cambio de forma no afecta a nadie más. */
+  return supabaseClient.from(table).select('data, updated_at').then(function (res) {
     if (res.error || !res.data) return null;
-    return res.data.map(function (row) { return row.data; });
+    return res.data.map(function (row) { return { value: row.data, updatedAt: row.updated_at }; });
   }, function () { return null; });
+}
+/* Consolida filas de app_users por correo (minúsculas) cuando Supabase trae más de una para la misma
+   persona bajo ids distintos -- se queda con la de updated_at más reciente. Una fila sin correo reconocible
+   (no debería ocurrir en la práctica) se conserva tal cual, sin deduplicar, para no perder datos por error. */
+function deduplicarUsuariosPorEmail(rows) {
+  var porEmail = {};
+  rows.forEach(function (row) {
+    var key = (row.value.email || '').toLowerCase();
+    if (!key) return;
+    var existente = porEmail[key];
+    if (!existente || new Date(row.updatedAt || 0) > new Date(existente.updatedAt || 0)) porEmail[key] = row;
+  });
+  var sinEmail = rows.filter(function (row) { return !row.value.email; }).map(function (row) { return row.value; });
+  return Object.keys(porEmail).map(function (k) { return porEmail[k].value; }).concat(sinEmail);
 }
 function scPushRows(table, rows) {
   if (!supabaseClient || !rows || !rows.length) return Promise.resolve();
@@ -368,9 +388,9 @@ function scPullAll() {
   return Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos')]).then(function (res) {
     var users = res[0], mensajeros = res[1], turnos = res[2];
     var changed = false;
-    if (users && users.length) { state.users = users; changed = true; }
-    if (mensajeros && mensajeros.length) { state.mensajeros = mensajeros; changed = true; }
-    if (turnos && turnos.length) { state.turnos = turnos; changed = true; }
+    if (users && users.length) { state.users = deduplicarUsuariosPorEmail(users); changed = true; }
+    if (mensajeros && mensajeros.length) { state.mensajeros = mensajeros.map(function (row) { return row.value; }); changed = true; }
+    if (turnos && turnos.length) { state.turnos = turnos.map(function (row) { return row.value; }); changed = true; }
     if (changed && state.user) syncAndRender(true);
     return changed;
   });
