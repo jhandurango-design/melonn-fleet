@@ -1597,6 +1597,10 @@ const state = {
   securityEvents: [],
   securityEventCounter: 0,
   securityConfig: { maxIntentos: 2, bloqueoMs: 60000 },
+  /* Filtro del nuevo panel "Solicitudes de Recuperación de Contraseña" (ver requerimiento "Módulo de Gestión
+     en Seguridad y Accesos"): 'pendientes' (default) muestra solo los eventos tipo 'recuperacion' aún sin
+     resolver; 'historial' muestra los ya resueltos (por Admin o por el propio usuario). */
+  seguridadRecuperacionFiltro: 'pendientes',
   uiLang: 'es',
   cuotasMatriz: [],
   /* Instantánea de la Cuota Vigente congelada para HOY (ver requerimiento "Aplicación a Futuro de Cambios y
@@ -5574,6 +5578,15 @@ function navigate(viewId) {
     state.usuarioTogglePendienteId = null;
     state.permisosPendiente = null;
     state.seguridadAuthEditing = false;
+    /* Ver requerimiento "Sincronización Automática y Transparente de Usuarios": Supabase es la fuente de
+       verdad para state.users (ver scPullAll), pero antes de este fix solo se re-consultaba al iniciar
+       sesión/cargar la página -- un usuario eliminado directamente en Supabase (fuera de la app) seguía
+       apareciendo en Gestión de Usuarios hasta el próximo login, porque nada volvía a llamar scPullAll()
+       mientras la sesión seguía activa. Ahora se dispara de nuevo CADA VEZ que se entra a este módulo; si
+       Supabase trae un dataset distinto, scPullAll() ya se encarga de reemplazar state.users por completo y
+       volver a renderizar (ver su propio syncAndRender(true)), sin que Admin tenga que recargar la página ni
+       borrar caché. */
+    scPullAll();
   }
   /* Al ENTRAR a Alertas, el selector local de Bodega (y el badge del sidebar, ver updateAlertsBadge) arrancan
      sincronizados a "Bodega actual" del Header (state.activeSede) — misma lógica que Consolidado de
@@ -11889,8 +11902,15 @@ function renderUsuarios() {
   var list = state.users.filter(function (u) {
     if (q && u.nombre.toLowerCase().indexOf(q) === -1 && u.email.toLowerCase().indexOf(q) === -1) return false;
     if (qRol && u.roles.indexOf(qRol) === -1) return false;
-    if (qEstado === 'activo' && !u.activo) return false;
-    if (qEstado === 'inactivo' && u.activo) return false;
+    /* Ver requerimiento "Filtro de Estado en la pestaña Usuarios": "Pendiente de Activación" es un estado
+       propio (u.status, ver usuarioRowHtml) que antes no tenía forma de aislarse en este filtro -- quedaba
+       mezclado dentro de "Activo" porque u.activo (¿puede iniciar sesión?) y u.status (¿ya definió su propia
+       contraseña?) son independientes. "Activo"/"Inactivo" ahora excluyen explícitamente a los pendientes,
+       igual que ya distingue el badge de cada fila. */
+    var pendienteActivacion = u.status === 'PENDING_ACTIVATION';
+    if (qEstado === 'pendiente' && !pendienteActivacion) return false;
+    if (qEstado === 'activo' && (pendienteActivacion || !u.activo)) return false;
+    if (qEstado === 'inactivo' && (pendienteActivacion || u.activo)) return false;
     return true;
   }).sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
   document.getElementById('usuariosTbody').innerHTML = list.map(usuarioRowHtml).join('');
@@ -13300,8 +13320,15 @@ function initUserContext() {
 }
 /* ---------------- Seguridad y Autenticación ---------------- */
 function nextSecurityEventId() { state.securityEventCounter++; return 'SEC-' + String(state.securityEventCounter).padStart(3, '0'); }
+/* Ver requerimiento "Módulo de Gestión en Seguridad y Accesos": solo los eventos tipo 'recuperacion' tienen
+   un ciclo de vida Pendiente -> Resuelto (ver renderSolicitudesRecuperacion/resolverEventoRecuperacion) --
+   el resto de tipos (bloqueo, fallo, desbloqueo, reset, creacion, etc.) siguen siendo puramente informativos,
+   por eso estado queda null para ellos. Devuelve el evento creado para que el llamador pueda, si lo necesita,
+   seguir una referencia directa (ver copiarEnlaceRecuperacion/asignarClaveTemporalRecuperacion). */
 function registrarEventoSeguridad(tipo, email, detalle) {
-  state.securityEvents.unshift({ id: nextSecurityEventId(), tipo: tipo, email: email, detalle: detalle, ts: fmtClock(state.now), fecha: TODAY_STR });
+  var ev = { id: nextSecurityEventId(), tipo: tipo, email: email, detalle: detalle, ts: fmtClock(state.now), fecha: TODAY_STR, estado: tipo === 'recuperacion' ? 'pendiente' : null };
+  state.securityEvents.unshift(ev);
+  return ev;
 }
 /* Estado de bloqueo vigente de un correo (real, en milisegundos de reloj del navegador — independiente del reloj Gravity simulado). */
 function loginLockStatus(email) {
@@ -13485,8 +13512,26 @@ function mostrarEstadoActivacion(u, token) {
    "inválido" contra esa foto desactualizada era el bug real (ver requerimiento "Corrección de Enlaces de
    Activación"). Si el token no aparece en memoria, se intenta un refresco desde Supabase UNA vez antes de
    rendirse -- scPullAll ya cae de vuelta a "nada cambia" si Supabase no responde. */
+/* Ver requerimiento "Carga del formulario de activación -- captura robusta del token": algunos clientes de
+   correo/mensajería reescriben enlaces compartidos (acortadores, previsualizadores) y pueden convertir el
+   "?" en "#", o el nombre del parámetro puede llegar mal copiado como "token" en vez de "activate" si
+   alguien lo retransribe a mano. En vez de exigir el formato exacto "?activate=TOKEN" y mostrar "Enlace no
+   válido" por una diferencia de formato que el usuario no puede corregir por su cuenta, se acepta cualquiera
+   de estas variantes, en orden: ?activate=, ?token=, #activate=, #token=, o un "#TOKEN" a secas. */
+function extraerTokenActivacionDeUrl() {
+  var qs = new URLSearchParams(location.search);
+  var token = qs.get('activate') || qs.get('token');
+  if (token) return token;
+  var hash = location.hash.replace(/^#/, '');
+  if (!hash) return null;
+  if (hash.indexOf('=') !== -1) {
+    var hashParams = new URLSearchParams(hash);
+    return hashParams.get('activate') || hashParams.get('token') || null;
+  }
+  return hash;
+}
 function resolverActivacionDesdeUrl() {
-  var token = new URLSearchParams(location.search).get('activate');
+  var token = extraerTokenActivacionDeUrl();
   if (!token) return false;
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('activationScreen').hidden = false;
@@ -13503,6 +13548,129 @@ function resolverActivacionDesdeUrl() {
 }
 function volverAPantallaLogin() {
   document.getElementById('activationScreen').hidden = true;
+  document.getElementById('loginScreen').style.display = '';
+}
+/* ---------------- Solicitudes de Recuperación de Contraseña (ver #recoveryScreen) ----------------
+   Ver requerimiento "Módulo de Gestión en Seguridad y Accesos": cada evento tipo 'recuperacion' (creado al
+   enviar "Olvidé mi contraseña" en el login, ver #formRecuperarPassword) nace con estado 'pendiente' (ver
+   registrarEventoSeguridad) y se resuelve por 1 de 3 caminos -- Admin copia un enlace de recuperación, Admin
+   asigna una clave temporal directa, o el propio usuario completa el restablecimiento por su cuenta -- los 3
+   pasan el evento a 'resuelto' automáticamente, sin ningún botón manual de "Marcar como resuelto". */
+var RECOVERY_TOKEN_VIGENCIA_MS = 24 * 60 * 60 * 1000; // 24 horas
+function recoveryLinkFor(token) { return location.origin + location.pathname + '?recover=' + token; }
+/* Único punto que resuelve un evento -- la comprobación de estado !== 'pendiente' lo hace idempotente: si ya
+   se resolvió por otro camino (p.ej. Admin ya asignó clave temporal y el usuario igual alcanza a usar un
+   enlace viejo), la segunda llamada no sobreescribe el detalle real de cómo se resolvió primero. */
+function resolverEventoRecuperacion(eventId, detalleResolucion) {
+  var ev = state.securityEvents.find(function (x) { return x.id === eventId; });
+  if (!ev || ev.estado !== 'pendiente') return;
+  ev.estado = 'resuelto';
+  ev.detalle = detalleResolucion;
+}
+/* "Copiar Enlace de Recuperación": token propio (independiente del de activación -- vigencia de 24h, no 7
+   días, porque una recuperación de clave es un trámite puntual, no una invitación nueva). Resuelve el evento
+   de inmediato: una vez que Admin comparte el enlace, el seguimiento de si el usuario lo abre o no ya no
+   depende de este panel (si lo necesita de nuevo, genera una solicitud nueva). */
+function copiarEnlaceRecuperacion(eventId) {
+  if (!canDo('users.manage')) return;
+  var ev = state.securityEvents.find(function (x) { return x.id === eventId; });
+  if (!ev || ev.estado !== 'pendiente') return;
+  var u = state.users.find(function (x) { return x.email.toLowerCase() === ev.email.toLowerCase(); });
+  if (!u) { toast('warn', 'Usuario no encontrado', 'No existe ninguna cuenta con el correo ' + ev.email + '.'); return; }
+  u.recoveryToken = generarActivationToken();
+  u.recoveryTokenExpiraEn = Date.now() + RECOVERY_TOKEN_VIGENCIA_MS;
+  persistUsers();
+  /* Ver nota "Supabase": mismo criterio que un enlace de activación -- tiene que llegar a la nube antes de
+     que el usuario lo abra, posiblemente desde otro dispositivo. */
+  scPushRows('app_users', [u]);
+  var link = recoveryLinkFor(u.recoveryToken);
+  function marcarCopiado() { toast('ok', 'Enlace copiado', 'Comparte este enlace de recuperación con ' + u.nombre + ' — vence en 24 horas.'); }
+  function copiarFallback() {
+    var ta = document.createElement('textarea');
+    ta.value = link; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    if (ok) marcarCopiado(); else toast('warn', 'No se pudo copiar', 'Copia manualmente: ' + link);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(marcarCopiado, copiarFallback);
+  else copiarFallback();
+  resolverEventoRecuperacion(eventId, 'Se generó y copió un enlace de recuperación (vigente 24h) para ' + u.email + ', solicitado por ' + state.user.nombre + '.');
+  renderSeguridad();
+}
+/* "Asignar Clave Temporal": salida directa sin depender de que el usuario abra ningún enlace -- mismo patrón
+   que asignarClaveTemporalPendiente() (rescate de activación), pero sobre una cuenta YA ACTIVA: no toca
+   u.status ni activationToken, solo fuerza el cambio de clave en el siguiente inicio de sesión. Invalida
+   cualquier recoveryToken vigente para que no quede un enlace vivo apuntando a una clave que ya no aplica. */
+function asignarClaveTemporalRecuperacion(eventId) {
+  if (!canDo('users.manage')) return;
+  var ev = state.securityEvents.find(function (x) { return x.id === eventId; });
+  if (!ev || ev.estado !== 'pendiente') return;
+  var u = state.users.find(function (x) { return x.email.toLowerCase() === ev.email.toLowerCase(); });
+  if (!u) { toast('warn', 'Usuario no encontrado', 'No existe ninguna cuenta con el correo ' + ev.email + '.'); return; }
+  var temp = generarClaveTemporal();
+  u.password = temp;
+  u.mustChangePassword = true;
+  u.isTemporaryPassword = true;
+  delete u.recoveryToken;
+  delete u.recoveryTokenExpiraEn;
+  delete state.loginAttempts[u.email.toLowerCase()];
+  persistUsers();
+  scPushRows('app_users', [u]);
+  function marcarCopiada() { toast('ok', 'Clave temporal copiada', 'Compártela con ' + u.nombre + ' por un canal seguro -- deberá cambiarla en su próximo ingreso.'); }
+  function copiarFallback() {
+    var ta = document.createElement('textarea');
+    ta.value = temp; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    if (ok) marcarCopiada(); else toast('warn', 'No se pudo copiar', 'Clave temporal: ' + temp);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(temp).then(marcarCopiada, copiarFallback);
+  else copiarFallback();
+  resolverEventoRecuperacion(eventId, 'Se asignó una clave temporal directa a ' + u.nombre + ', solicitado por ' + state.user.nombre + '. Deberá cambiarla en su próximo inicio de sesión.');
+  renderSeguridad();
+}
+/* ---------------- Pantalla de Recuperación de Contraseña (ver #recoveryScreen) ----------------
+   Mismo patrón de estados mutuamente excluyentes que la Pantalla de Activación, pero con 3 en vez de 4: no
+   existe un estado "ya usada" -- recoveryToken se borra en cuanto se consume (ver #formRecuperarCuenta más
+   abajo), así que un enlace reutilizado cae directo en "inválido". */
+function recoveryEstadoIds() { return ['recoveryFormState', 'recoveryLoadingState', 'recoveryInvalidState', 'recoveryExpiredState']; }
+function mostrarEstadoRecuperacion(u, token) {
+  recoveryEstadoIds().forEach(function (id) { document.getElementById(id).hidden = true; });
+  document.getElementById('recoveryToken').value = token || '';
+  if (!u || !u.activo) { document.getElementById('recoveryInvalidState').hidden = false; return; }
+  if (Date.now() > u.recoveryTokenExpiraEn) { document.getElementById('recoveryExpiredState').hidden = false; return; }
+  document.getElementById('formRecuperarCuenta').reset();
+  document.getElementById('recoveryToken').value = token || u.recoveryToken;
+  document.getElementById('recoveryFormError').textContent = '';
+  document.getElementById('recoveryFormNote').textContent = 'Hola ' + u.nombre + ', define tu nueva contraseña para recuperar el acceso a tu cuenta.';
+  document.getElementById('recoveryFormState').hidden = false;
+}
+/* Se llama al arrancar la app (ver DOMContentLoaded), igual que resolverActivacionDesdeUrl -- mismo
+   fallback de un pull a Supabase si el token no aparece todavía en el roster local (ver nota "Supabase" junto
+   a resolverActivacionDesdeUrl -- un enlace de recuperación también suele abrirse en un dispositivo que nunca
+   vio a este usuario). */
+function resolverRecuperacionDesdeUrl() {
+  var token = new URLSearchParams(location.search).get('recover');
+  if (!token) return false;
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('recoveryScreen').hidden = false;
+  history.replaceState(null, '', location.pathname);
+  var u = state.users.find(function (x) { return x.recoveryToken === token; });
+  if (u) { mostrarEstadoRecuperacion(u, token); return true; }
+  recoveryEstadoIds().forEach(function (id) { document.getElementById(id).hidden = true; });
+  document.getElementById('recoveryLoadingState').hidden = false;
+  scPullAll().then(function () {
+    var u2 = state.users.find(function (x) { return x.recoveryToken === token; });
+    mostrarEstadoRecuperacion(u2, token);
+  });
+  return true;
+}
+function volverAPantallaLoginDesdeRecuperacion() {
+  document.getElementById('recoveryScreen').hidden = true;
   document.getElementById('loginScreen').style.display = '';
 }
 /* Ver requerimiento "Prompt Consolidador Maestro...", Bloque 1 ("Excepción de Seguridad y Asignación Directa
@@ -13612,7 +13780,7 @@ function seguridadUsuarioRowHtml(u) {
     '</tr>';
 }
 function seguridadEventoTipoLabel(tipo) {
-  var map = { bloqueo: 'Bloqueo de cuenta', fallo: 'Inicio de sesión fallido', recuperacion: 'Solicitud de recuperación', desbloqueo: 'Cuenta desbloqueada', reset: 'Contraseña restablecida', creacion: 'Usuario creado', reset_directo: 'Contraseña establecida (acceso directo)' };
+  var map = { bloqueo: 'Bloqueo de cuenta', fallo: 'Inicio de sesión fallido', recuperacion: 'Solicitud de recuperación', recuperacion_completada: 'Recuperación completada por el usuario', desbloqueo: 'Cuenta desbloqueada', reset: 'Contraseña restablecida', creacion: 'Usuario creado', reset_directo: 'Contraseña establecida (acceso directo)' };
   return map[tipo] || tipo;
 }
 function seguridadEventoBadge(tipo) {
@@ -13627,6 +13795,26 @@ function seguridadEventoRowHtml(ev) {
     '<td><span class="badge ' + seguridadEventoBadge(ev.tipo) + '"><i></i>' + seguridadEventoTipoLabel(ev.tipo) + '</span></td>' +
     '<td>' + ev.email + '</td>' +
     '<td class="courier-sub">' + escapeHtml(ev.detalle) + '</td>' +
+    '</tr>';
+}
+/* Fila del panel "Solicitudes de Recuperación de Contraseña" (ver requerimiento "Módulo de Gestión en
+   Seguridad y Accesos") -- a diferencia de seguridadEventoRowHtml (log genérico, de solo lectura), esta fila
+   SÍ trae acciones mientras el evento sigue 'pendiente'; una vez 'resuelto' las acciones desaparecen y solo
+   queda el detalle de cómo se resolvió (ver resolverEventoRecuperacion). */
+function recuperacionEventoRowHtml(ev) {
+  var badge = ev.estado === 'pendiente' ? '<span class="badge badge-warn"><i></i>Pendiente</span>' : '<span class="badge badge-dispatched"><i></i>Resuelto</span>';
+  var acciones = ev.estado === 'pendiente'
+    ? '<div class="row-actions">' +
+      '<button data-act="copiar-enlace-recuperacion" data-id="' + ev.id + '" class="raised">Copiar Enlace de Recuperación</button>' +
+      '<button data-act="asignar-clave-temporal-recuperacion" data-id="' + ev.id + '">Asignar Clave Temporal</button>' +
+      '</div>'
+    : '';
+  return '<tr>' +
+    '<td>' + ev.ts + '</td>' +
+    '<td>' + ev.email + '</td>' +
+    '<td>' + badge + '</td>' +
+    '<td class="courier-sub">' + escapeHtml(ev.detalle) + '</td>' +
+    '<td>' + acciones + '</td>' +
     '</tr>';
 }
 function renderSeguridad() {
@@ -13654,6 +13842,19 @@ function renderSeguridad() {
   document.getElementById('seguridadEventosTbody').innerHTML = eventos.map(seguridadEventoRowHtml).join('');
   document.getElementById('seguridadEventosCount').textContent = eventos.length;
   document.getElementById('seguridadEventosEmpty').classList.toggle('show', eventos.length === 0);
+
+  /* Panel "Solicitudes de Recuperación de Contraseña" (ver requerimiento "Módulo de Gestión en Seguridad y
+     Accesos"): recorte de state.securityEvents por tipo 'recuperacion', acotado además por el segmentado
+     Pendientes/Historial (ver seguridadRecuperacionFiltro). */
+  var recuperaciones = state.securityEvents.filter(function (ev) { return ev.tipo === 'recuperacion'; });
+  var recuperacionesFiltradas = recuperaciones.filter(function (ev) {
+    return state.seguridadRecuperacionFiltro === 'historial' ? ev.estado === 'resuelto' : ev.estado === 'pendiente';
+  });
+  document.getElementById('seguridadRecuperacionTbody').innerHTML = recuperacionesFiltradas.map(recuperacionEventoRowHtml).join('');
+  document.getElementById('seguridadRecuperacionCount').textContent = recuperacionesFiltradas.length;
+  document.getElementById('seguridadRecuperacionEmpty').classList.toggle('show', recuperacionesFiltradas.length === 0);
+  document.getElementById('seguridadRecuperacionEmpty').querySelector('div').textContent =
+    state.seguridadRecuperacionFiltro === 'historial' ? 'No hay solicitudes de recuperación resueltas todavía.' : 'No hay solicitudes de recuperación pendientes.';
 }
 /* Confirmación de Parámetros de Autenticación (ver requerimiento "Gestión de Usuarios — Botones de
    Confirmación"). */
@@ -16031,7 +16232,7 @@ document.addEventListener('DOMContentLoaded', function () {
   syncCatalogosDesdeConfig();
   wireSidebarDelegation();
 
-  if (!resolverActivacionDesdeUrl()) {
+  if (!resolverActivacionDesdeUrl() && !resolverRecuperacionDesdeUrl()) {
     var savedId = localStorage.getItem('melonn_session');
     if (savedId) {
       var u = state.users.find(function (x) { return x.id === savedId; });
@@ -16183,6 +16384,45 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   document.getElementById('btnActivationVolverLogin').addEventListener('click', volverAPantallaLogin);
   document.getElementById('btnActivationYaActivaLogin').addEventListener('click', volverAPantallaLogin);
+
+  /* Ver requerimiento "Módulo de Gestión en Seguridad y Accesos": completa el 3er camino de resolución
+     (auto-resolución por el propio usuario) -- los otros 2 (Copiar Enlace / Asignar Clave Temporal) ya
+     resuelven el evento desde el panel de Admin, ver copiarEnlaceRecuperacion/asignarClaveTemporalRecuperacion. */
+  document.getElementById('formRecuperarCuenta').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var token = document.getElementById('recoveryToken').value;
+    var u = state.users.find(function (x) { return x.recoveryToken === token; });
+    var errorEl = document.getElementById('recoveryFormError');
+    if (!u || !u.activo || Date.now() > u.recoveryTokenExpiraEn) { mostrarEstadoRecuperacion(u, token); return; }
+    var nueva = document.getElementById('recoveryPassword').value;
+    var confirmar = document.getElementById('recoveryPasswordConfirm').value;
+    if (nueva.length < 6) { errorEl.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
+    if (nueva !== confirmar) { errorEl.textContent = 'La confirmación no coincide con la contraseña.'; return; }
+    errorEl.textContent = '';
+    u.password = nueva;
+    u.mustChangePassword = false;
+    u.isTemporaryPassword = false;
+    delete u.recoveryToken;
+    delete u.recoveryTokenExpiraEn;
+    delete state.loginAttempts[u.email.toLowerCase()];
+    persistUsers();
+    /* Ver nota "Supabase": mismo criterio que la activación -- la clave recién definida tiene que llegar a la
+       nube de inmediato, sin depender del autoguardado de 30s. */
+    scPushRows('app_users', [u]);
+    /* Cierra cualquier solicitud de recuperación que siguiera 'pendiente' para este correo -- cubre el caso
+       de una segunda solicitud duplicada que Admin todavía no había atendido: el usuario ya resolvió su
+       acceso por su cuenta, así que no debe quedar una fila pendiente eterna en el panel de Admin. */
+    state.securityEvents.forEach(function (ev) {
+      if (ev.tipo === 'recuperacion' && ev.estado === 'pendiente' && ev.email.toLowerCase() === u.email.toLowerCase()) {
+        resolverEventoRecuperacion(ev.id, 'El propio usuario completó su restablecimiento de contraseña a través del enlace de recuperación.');
+      }
+    });
+    registrarEventoSeguridad('recuperacion_completada', u.email, 'El usuario restableció su propia contraseña a través del enlace de recuperación.');
+    document.getElementById('recoveryScreen').hidden = true;
+    startSession(u);
+  });
+  document.getElementById('btnRecoveryVolverLogin').addEventListener('click', volverAPantallaLoginDesdeRecuperacion);
+  document.getElementById('btnRecoveryExpiredVolverLogin').addEventListener('click', volverAPantallaLoginDesdeRecuperacion);
 
   document.getElementById('sidebarToggle').addEventListener('click', function () {
     document.getElementById('sidebar').classList.toggle('collapsed');
@@ -16752,6 +16992,7 @@ document.addEventListener('DOMContentLoaded', function () {
   wirePasswordToggle('establecerPasswordValor', 'establecerPasswordToggle');
   wireGenerarClaveAleatoria('btnGenerarClaveEstablecerPassword', 'establecerPasswordValor', 'establecerPasswordToggle');
   wirePasswordToggle('activationPassword', 'activationPasswordToggle');
+  wirePasswordToggle('recoveryPassword', 'recoveryPasswordToggle');
   /* Centro de Ayuda: a diferencia de los demás segmentados (#alertasTabSegment, #solicitudesTabSegment),
      los botones de pestaña de Ayuda son dinámicos por rol/módulos activos (ver ayudaTabsVisibles) — no
      existen todavía en el DOM al momento de este bindEvents inicial, así que se delega el click sobre el
@@ -17232,6 +17473,15 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   document.getElementById('btnGuardarSeguridadAuth').addEventListener('click', guardarSeguridadAuth);
   document.getElementById('btnCancelarSeguridadAuth').addEventListener('click', cancelarSeguridadAuth);
+
+  document.querySelectorAll('#seguridadRecuperacionSegment button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('#seguridadRecuperacionSegment button').forEach(function (x) { x.classList.remove('active'); });
+      b.classList.add('active');
+      state.seguridadRecuperacionFiltro = b.dataset.filtro;
+      renderSeguridad();
+    });
+  });
 
   document.querySelectorAll('#progDaySegment button').forEach(function (b) {
     b.addEventListener('click', function () {
@@ -17859,6 +18109,8 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'establecer-password-bodega') abrirModalEstablecerPasswordBodega(id);
     else if (act === 'copiar-enlace-activacion') copiarEnlaceActivacion(id);
     else if (act === 'asignar-clave-temporal-pendiente') asignarClaveTemporalPendiente(id);
+    else if (act === 'copiar-enlace-recuperacion') copiarEnlaceRecuperacion(id);
+    else if (act === 'asignar-clave-temporal-recuperacion') asignarClaveTemporalRecuperacion(id);
     else if (act === 'seleccionar-perfil') confirmarSeleccionPerfil(btn.dataset.role);
     else if (act === 'usuario-editar') openUsuarioEditModal(id);
     else if (act === 'alerta-resolver-modal') openResolverAlertaModal(id, btn.dataset.code);
@@ -18024,4 +18276,13 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   document.addEventListener('scroll', closeAllFloatingMenusOnScroll, true);
   window.addEventListener('resize', closeAllFloatingMenusOnScroll);
+
+  /* Ver requerimiento "Sincronización Automática y Transparente de Usuarios", punto 3 ("en tiempo real o al
+     enfocar"): sin Supabase Realtime (websockets) -- ya descartado antes a favor de "Cargar al iniciar sesión
+     + guardar en puntos clave" -- el equivalente barato es re-sincronizar cada vez que esta pestaña vuelve a
+     tener foco o redescubre visibilidad (volver de otra pestaña/app, despertar el equipo, etc.), que es
+     justo cuando un cambio hecho en otro lado (otro navegador, o directo en Supabase) es más probable que ya
+     exista y nadie lo haya visto todavía. scPullAll() ya es un no-op seguro sin sesión activa/sin red. */
+  window.addEventListener('focus', function () { if (state.user) scPullAll(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && state.user) scPullAll(); });
 });
