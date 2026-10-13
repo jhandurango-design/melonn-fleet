@@ -16082,6 +16082,17 @@ document.addEventListener('DOMContentLoaded', function () {
   /* Ver requerimiento "Remover Mock reCAPTCHA y Reasignar Herramienta al Logo de Melonn": en producción,
      Google inyecta y gestiona su propio script/iframe de reCAPTCHA v3 automáticamente (verificación
      invisible en segundo plano) -- no requiere ningún paso de gating manual desde este código. */
+  /* Ver requerimiento "Verificación de creación de Nuevo Usuario": un usuario creado desde Gestión de
+     Usuarios existe de inmediato en Supabase (scPushRows, ver #formUsuario), pero un navegador/dispositivo
+     que JAMÁS vio esta app antes arranca con state.users = solo el roster local (seed) + lo que scPullAll()
+     ya haya alcanzado a traer al momento de este clic -- si el usuario escribe sus credenciales más rápido
+     de lo que tarda ese primer pull (mismo problema de fondo que ya resolvimos para el enlace de activación,
+     ver nota "Supabase" junto a resolverRecuperacionDesdeUrl), el correo todavía no existe en memoria y el
+     login lo rechaza como "incorrecto" aunque la contraseña sea exactamente la correcta. En vez de confiar
+     ciegamente en que el pull de DOMContentLoaded ya terminó, se intenta UN refresco adicional (silencioso,
+     sin contar como intento fallido) antes de declarar la credencial inválida, pero SOLO si el correo es
+     desconocido -- un correo ya conocido localmente con clave incorrecta sigue siendo un error real e
+     inmediato, sin esperar ninguna red. */
   function intentarCredenciales() {
     var emailField = document.getElementById('loginEmail');
     var passwordField = document.getElementById('loginPassword');
@@ -16090,6 +16101,19 @@ document.addEventListener('DOMContentLoaded', function () {
     var password = passwordField.value;
     var lock = loginLockStatus(email);
     if (lock) { mostrarBloqueoLogin(email, lock.lockedUntil); return; }
+    var emailConocido = state.users.some(function (u) { return u.email.toLowerCase() === email; });
+    if (!emailConocido) {
+      document.getElementById('loginSubmitBtn').disabled = true;
+      document.getElementById('loginError').textContent = '';
+      scPullAll().then(function () {
+        document.getElementById('loginSubmitBtn').disabled = false;
+        resolverCredenciales(email, password);
+      });
+      return;
+    }
+    resolverCredenciales(email, password);
+  }
+  function resolverCredenciales(email, password) {
     var user = state.users.find(function (u) { return u.email.toLowerCase() === email && u.password === password; });
     if (!user) {
       var rec = registrarIntentoFallido(email);
@@ -17117,7 +17141,11 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!canDo('users.manage')) return;
     var editId = document.getElementById('usuarioEditId').value;
     var nombre = document.getElementById('usuarioNombre').value.trim();
-    var email = document.getElementById('usuarioEmail').value.trim();
+    /* Ver requerimiento "Verificación de creación de Nuevo Usuario": el correo se normaliza a minúsculas una
+       sola vez, aquí mismo, para que quede así en state.users/Supabase desde el origen -- antes solo se
+       comparaba en minúsculas (duplicados, login) pero se guardaba tal cual lo tipeara Admin, abriendo la
+       puerta a inconsistencias de mayúsculas/minúsculas entre pantallas. */
+    var email = document.getElementById('usuarioEmail').value.trim().toLowerCase();
     var roles = usuarioRolesSeleccionados();
     if (!nombre || !email) return;
     if (!roles.length) { document.getElementById('usuarioRolesError').hidden = false; return; }
