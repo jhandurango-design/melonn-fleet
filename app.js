@@ -11865,6 +11865,9 @@ function usuarioRowHtml(u) {
       var enlaceVencido = !u.activationTokenExpiraEn || Date.now() > u.activationTokenExpiraEn;
       var enlaceBtnLabel = enlaceVencido ? 'Generar Nuevo Enlace' : 'Copiar Enlace de Activación';
       acciones += '<button data-act="copiar-enlace-activacion" data-id="' + u.id + '" class="raised">' + enlaceBtnLabel + '</button>';
+      /* Ver requerimiento "Opción de Rescate (Clave Temporal)" -- ver asignarClaveTemporalPendiente: salida
+         de emergencia cuando el enlace de activación no funcionó por el motivo que sea. */
+      acciones += '<button data-act="asignar-clave-temporal-pendiente" data-id="' + u.id + '">Asignar Clave Temporal</button>';
     }
     /* Ver requerimiento "Prompt Consolidador Maestro...", Bloque 1: "Establecer Contraseña" sigue siendo una
        acción de RESET exclusiva de BODEGA sobre una cuenta ya existente (ver establecerPasswordBodegaDirecta)
@@ -13362,6 +13365,45 @@ function restablecerClaveTemporal(userId) {
   document.getElementById('resetPasswordConfirmStep').hidden = true;
   document.getElementById('resetPasswordDoneStep').hidden = false;
   document.getElementById('resetPasswordDoneNote').textContent = '✅ Se ha enviado un correo a ' + u.email + ' con las instrucciones de restablecimiento. Por motivos de seguridad, la clave no es visible en pantalla.';
+  syncAndRender(true);
+}
+/* Ver requerimiento "Opción de Rescate (Clave Temporal)": vía de emergencia para una invitación
+   PENDING_ACTIVATION cuyo enlace no llegó a funcionar por el motivo que sea (correo simulado nunca entregado
+   de verdad, token vencido, problema de red del propio usuario, etc.) -- Admin asigna una clave temporal
+   DIRECTAMENTE, saltándose por completo el flujo de activationToken/?activate=. A diferencia de
+   restablecerClaveTemporal() (cuenta YA ACTIVA, clave nunca visible -- "se envió un correo"), aquí SÍ se
+   copia al portapapeles: no hay otro canal con el que compartirla, ya que justamente este botón existe
+   porque el canal normal (el enlace) falló. mustChangePassword/isTemporaryPassword fuerzan igual el Modal de
+   Cambio Obligatorio en su primer ingreso real. */
+function asignarClaveTemporalPendiente(userId) {
+  if (!canDo('users.manage')) return;
+  var u = state.users.find(function (x) { return x.id === userId; });
+  if (!u || u.status !== 'PENDING_ACTIVATION') return;
+  var temp = generarClaveTemporal();
+  u.password = temp;
+  u.status = 'ACTIVE';
+  u.mustChangePassword = true;
+  u.isTemporaryPassword = true;
+  delete u.activationToken;
+  delete u.activationTokenExpiraEn;
+  delete state.loginAttempts[u.email.toLowerCase()];
+  persistUsers();
+  /* Ver nota "Supabase": de inmediato, igual que cualquier otro cambio de credenciales -- otro dispositivo
+     podría intentar iniciar sesión con esta clave en cualquier momento. */
+  scPushRows('app_users', [u]);
+  registrarEventoSeguridad('reset_directo', u.email, 'Se asignó una clave temporal directa (opción de rescate -- el enlace de activación no estaba disponible) a ' + u.nombre + ', solicitado por ' + state.user.nombre + '. Deberá definir su propia clave en su próximo inicio de sesión.');
+  function marcarCopiada() { toast('ok', 'Clave temporal copiada', 'Compártela con ' + u.nombre + ' por un canal seguro -- deberá cambiarla en su próximo ingreso.'); }
+  function copiarFallback() {
+    var ta = document.createElement('textarea');
+    ta.value = temp; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    if (ok) marcarCopiada(); else toast('warn', 'No se pudo copiar', 'Clave temporal: ' + temp);
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(temp).then(marcarCopiada, copiarFallback);
+  else copiarFallback();
   syncAndRender(true);
 }
 /* Ver requerimiento "Estandarización de Onboarding y Autenticación: Invitación con Activación y Asignación
@@ -17816,6 +17858,7 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'restablecer-clave') abrirModalRestablecerClave(id);
     else if (act === 'establecer-password-bodega') abrirModalEstablecerPasswordBodega(id);
     else if (act === 'copiar-enlace-activacion') copiarEnlaceActivacion(id);
+    else if (act === 'asignar-clave-temporal-pendiente') asignarClaveTemporalPendiente(id);
     else if (act === 'seleccionar-perfil') confirmarSeleccionPerfil(btn.dataset.role);
     else if (act === 'usuario-editar') openUsuarioEditModal(id);
     else if (act === 'alerta-resolver-modal') openResolverAlertaModal(id, btn.dataset.code);
