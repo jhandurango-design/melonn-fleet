@@ -15,20 +15,31 @@
 -- ahora alcanzable por internet. Si más adelante se quiere cerrar esto de verdad, el paso natural es migrar
 -- a Supabase Auth real (requiere la Service Role Key, no solo el Anon Key) y condicionar las políticas a
 -- auth.uid().
+--
+-- Ver "Diagnóstico en vivo, 2026-10-13" (segundo hallazgo): si estas 3 tablas ya existían de antes bajo
+-- estos mismos nombres (p.ej. creadas con el editor visual de Supabase, con columnas id/created_at por
+-- defecto), "CREATE TABLE IF NOT EXISTS" las deja TAL CUAL -- nunca les agrega la columna `data` que este
+-- script espera, y cada select/upsert de app.js falla con "column ... data does not exist" (42703).
+-- Confirmado en producción: las 3 estaban así, y las 3 estaban vacías (0 filas) -- por eso se botan y
+-- recrean aquí sin riesgo de perder nada. Si en el futuro SÍ llegan a tener filas reales, cambiar estos
+-- DROP por una migración (ALTER TABLE ... ADD COLUMN) en vez de volver a correr este bloque tal cual.
+drop table if exists public.app_users cascade;
+drop table if exists public.app_mensajeros cascade;
+drop table if exists public.app_turnos cascade;
 
-create table if not exists public.app_users (
+create table public.app_users (
   id text primary key,
   data jsonb not null,
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.app_mensajeros (
+create table public.app_mensajeros (
   id text primary key,
   data jsonb not null,
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.app_turnos (
+create table public.app_turnos (
   id text primary key,
   data jsonb not null,
   updated_at timestamptz not null default now()
