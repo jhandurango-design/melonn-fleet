@@ -16189,15 +16189,20 @@ document.addEventListener('DOMContentLoaded', function () {
     user.mustChangePassword = false;
     user.isTemporaryPassword = false;
     persistUsers();
-    /* Ver nota "Supabase": este guardado SOLO escribía en localStorage de este navegador -- un login desde
-       otro dispositivo/navegador seguía trayendo la clave temporal vieja y mustChangePassword:true desde la
-       nube, así que el Cambio Obligatorio nunca quedaba resuelto de verdad (bug real reportado en
-       producción). Push inmediato, igual que cualquier otro cambio de credenciales: no puede esperar al
-       autoguardado periódico de 30s ni al logout. */
-    scPushRows('app_users', [user]);
     pendingFirstLoginUser = null;
     closeModal();
-    startSession(user);
+    /* Ver nota "Supabase": push inmediato, igual que cualquier otro cambio de credenciales -- no puede
+       esperar al autoguardado periódico de 30s ni al logout. CRÍTICO: startSession() tiene que esperar a que
+       este push TERMINE antes de ejecutarse -- completarInicioSesion() dispara scPullAll() como primer paso,
+       y si esa consulta (pull) le gana la carrera a este guardado (push) todavía en vuelo, el pull trae de
+       vuelta la fila VIEJA (clave temporal, mustChangePassword:true) y la usa para reemplazar state.users,
+       deshaciendo en memoria el cambio que el usuario acaba de hacer (bug real reportado en producción:
+       "la clave vuelve a ser la inicial al refrescar"). Encadenado en vez de disparado en paralelo, elimina
+       la carrera -- scPushRows() nunca rechaza (ver su propio catch), así que esto jamás se queda colgado
+       aunque Supabase no responda. */
+    scPushRows('app_users', [user]).then(function () {
+      startSession(user);
+    });
   });
 
   document.getElementById('btnOlvidePassword').addEventListener('click', function () {
@@ -16234,9 +16239,6 @@ document.addEventListener('DOMContentLoaded', function () {
     delete u.recoveryTokenExpiraEn;
     delete state.loginAttempts[u.email.toLowerCase()];
     persistUsers();
-    /* Ver nota "Supabase": mismo criterio que la activación -- la clave recién definida tiene que llegar a la
-       nube de inmediato, sin depender del autoguardado de 30s. */
-    scPushRows('app_users', [u]);
     /* Cierra cualquier solicitud de recuperación que siguiera 'pendiente' para este correo -- cubre el caso
        de una segunda solicitud duplicada que Admin todavía no había atendido: el usuario ya resolvió su
        acceso por su cuenta, así que no debe quedar una fila pendiente eterna en el panel de Admin. */
@@ -16247,7 +16249,12 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     registrarEventoSeguridad('recuperacion_completada', u.email, 'El usuario restableció su propia contraseña a través del enlace de recuperación.');
     document.getElementById('recoveryScreen').hidden = true;
-    startSession(u);
+    /* Ver nota "Supabase" junto al submit de #formCambioObligatorio: mismo motivo exacto -- startSession()
+       dispara un scPullAll() que puede ganarle la carrera a este push si se disparan en paralelo, trayendo
+       de vuelta la clave vieja. Encadenado para eliminar la carrera. */
+    scPushRows('app_users', [u]).then(function () {
+      startSession(u);
+    });
   });
   document.getElementById('btnRecoveryVolverLogin').addEventListener('click', volverAPantallaLoginDesdeRecuperacion);
   document.getElementById('btnRecoveryExpiredVolverLogin').addEventListener('click', volverAPantallaLoginDesdeRecuperacion);
