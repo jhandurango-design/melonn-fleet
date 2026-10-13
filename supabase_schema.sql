@@ -34,18 +34,39 @@ create table if not exists public.app_turnos (
   updated_at timestamptz not null default now()
 );
 
+-- Ver "Diagnóstico en vivo, 2026-10-13": las políticas RLS de abajo NO bastan por sí solas -- en Postgres,
+-- el GRANT de tabla y las políticas RLS son 2 capas distintas. RLS decide QUÉ FILAS puede ver/tocar un rol
+-- que YA tiene permiso sobre la tabla; sin el GRANT, Postgres rechaza la consulta ANTES de llegar a evaluar
+-- ninguna política, con "permission denied for table ..." (código 42501) -- exactamente el error real
+-- confirmado en producción contra este proyecto. Faltaba esto desde la versión original de este script.
+grant usage on schema public to anon;
+grant select, insert, update on public.app_users to anon;
+grant select, insert, update on public.app_mensajeros to anon;
+grant select, insert, update on public.app_turnos to anon;
+
 alter table public.app_users enable row level security;
 alter table public.app_mensajeros enable row level security;
 alter table public.app_turnos enable row level security;
 
+-- drop+create (no "if not exists" para policies en Postgres) -- hace el script seguro de volver a correr
+-- completo en el futuro sin fallar por "policy already exists".
+drop policy if exists "anon_select_app_users" on public.app_users;
+drop policy if exists "anon_insert_app_users" on public.app_users;
+drop policy if exists "anon_update_app_users" on public.app_users;
 create policy "anon_select_app_users" on public.app_users for select to anon using (true);
 create policy "anon_insert_app_users" on public.app_users for insert to anon with check (true);
 create policy "anon_update_app_users" on public.app_users for update to anon using (true) with check (true);
 
+drop policy if exists "anon_select_app_mensajeros" on public.app_mensajeros;
+drop policy if exists "anon_insert_app_mensajeros" on public.app_mensajeros;
+drop policy if exists "anon_update_app_mensajeros" on public.app_mensajeros;
 create policy "anon_select_app_mensajeros" on public.app_mensajeros for select to anon using (true);
 create policy "anon_insert_app_mensajeros" on public.app_mensajeros for insert to anon with check (true);
 create policy "anon_update_app_mensajeros" on public.app_mensajeros for update to anon using (true) with check (true);
 
+drop policy if exists "anon_select_app_turnos" on public.app_turnos;
+drop policy if exists "anon_insert_app_turnos" on public.app_turnos;
+drop policy if exists "anon_update_app_turnos" on public.app_turnos;
 create policy "anon_select_app_turnos" on public.app_turnos for select to anon using (true);
 create policy "anon_insert_app_turnos" on public.app_turnos for insert to anon with check (true);
 create policy "anon_update_app_turnos" on public.app_turnos for update to anon using (true) with check (true);
