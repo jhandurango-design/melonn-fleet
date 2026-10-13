@@ -11844,14 +11844,10 @@ function nextUserId() {
    toggleUsuarioActivo(). */
 function usuarioRowHtml(u) {
   var asign = u.sede || u.aliado || '—';
-  /* Ver requerimiento "Estandarización de Onboarding y Autenticación...": PENDING_ACTIVATION es un estado
-     propio, distinto de Activo/Inactivo (u.activo sigue siendo el control administrativo de "puede iniciar
-     sesión", independiente del ciclo de vida de su propia activación) -- se muestra con su propio badge para
-     que Admin distinga de un vistazo quién todavía no ha definido su contraseña. */
-  var pendienteActivacion = u.status === 'PENDING_ACTIVATION';
-  var estadoBadge = pendienteActivacion
-    ? '<span class="badge badge-warn"><i></i>Pendiente de Activación</span>'
-    : (u.activo ? '<span class="badge badge-dispatched"><i></i>Activo</span>' : '<span class="badge badge-disabled"><i></i>Inactivo</span>');
+  /* Ver requerimiento "Eliminación del Sistema de Activación por Enlace/Token": ya no existe el estado
+     PENDING_ACTIVATION -- todo usuario nuevo nace ACTIVO de inmediato (ver creación en #formUsuario), así
+     que el badge vuelve a ser solo Activo/Inactivo según u.activo. */
+  var estadoBadge = u.activo ? '<span class="badge badge-dispatched"><i></i>Activo</span>' : '<span class="badge badge-disabled"><i></i>Inactivo</span>';
   var pendiente = state.usuarioTogglePendienteId === u.id;
   var acciones;
   if (pendiente) {
@@ -11866,22 +11862,6 @@ function usuarioRowHtml(u) {
          modal que abre ("Permisos y módulos activos", ver openPermisosModal) NO cambió de nombre ni de
          función: sigue ajustando únicamente qué ítems del sidebar ve este usuario en particular. */
       '<button data-act="permisos-usuario" data-id="' + u.id + '">Módulos</button>';
-    /* "Copiar Enlace de Activación" / "Generar Nuevo Enlace" (ver copiarEnlaceActivacion): exclusivo de
-       cuentas aún PENDING_ACTIVATION -- para soporte directo en rampa, sin depender de que el correo
-       (simulado) le llegue. Una vez activada, esta acción desaparece y la fila vuelve al menú estándar.
-       Ver requerimiento "Claridad Visual de Vigencia del Enlace de Activación": el ROTULO cambia solo (la
-       función copiarEnlaceActivacion ya regeneraba el token solo si estaba vencido desde antes, sin cambios
-       de lógica aquí) -- con el token vigente (<7 días) invita a "Copiar"; ya vencido, dejar el mismo verbo
-       sería engañoso (copiaría un enlace muerto si no fuera porque ya regenera solo), así que el botón avisa
-       de entrada que lo que va a hacer es renovarlo. */
-    if (pendienteActivacion) {
-      var enlaceVencido = !u.activationTokenExpiraEn || Date.now() > u.activationTokenExpiraEn;
-      var enlaceBtnLabel = enlaceVencido ? 'Generar Nuevo Enlace' : 'Copiar Enlace de Activación';
-      acciones += '<button data-act="copiar-enlace-activacion" data-id="' + u.id + '" class="raised">' + enlaceBtnLabel + '</button>';
-      /* Ver requerimiento "Opción de Rescate (Clave Temporal)" -- ver asignarClaveTemporalPendiente: salida
-         de emergencia cuando el enlace de activación no funcionó por el motivo que sea. */
-      acciones += '<button data-act="asignar-clave-temporal-pendiente" data-id="' + u.id + '">Asignar Clave Temporal</button>';
-    }
     /* Ver requerimiento "Prompt Consolidador Maestro...", Bloque 1: "Establecer Contraseña" sigue siendo una
        acción de RESET exclusiva de BODEGA sobre una cuenta ya existente (ver establecerPasswordBodegaDirecta)
        -- independiente de cómo se activó originalmente, sin cambios por este requerimiento. */
@@ -11902,15 +11882,8 @@ function renderUsuarios() {
   var list = state.users.filter(function (u) {
     if (q && u.nombre.toLowerCase().indexOf(q) === -1 && u.email.toLowerCase().indexOf(q) === -1) return false;
     if (qRol && u.roles.indexOf(qRol) === -1) return false;
-    /* Ver requerimiento "Filtro de Estado en la pestaña Usuarios": "Pendiente de Activación" es un estado
-       propio (u.status, ver usuarioRowHtml) que antes no tenía forma de aislarse en este filtro -- quedaba
-       mezclado dentro de "Activo" porque u.activo (¿puede iniciar sesión?) y u.status (¿ya definió su propia
-       contraseña?) son independientes. "Activo"/"Inactivo" ahora excluyen explícitamente a los pendientes,
-       igual que ya distingue el badge de cada fila. */
-    var pendienteActivacion = u.status === 'PENDING_ACTIVATION';
-    if (qEstado === 'pendiente' && !pendienteActivacion) return false;
-    if (qEstado === 'activo' && (pendienteActivacion || !u.activo)) return false;
-    if (qEstado === 'inactivo' && (pendienteActivacion || u.activo)) return false;
+    if (qEstado === 'activo' && !u.activo) return false;
+    if (qEstado === 'inactivo' && u.activo) return false;
     return true;
   }).sort(function (a, b) { return a.nombre.localeCompare(b.nombre); });
   document.getElementById('usuariosTbody').innerHTML = list.map(usuarioRowHtml).join('');
@@ -13374,6 +13347,12 @@ function abrirModalRestablecerClave(userId) {
    No Repudio de Credenciales"): compartido entre restablecerClaveTemporal() y la creación de usuarios en
    #formUsuario -- el Admin nunca define ni ve esta clave en ninguno de los dos flujos. */
 function generarClaveTemporal() { return 'Melonn' + Math.floor(1000 + Math.random() * 9000); }
+/* Ver requerimiento "Eliminación del Sistema de Activación por Enlace/Token -- Creación Directa con Clave
+   Temporal": a diferencia de generarClaveTemporal() (aleatoria, usada en resets individuales), TODO usuario
+   nuevo (#formUsuario) nace con esta MISMA clave fija -- deliberado, para que Admin pueda comunicarla de
+   memoria sin depender de copiar/pegar nada por cuenta. mustChangePassword la neutraliza de inmediato: nadie
+   queda operando con ella más allá del primer inicio de sesión. */
+var CLAVE_TEMPORAL_USUARIO_NUEVO = 'Melonn2026*';
 /* REGLA ESTRICTA DE PRIVACIDAD: la clave temporal generada nunca se expone en pantalla (ni en el modal ni en
    ningún toast) -- solo queda almacenada en u.password, igual que antes, para que el usuario inicie sesión.
    El Admin únicamente recibe la confirmación de que el correo (simulado) fue enviado. mustChangePassword/
@@ -13394,162 +13373,12 @@ function restablecerClaveTemporal(userId) {
   document.getElementById('resetPasswordDoneNote').textContent = '✅ Se ha enviado un correo a ' + u.email + ' con las instrucciones de restablecimiento. Por motivos de seguridad, la clave no es visible en pantalla.';
   syncAndRender(true);
 }
-/* Ver requerimiento "Opción de Rescate (Clave Temporal)": vía de emergencia para una invitación
-   PENDING_ACTIVATION cuyo enlace no llegó a funcionar por el motivo que sea (correo simulado nunca entregado
-   de verdad, token vencido, problema de red del propio usuario, etc.) -- Admin asigna una clave temporal
-   DIRECTAMENTE, saltándose por completo el flujo de activationToken/?activate=. A diferencia de
-   restablecerClaveTemporal() (cuenta YA ACTIVA, clave nunca visible -- "se envió un correo"), aquí SÍ se
-   copia al portapapeles: no hay otro canal con el que compartirla, ya que justamente este botón existe
-   porque el canal normal (el enlace) falló. mustChangePassword/isTemporaryPassword fuerzan igual el Modal de
-   Cambio Obligatorio en su primer ingreso real. */
-function asignarClaveTemporalPendiente(userId) {
-  if (!canDo('users.manage')) return;
-  var u = state.users.find(function (x) { return x.id === userId; });
-  if (!u || u.status !== 'PENDING_ACTIVATION') return;
-  var temp = generarClaveTemporal();
-  u.password = temp;
-  u.status = 'ACTIVE';
-  u.mustChangePassword = true;
-  u.isTemporaryPassword = true;
-  delete u.activationToken;
-  delete u.activationTokenExpiraEn;
-  delete state.loginAttempts[u.email.toLowerCase()];
-  persistUsers();
-  /* Ver nota "Supabase": de inmediato, igual que cualquier otro cambio de credenciales -- otro dispositivo
-     podría intentar iniciar sesión con esta clave en cualquier momento. */
-  scPushRows('app_users', [u]);
-  registrarEventoSeguridad('reset_directo', u.email, 'Se asignó una clave temporal directa (opción de rescate -- el enlace de activación no estaba disponible) a ' + u.nombre + ', solicitado por ' + state.user.nombre + '. Deberá definir su propia clave en su próximo inicio de sesión.');
-  function marcarCopiada() { toast('ok', 'Clave temporal copiada', 'Compártela con ' + u.nombre + ' por un canal seguro -- deberá cambiarla en su próximo ingreso.'); }
-  function copiarFallback() {
-    var ta = document.createElement('textarea');
-    ta.value = temp; ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta); ta.select();
-    var ok = false;
-    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
-    document.body.removeChild(ta);
-    if (ok) marcarCopiada(); else toast('warn', 'No se pudo copiar', 'Clave temporal: ' + temp);
-  }
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(temp).then(marcarCopiada, copiarFallback);
-  else copiarFallback();
-  syncAndRender(true);
-}
-/* Ver requerimiento "Estandarización de Onboarding y Autenticación: Invitación con Activación y Asignación
-   de Clave (Todos los Roles)": protocolo único de Invitación y Activación para la CREACIÓN de cualquier
-   usuario (ver #formUsuario) -- distinto de restablecerClaveTemporal()/abrirModalEstablecerPasswordBodega
-   arriba, que siguen intactos como flujos de RESET sobre una cuenta YA EXISTENTE. Un usuario recién invitado
-   queda status:'PENDING_ACTIVATION' con un activationToken propio -- nunca con contraseña, ni temporal ni
-   definida por Admin -- hasta que él mismo la asigna en la pantalla de activación (ver
-   resolverActivacionDesdeUrl/#formActivarCuenta más abajo). */
+/* Ver requerimiento "Eliminación del Sistema de Activación por Enlace/Token -- Creación Directa con Clave
+   Temporal": generador de token genérico, compartido por lo que quede de ese estilo de flujo -- hoy solo lo
+   usa el módulo de Recuperación de Contraseña (ver copiarEnlaceRecuperacion), ya que el de activación de
+   cuenta nueva se retiró por completo (ver #formUsuario: todo usuario nuevo nace ACTIVO con clave temporal
+   fija, sin token ni enlace de por medio). */
 function generarActivationToken() { return Math.random().toString(36).slice(2) + Date.now().toString(36); }
-var ACTIVATION_TOKEN_VIGENCIA_MS = 7 * 24 * 60 * 60 * 1000; // 7 días
-function activationLinkFor(token) { return location.origin + location.pathname + '?activate=' + token; }
-/* Único punto que (re)emite el token de un usuario -- usado tanto al crearlo (#formUsuario) como por
-   "Copiar Enlace de Activación" (si el token vigente ya venció) y por "Reexpedir enlace" en la propia
-   pantalla de activación (token vencido, autoservicio). */
-function reexpedirActivationToken(userId) {
-  var u = state.users.find(function (x) { return x.id === userId; });
-  if (!u) return null;
-  u.activationToken = generarActivationToken();
-  u.activationTokenExpiraEn = Date.now() + ACTIVATION_TOKEN_VIGENCIA_MS;
-  persistUsers();
-  /* Ver nota "Supabase": este token solo sirve si llega a la nube ANTES de que el usuario lo abra desde
-     otro dispositivo -- no puede esperar al autoguardado periódico de 30s ni al logout. */
-  scPushRows('app_users', [u]);
-  return u;
-}
-/* Copia el enlace vigente -- solo genera uno NUEVO si no existía o si ya venció, para no invalidar en
-   silencio un enlace que el usuario ya pueda tener abierto en otra pestaña/dispositivo. */
-function copiarEnlaceActivacion(userId) {
-  if (!canDo('users.manage')) return;
-  var u = state.users.find(function (x) { return x.id === userId; });
-  if (!u || u.status !== 'PENDING_ACTIVATION') return;
-  if (!u.activationToken || Date.now() > u.activationTokenExpiraEn) {
-    u = reexpedirActivationToken(userId);
-    registrarEventoSeguridad('activacion_enlace', u.email, 'Se generó un nuevo enlace de activación para ' + u.email + ', solicitado por ' + state.user.nombre + '.');
-  }
-  var link = activationLinkFor(u.activationToken);
-  function marcarCopiado() { toast('ok', 'Enlace copiado', 'Comparte este enlace de activación con ' + u.nombre + ' — vence en 7 días.'); }
-  function copiarFallback() {
-    var ta = document.createElement('textarea');
-    ta.value = link; ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta); ta.select();
-    var ok = false;
-    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
-    document.body.removeChild(ta);
-    if (ok) marcarCopiado(); else toast('warn', 'No se pudo copiar', 'Copia manualmente: ' + link);
-  }
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(marcarCopiado, copiarFallback);
-  else copiarFallback();
-  renderUsuarios();
-}
-/* ---------------- Pantalla de Activación de Cuenta (ver #activationScreen) ----------------
-   4 estados mutuamente excluyentes: formulario (token válido y vigente) / inválido (ningún usuario tiene
-   ese token) / vencido (token encontrado pero ya pasó activationTokenExpiraEn, con "Reexpedir enlace" de
-   autoservicio) / ya activa (token encontrado pero ese usuario ya completó su activación antes -- enlace
-   reutilizado). */
-function activationEstadoIds() { return ['activationFormState', 'activationInvalidState', 'activationExpiredState', 'activationYaActivaState', 'activationLoadingState']; }
-function mostrarEstadoActivacion(u, token) {
-  activationEstadoIds().forEach(function (id) { document.getElementById(id).hidden = true; });
-  document.getElementById('activationToken').value = token || '';
-  /* u.activo === false: Admin inactivó la invitación antes de que se usara -- el enlace no debe seguir
-     siendo una puerta de entrada válida, se trata igual que un token inexistente. */
-  if (!u || !u.activo) { document.getElementById('activationInvalidState').hidden = false; return; }
-  if (u.status === 'ACTIVE') { document.getElementById('activationYaActivaState').hidden = false; return; }
-  if (Date.now() > u.activationTokenExpiraEn) { document.getElementById('activationExpiredState').hidden = false; return; }
-  document.getElementById('formActivarCuenta').reset();
-  document.getElementById('activationToken').value = token || u.activationToken;
-  document.getElementById('activationFormError').textContent = '';
-  document.getElementById('activationFormNote').textContent = 'Hola ' + u.nombre + ', asigna tu contraseña para activar tu cuenta.';
-  document.getElementById('activationFormState').hidden = false;
-}
-/* Se llama al arrancar la app (ver DOMContentLoaded), ANTES del restauro de sesión guardada -- un enlace de
-   activación en la URL siempre tiene prioridad sobre cualquier sesión previa del mismo navegador. Limpia el
-   query param de la URL en cuanto el token queda capturado en el campo oculto del formulario: el resto de
-   esta pantalla ya no depende de la URL, así que no hace falta conservarlo visible ahí.
-   Ver nota "Supabase": un enlace de activación casi siempre se abre en un navegador/dispositivo que JAMÁS
-   vio a este usuario -- fue invitado desde la sesión de Admin en OTRA máquina. state.users en este primer
-   render es solo el roster local (seed), que nunca va a contener a alguien recién invitado; declarar
-   "inválido" contra esa foto desactualizada era el bug real (ver requerimiento "Corrección de Enlaces de
-   Activación"). Si el token no aparece en memoria, se intenta un refresco desde Supabase UNA vez antes de
-   rendirse -- scPullAll ya cae de vuelta a "nada cambia" si Supabase no responde. */
-/* Ver requerimiento "Carga del formulario de activación -- captura robusta del token": algunos clientes de
-   correo/mensajería reescriben enlaces compartidos (acortadores, previsualizadores) y pueden convertir el
-   "?" en "#", o el nombre del parámetro puede llegar mal copiado como "token" en vez de "activate" si
-   alguien lo retransribe a mano. En vez de exigir el formato exacto "?activate=TOKEN" y mostrar "Enlace no
-   válido" por una diferencia de formato que el usuario no puede corregir por su cuenta, se acepta cualquiera
-   de estas variantes, en orden: ?activate=, ?token=, #activate=, #token=, o un "#TOKEN" a secas. */
-function extraerTokenActivacionDeUrl() {
-  var qs = new URLSearchParams(location.search);
-  var token = qs.get('activate') || qs.get('token');
-  if (token) return token;
-  var hash = location.hash.replace(/^#/, '');
-  if (!hash) return null;
-  if (hash.indexOf('=') !== -1) {
-    var hashParams = new URLSearchParams(hash);
-    return hashParams.get('activate') || hashParams.get('token') || null;
-  }
-  return hash;
-}
-function resolverActivacionDesdeUrl() {
-  var token = extraerTokenActivacionDeUrl();
-  if (!token) return false;
-  document.getElementById('loginScreen').style.display = 'none';
-  document.getElementById('activationScreen').hidden = false;
-  history.replaceState(null, '', location.pathname);
-  var u = state.users.find(function (x) { return x.activationToken === token; });
-  if (u) { mostrarEstadoActivacion(u, token); return true; }
-  activationEstadoIds().forEach(function (id) { document.getElementById(id).hidden = true; });
-  document.getElementById('activationLoadingState').hidden = false;
-  scPullAll().then(function () {
-    var u2 = state.users.find(function (x) { return x.activationToken === token; });
-    mostrarEstadoActivacion(u2, token);
-  });
-  return true;
-}
-function volverAPantallaLogin() {
-  document.getElementById('activationScreen').hidden = true;
-  document.getElementById('loginScreen').style.display = '';
-}
 /* ---------------- Solicitudes de Recuperación de Contraseña (ver #recoveryScreen) ----------------
    Ver requerimiento "Módulo de Gestión en Seguridad y Accesos": cada evento tipo 'recuperacion' (creado al
    enviar "Olvidé mi contraseña" en el login, ver #formRecuperarPassword) nace con estado 'pendiente' (ver
@@ -13599,10 +13428,9 @@ function copiarEnlaceRecuperacion(eventId) {
   resolverEventoRecuperacion(eventId, 'Se generó y copió un enlace de recuperación (vigente 24h) para ' + u.email + ', solicitado por ' + state.user.nombre + '.');
   renderSeguridad();
 }
-/* "Asignar Clave Temporal": salida directa sin depender de que el usuario abra ningún enlace -- mismo patrón
-   que asignarClaveTemporalPendiente() (rescate de activación), pero sobre una cuenta YA ACTIVA: no toca
-   u.status ni activationToken, solo fuerza el cambio de clave en el siguiente inicio de sesión. Invalida
-   cualquier recoveryToken vigente para que no quede un enlace vivo apuntando a una clave que ya no aplica. */
+/* "Asignar Clave Temporal": salida directa sin depender de que el usuario abra ningún enlace -- fuerza el
+   cambio de clave en el siguiente inicio de sesión. Invalida cualquier recoveryToken vigente para que no
+   quede un enlace vivo apuntando a una clave que ya no aplica. */
 function asignarClaveTemporalRecuperacion(eventId) {
   if (!canDo('users.manage')) return;
   var ev = state.securityEvents.find(function (x) { return x.id === eventId; });
@@ -13649,10 +13477,9 @@ function mostrarEstadoRecuperacion(u, token) {
   document.getElementById('recoveryFormNote').textContent = 'Hola ' + u.nombre + ', define tu nueva contraseña para recuperar el acceso a tu cuenta.';
   document.getElementById('recoveryFormState').hidden = false;
 }
-/* Se llama al arrancar la app (ver DOMContentLoaded), igual que resolverActivacionDesdeUrl -- mismo
-   fallback de un pull a Supabase si el token no aparece todavía en el roster local (ver nota "Supabase" junto
-   a resolverActivacionDesdeUrl -- un enlace de recuperación también suele abrirse en un dispositivo que nunca
-   vio a este usuario). */
+/* Se llama al arrancar la app (ver DOMContentLoaded): mismo fallback de un pull a Supabase si el token no
+   aparece todavía en el roster local -- un enlace de recuperación suele abrirse en un dispositivo que nunca
+   vio a este usuario. */
 function resolverRecuperacionDesdeUrl() {
   var token = new URLSearchParams(location.search).get('recover');
   if (!token) return false;
@@ -13697,13 +13524,6 @@ function establecerPasswordBodegaDirecta(userId, nuevaPassword) {
   u.password = nuevaPassword;
   u.mustChangePassword = false;
   u.isTemporaryPassword = false;
-  /* Ver requerimiento "Estandarización de Onboarding y Autenticación...": si esta cuenta todavía estaba
-     PENDING_ACTIVATION (Admin la está activando por esta vía en vez de por el enlace), queda ACTIVA de
-     inmediato -- sin esto, intentarCredenciales() seguiría bloqueando el login con el aviso de "pendiente
-     de activación" a pesar de ya tener una contraseña real asignada. */
-  u.status = 'ACTIVE';
-  delete u.activationToken;
-  delete u.activationTokenExpiraEn;
   delete state.loginAttempts[u.email.toLowerCase()];
   persistUsers();
   registrarEventoSeguridad('reset_directo', u.email, 'Contraseña establecida directamente (acceso inmediato, sin correo de confirmación) por ' + state.user.nombre + ' para la cuenta operativa de Bodega ' + u.nombre + '.');
@@ -16232,7 +16052,7 @@ document.addEventListener('DOMContentLoaded', function () {
   syncCatalogosDesdeConfig();
   wireSidebarDelegation();
 
-  if (!resolverActivacionDesdeUrl() && !resolverRecuperacionDesdeUrl()) {
+  if (!resolverRecuperacionDesdeUrl()) {
     var savedId = localStorage.getItem('melonn_session');
     if (savedId) {
       var u = state.users.find(function (x) { return x.id === savedId; });
@@ -16270,15 +16090,6 @@ document.addEventListener('DOMContentLoaded', function () {
     var password = passwordField.value;
     var lock = loginLockStatus(email);
     if (lock) { mostrarBloqueoLogin(email, lock.lockedUntil); return; }
-    /* Ver requerimiento "Estandarización de Onboarding y Autenticación...": una cuenta PENDING_ACTIVATION no
-       tiene ninguna contraseña que comparar -- se detecta ANTES del match normal para dar una guía específica
-       en vez de caer en el mensaje genérico de "credenciales incorrectas" (y sin contar como intento fallido,
-       no es un problema de credenciales). */
-    var userPendiente = state.users.find(function (u) { return u.email.toLowerCase() === email && u.status === 'PENDING_ACTIVATION'; });
-    if (userPendiente) {
-      document.getElementById('loginError').textContent = 'Esta cuenta está pendiente de activación. Usa el enlace de activación que te compartió tu administrador.';
-      return;
-    }
     var user = state.users.find(function (u) { return u.email.toLowerCase() === email && u.password === password; });
     if (!user) {
       var rec = registrarIntentoFallido(email);
@@ -16348,42 +16159,6 @@ document.addEventListener('DOMContentLoaded', function () {
     toast('ok', 'Solicitud registrada', 'Por favor contacta directamente al Administrador de la plataforma de Melonn para restablecer tu clave.');
     closeModal();
   });
-
-  document.getElementById('formActivarCuenta').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var token = document.getElementById('activationToken').value;
-    var u = state.users.find(function (x) { return x.activationToken === token; });
-    var errorEl = document.getElementById('activationFormError');
-    if (!u || !u.activo || u.status !== 'PENDING_ACTIVATION' || Date.now() > u.activationTokenExpiraEn) { mostrarEstadoActivacion(u, token); return; }
-    var nueva = document.getElementById('activationPassword').value;
-    var confirmar = document.getElementById('activationPasswordConfirm').value;
-    if (nueva.length < 6) { errorEl.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
-    if (nueva !== confirmar) { errorEl.textContent = 'La confirmación no coincide con la contraseña.'; return; }
-    errorEl.textContent = '';
-    u.password = nueva;
-    u.status = 'ACTIVE';
-    u.activo = true;
-    delete u.activationToken;
-    delete u.activationTokenExpiraEn;
-    persistUsers();
-    /* Ver nota "Supabase": la contraseña recién definida tiene que llegar a la nube de inmediato -- un
-       login desde otro dispositivo justo después no puede depender del autoguardado de 30s. */
-    scPushRows('app_users', [u]);
-    registrarEventoSeguridad('activacion', u.email, 'Cuenta activada por el propio usuario a través de su enlace de activación -- definió su contraseña por primera vez.');
-    document.getElementById('activationScreen').hidden = true;
-    startSession(u);
-  });
-  document.getElementById('btnActivationReexpedir').addEventListener('click', function () {
-    var token = document.getElementById('activationToken').value;
-    var u = state.users.find(function (x) { return x.activationToken === token; });
-    if (!u) return;
-    var actualizado = reexpedirActivationToken(u.id);
-    registrarEventoSeguridad('activacion_enlace', actualizado.email, 'El propio usuario reexpidió su enlace de activación vencido desde la pantalla de activación.');
-    toast('ok', 'Enlace renovado', 'Tu enlace de activación se renovó -- ya puedes definir tu contraseña.');
-    mostrarEstadoActivacion(actualizado, actualizado.activationToken);
-  });
-  document.getElementById('btnActivationVolverLogin').addEventListener('click', volverAPantallaLogin);
-  document.getElementById('btnActivationYaActivaLogin').addEventListener('click', volverAPantallaLogin);
 
   /* Ver requerimiento "Módulo de Gestión en Seguridad y Accesos": completa el 3er camino de resolución
      (auto-resolución por el propio usuario) -- los otros 2 (Copiar Enlace / Asignar Clave Temporal) ya
@@ -16991,7 +16766,6 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   wirePasswordToggle('establecerPasswordValor', 'establecerPasswordToggle');
   wireGenerarClaveAleatoria('btnGenerarClaveEstablecerPassword', 'establecerPasswordValor', 'establecerPasswordToggle');
-  wirePasswordToggle('activationPassword', 'activationPasswordToggle');
   wirePasswordToggle('recoveryPassword', 'recoveryPasswordToggle');
   /* Centro de Ayuda: a diferencia de los demás segmentados (#alertasTabSegment, #solicitudesTabSegment),
      los botones de pestaña de Ayuda son dinámicos por rol/módulos activos (ver ayudaTabsVisibles) — no
@@ -17364,25 +17138,26 @@ document.addEventListener('DOMContentLoaded', function () {
       registrarEventoSeguridad('edicion', email, 'Se editó la cuenta de ' + nombre + ' (' + roles.join(' + ') + ') -- actualizado por ' + state.user.nombre + '.');
       toast('ok', 'Usuario actualizado', nombre + ' se actualizó correctamente.');
     } else {
-      /* Ver requerimiento "Estandarización de Onboarding y Autenticación: Invitación con Activación y
-         Asignación de Clave (Todos los Roles)": protocolo único para TODOS los roles, incluido BODEGA -- la
-         vieja excepción de "Contraseña de Acceso Directo" (ver historial de este archivo) se retira; el
-         usuario nunca recibe ni ve una contraseña aquí, solo queda PENDING_ACTIVATION con su propio
-         activationToken hasta que él mismo la define en la pantalla de activación. */
+      /* Ver requerimiento "Eliminación del Sistema de Activación por Enlace/Token -- Creación Directa con
+         Clave Temporal": se retiró el flujo de invitación/token (fallaba en producción para varios usuarios
+         pendientes). Protocolo único para TODOS los roles, incluido BODEGA: la cuenta nace ACTIVA de
+         inmediato con la misma clave temporal fija -- el usuario entra por el login normal con esa clave y
+         el Modal de Cambio Obligatorio ya existente (ver startSession) lo obliga a definir la suya propia en
+         su primer ingreso, sin depender de ningún enlace ni correo. */
       var nuevo = {
         id: nextUserId(), nombre: nombre, email: email, roles: roles, avatarInitials: initialsOf(nombre),
         activo: true, modulosDeshabilitados: [], modulosAdicionales: [],
-        status: 'PENDING_ACTIVATION', activationToken: generarActivationToken(), activationTokenExpiraEn: Date.now() + ACTIVATION_TOKEN_VIGENCIA_MS
+        status: 'ACTIVE', password: CLAVE_TEMPORAL_USUARIO_NUEVO, mustChangePassword: true, isTemporaryPassword: true
       };
       if (sede !== undefined) nuevo.sede = sede;
       if (aliado !== undefined) nuevo.aliado = aliado;
       state.users.push(nuevo);
       persistUsers();
-      /* Ver nota "Supabase": igual que reexpedirActivationToken -- el enlace que Admin va a copiar y
-         compartir debe existir en la nube de inmediato, no 30s después. */
+      /* Ver nota "Supabase": de inmediato -- otro dispositivo podría intentar iniciar sesión con esta cuenta
+         en cualquier momento, no puede esperar al autoguardado de 30s. */
       scPushRows('app_users', [nuevo]);
-      registrarEventoSeguridad('creacion', email, 'Se creó la cuenta de ' + nombre + ' (' + roles.join(' + ') + '), pendiente de activación -- solicitado por ' + state.user.nombre + '. Deberá definir su propia contraseña a través de su enlace de activación.');
-      toast('ok', 'Usuario invitado', nombre + ' fue registrado como ' + roles.join(' + ') + ', pendiente de activación. Copia su enlace de activación desde la tabla para compartirlo.');
+      registrarEventoSeguridad('creacion', email, 'Se creó la cuenta de ' + nombre + ' (' + roles.join(' + ') + '), activa de inmediato con clave temporal -- solicitado por ' + state.user.nombre + '. Deberá cambiarla en su primer inicio de sesión.');
+      toast('ok', 'Usuario creado', nombre + ' fue registrado como ' + roles.join(' + ') + ' y ya puede iniciar sesión con la clave temporal ' + CLAVE_TEMPORAL_USUARIO_NUEVO + '.');
     }
     closeModal();
     renderUsuarios();
@@ -18107,8 +17882,6 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'desbloquear-usuario') desbloquearUsuario(id);
     else if (act === 'restablecer-clave') abrirModalRestablecerClave(id);
     else if (act === 'establecer-password-bodega') abrirModalEstablecerPasswordBodega(id);
-    else if (act === 'copiar-enlace-activacion') copiarEnlaceActivacion(id);
-    else if (act === 'asignar-clave-temporal-pendiente') asignarClaveTemporalPendiente(id);
     else if (act === 'copiar-enlace-recuperacion') copiarEnlaceRecuperacion(id);
     else if (act === 'asignar-clave-temporal-recuperacion') asignarClaveTemporalRecuperacion(id);
     else if (act === 'seleccionar-perfil') confirmarSeleccionPerfil(btn.dataset.role);

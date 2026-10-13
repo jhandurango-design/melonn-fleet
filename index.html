@@ -94,73 +94,11 @@
   </div>
 </section>
 
-<!-- ===================== ACTIVACIÓN DE CUENTA ===================== -->
-<!-- Ver requerimiento "Estandarización de Onboarding y Autenticación: Invitación con Activación y Asignación
-     de Clave (Todos los Roles)": pantalla separada del login normal, mostrada cuando la URL trae
-     ?activate=<token> (ver DOMContentLoaded/resolverActivacionDesdeUrl en app.js). 4 estados posibles,
-     mutuamente excluyentes vía el atributo hidden -- JS alterna cuál se muestra, nunca más de uno a la vez. -->
-<section id="activationScreen" class="login-screen" hidden>
-  <div class="login-bg-pattern" aria-hidden="true"></div>
-  <img class="login-corner-logo" src="assets/logo-melonn.png" alt="melonn" aria-hidden="true">
-  <div class="login-panel-col" style="margin:auto;">
-    <div class="login-panel">
-      <div class="login-brand-text"><span class="login-brand-main">melonn</span><span class="login-brand-suffix">fleet</span></div>
-      <p class="login-sub">Control y Programación de Flota</p>
-
-      <div id="activationFormState">
-        <h1>Bienvenido a Melonn Fleet</h1>
-        <p class="login-sub" id="activationFormNote">Asigna tu contraseña para activar tu cuenta.</p>
-        <form id="formActivarCuenta" class="login-form" autocomplete="off">
-          <input type="hidden" id="activationToken">
-          <div class="field">
-            <label for="activationPassword">Contraseña</label>
-            <div class="password-field-wrap">
-              <input type="password" id="activationPassword" placeholder="••••••••" minlength="6">
-              <button type="button" class="password-toggle-btn" id="activationPasswordToggle" aria-label="Mostrar contraseña">
-                <svg class="icon-eye" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                <svg class="icon-eye-off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
-              </button>
-            </div>
-          </div>
-          <div class="field">
-            <label for="activationPasswordConfirm">Confirmar contraseña</label>
-            <input type="password" id="activationPasswordConfirm" placeholder="••••••••">
-          </div>
-          <p class="login-error" id="activationFormError"></p>
-          <button type="submit" class="btn btn-primary btn-block">Activar Cuenta</button>
-        </form>
-      </div>
-
-      <div id="activationLoadingState" hidden>
-        <h1>Verificando tu enlace…</h1>
-        <p class="login-sub">Un momento, estamos confirmando tu invitación.</p>
-      </div>
-
-      <div id="activationInvalidState" hidden>
-        <h1>Enlace no válido</h1>
-        <p class="login-sub">Este enlace de activación no es válido. Verifica que lo copiaste completo o pide a tu administrador que te comparta uno nuevo.</p>
-        <button type="button" class="btn btn-primary btn-block" id="btnActivationVolverLogin">Volver al inicio de sesión</button>
-      </div>
-
-      <div id="activationExpiredState" hidden>
-        <h1>Enlace vencido</h1>
-        <p class="login-sub">Este enlace de activación ya venció. Puedes generar uno nuevo ahora mismo.</p>
-        <button type="button" class="btn btn-primary btn-block" id="btnActivationReexpedir">Reexpedir enlace</button>
-      </div>
-
-      <div id="activationYaActivaState" hidden>
-        <h1>Cuenta ya activada</h1>
-        <p class="login-sub">Esta cuenta ya está activa. Inicia sesión normalmente con tu correo y contraseña.</p>
-        <button type="button" class="btn btn-primary btn-block" id="btnActivationYaActivaLogin">Ir a iniciar sesión</button>
-      </div>
-    </div>
-  </div>
-</section>
-
 <!-- ===================== RECUPERACIÓN DE CONTRASEÑA ===================== -->
 <!-- Ver requerimiento "Módulo de Gestión en Seguridad y Accesos": pantalla mostrada cuando la URL trae
      ?recover=<token> (ver DOMContentLoaded/resolverRecuperacionDesdeUrl en app.js) -- el enlace que el Admin
-     copia desde el botón "Copiar Enlace de Recuperación". 3 estados posibles, mismo patrón de #activationScreen. -->
+     copia desde el botón "Copiar Enlace de Recuperación". 3 estados mutuamente excluyentes vía el atributo
+     hidden -- JS alterna cuál se muestra, nunca más de uno a la vez. -->
 <section id="recoveryScreen" class="login-screen" hidden>
   <div class="login-bg-pattern" aria-hidden="true"></div>
   <img class="login-corner-logo" src="assets/logo-melonn.png" alt="melonn" aria-hidden="true">
@@ -1266,7 +1204,6 @@
                   <option value="">Todos</option>
                   <option value="activo">Activo</option>
                   <option value="inactivo">Inactivo</option>
-                  <option value="pendiente">Pendiente de Activación</option>
                 </select>
               </div>
               <button class="btn btn-ghost filter-bar-clear" id="userFilterClear" type="button">Limpiar Filtro</button>
@@ -3275,17 +3212,16 @@
       <div class="field" id="usuarioSedeField"><label for="usuarioSede">Bodega asignada</label><select id="usuarioSede"></select></div>
       <div class="field" id="usuarioAliadoField"><label for="usuarioAliado">Aliado de flota asignado</label><select id="usuarioAliado"></select></div>
       <p class="modal-note" id="usuarioAlcanceGlobalNote" hidden>Alcance: <strong>Global</strong> — este perfil no se asigna a una bodega o aliado fijo.</p>
-      <!-- Ver requerimiento "Estandarización de Onboarding y Autenticación: Invitación con Activación y
-           Asignación de Clave (Todos los Roles)": protocolo único de Invitación y Activación para TODOS los
-           roles, incluido Bodega -- la vieja excepción de "Contraseña de Acceso Directo" (sin campo de
-           contraseña en este formulario desde este requerimiento) quedaba justificada únicamente por no tener
-           forma de hacerle llegar un enlace a una cuenta operativa sin correo propio; el botón "Copiar Enlace
-           de Activación" en la tabla de usuarios (ver usuarioRowHtml) resuelve exactamente ese caso -- el
-           Admin lo copia y lo comparte directo en rampa, sin necesitar un correo real. -->
-      <p class="modal-note" id="usuarioInviteNote">El usuario queda "Pendiente de Activación". Ningún administrador define ni ve una contraseña aquí -- desde la tabla de usuarios podrás copiar su enlace de activación para compartirlo directamente (correo, chat o en persona). Ahí mismo asignará su propia contraseña.</p>
+      <!-- Ver requerimiento "Eliminación del Sistema de Activación por Enlace/Token -- Creación Directa con
+           Clave Temporal": se retiró por completo el flujo de invitación por enlace (fallaba en producción
+           para varios usuarios pendientes). Ahora TODOS los roles, incluido Bodega, se crean directamente
+           ACTIVOS con la misma clave temporal fija (ver CLAVE_TEMPORAL_USUARIO_NUEVO en app.js) y
+           mustChangePassword en true -- el propio usuario la cambia obligatoriamente en su primer inicio de
+           sesión (modalCambioObligatorio, ya existente), sin depender de ningún enlace ni correo. -->
+      <p class="modal-note" id="usuarioInviteNote">El usuario queda <strong>Activo</strong> de inmediato con la clave temporal <strong>Melonn2026*</strong>. Compártesela por un canal seguro -- deberá cambiarla obligatoriamente en su primer inicio de sesión.</p>
       <div class="modal-foot">
         <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
-        <button type="submit" class="btn btn-primary" id="usuarioSubmitBtn">Invitar Usuario</button>
+        <button type="submit" class="btn btn-primary" id="usuarioSubmitBtn">Crear Usuario</button>
       </div>
     </form>
   </div>
