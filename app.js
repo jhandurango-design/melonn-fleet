@@ -11853,10 +11853,19 @@ function usuarioRowHtml(u) {
          modal que abre ("Permisos y módulos activos", ver openPermisosModal) NO cambió de nombre ni de
          función: sigue ajustando únicamente qué ítems del sidebar ve este usuario en particular. */
       '<button data-act="permisos-usuario" data-id="' + u.id + '">Módulos</button>';
-    /* "Copiar Enlace de Activación" (ver copiarEnlaceActivacion): exclusivo de cuentas aún
-       PENDING_ACTIVATION -- para soporte directo en rampa, sin depender de que el correo (simulado) le
-       llegue. Una vez activada, esta acción desaparece y la fila vuelve al menú estándar. */
-    if (pendienteActivacion) acciones += '<button data-act="copiar-enlace-activacion" data-id="' + u.id + '" class="raised">Copiar Enlace de Activación</button>';
+    /* "Copiar Enlace de Activación" / "Generar Nuevo Enlace" (ver copiarEnlaceActivacion): exclusivo de
+       cuentas aún PENDING_ACTIVATION -- para soporte directo en rampa, sin depender de que el correo
+       (simulado) le llegue. Una vez activada, esta acción desaparece y la fila vuelve al menú estándar.
+       Ver requerimiento "Claridad Visual de Vigencia del Enlace de Activación": el ROTULO cambia solo (la
+       función copiarEnlaceActivacion ya regeneraba el token solo si estaba vencido desde antes, sin cambios
+       de lógica aquí) -- con el token vigente (<7 días) invita a "Copiar"; ya vencido, dejar el mismo verbo
+       sería engañoso (copiaría un enlace muerto si no fuera porque ya regenera solo), así que el botón avisa
+       de entrada que lo que va a hacer es renovarlo. */
+    if (pendienteActivacion) {
+      var enlaceVencido = !u.activationTokenExpiraEn || Date.now() > u.activationTokenExpiraEn;
+      var enlaceBtnLabel = enlaceVencido ? 'Generar Nuevo Enlace' : 'Copiar Enlace de Activación';
+      acciones += '<button data-act="copiar-enlace-activacion" data-id="' + u.id + '" class="raised">' + enlaceBtnLabel + '</button>';
+    }
     /* Ver requerimiento "Prompt Consolidador Maestro...", Bloque 1: "Establecer Contraseña" sigue siendo una
        acción de RESET exclusiva de BODEGA sobre una cuenta ya existente (ver establecerPasswordBodegaDirecta)
        -- independiente de cómo se activó originalmente, sin cambios por este requerimiento. */
