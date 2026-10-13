@@ -11912,6 +11912,9 @@ function toggleUsuarioActivo(userId) {
   if (u.id === state.user.id) { toast('warn', 'Acción no permitida', 'No puedes inactivar tu propia sesión de administrador.'); return; }
   u.activo = !u.activo;
   persistUsers();
+  /* Ver nota "Supabase": de inmediato -- sobre todo al INACTIVAR, otro dispositivo con sesión abierta de
+     este usuario no debe seguir operando hasta el próximo autoguardado de 30s. */
+  scPushRows('app_users', [u]);
   state.usuarioTogglePendienteId = null;
   toast(u.activo ? 'ok' : 'warn', u.activo ? 'Usuario activado' : 'Usuario inactivado', u.nombre + (u.activo ? ' puede iniciar sesión nuevamente.' : ' ya no puede iniciar sesión.'));
   renderUsuarios();
@@ -16166,6 +16169,12 @@ document.addEventListener('DOMContentLoaded', function () {
     user.mustChangePassword = false;
     user.isTemporaryPassword = false;
     persistUsers();
+    /* Ver nota "Supabase": este guardado SOLO escribía en localStorage de este navegador -- un login desde
+       otro dispositivo/navegador seguía trayendo la clave temporal vieja y mustChangePassword:true desde la
+       nube, así que el Cambio Obligatorio nunca quedaba resuelto de verdad (bug real reportado en
+       producción). Push inmediato, igual que cualquier otro cambio de credenciales: no puede esperar al
+       autoguardado periódico de 30s ni al logout. */
+    scPushRows('app_users', [user]);
     pendingFirstLoginUser = null;
     closeModal();
     startSession(user);
@@ -17163,6 +17172,9 @@ document.addEventListener('DOMContentLoaded', function () {
       if (sede !== undefined) existente.sede = sede; else delete existente.sede;
       if (aliado !== undefined) existente.aliado = aliado; else delete existente.aliado;
       persistUsers();
+      /* Ver nota "Supabase": de inmediato -- otro dispositivo con sesión activa de este usuario podría
+         necesitar su rol/sede/aliado actualizado sin depender del autoguardado de 30s. */
+      scPushRows('app_users', [existente]);
       registrarEventoSeguridad('edicion', email, 'Se editó la cuenta de ' + nombre + ' (' + roles.join(' + ') + ') -- actualizado por ' + state.user.nombre + '.');
       toast('ok', 'Usuario actualizado', nombre + ' se actualizó correctamente.');
     } else {
