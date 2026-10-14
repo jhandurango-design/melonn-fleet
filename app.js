@@ -1,6 +1,7 @@
 ﻿/* ==========================================================================
    Melonn Fleet — Control y Programación de Flota
    Motor Gravity (mock) · Auth/RBAC · Render · SLA engine
+   (Redeploy forzado 2026-10-14 tras 502 Bad Gateway en Render -- sin cambios de lógica, ver commit.)
    ========================================================================== */
 
 /* ---------------- Catálogos ---------------- */
