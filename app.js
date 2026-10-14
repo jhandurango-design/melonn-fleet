@@ -12285,6 +12285,28 @@ function openRechazarSolicitudModal(routeId) {
   document.getElementById('rechazarSolicitudMotivo').value = '';
   openModal('modalRechazarSolicitud');
 }
+/* Ver requerimiento "Validación Dinámica de Ventana de Retorno (4 horas)": evita programar al mismo
+   mensajero 2 veces el mismo día con menos de 240 minutos de diferencia entre turnos -- el tiempo mínimo de
+   operación y retorno a bodega entre una entrega y la siguiente. Compara contra CUALQUIER otro turno ya
+   asignado a ese mensajero ese mismo día (sin importar sede), excluyendo el propio turno cuando se está
+   editando uno existente. Mensajeros DISTINTOS sí pueden compartir exactamente la misma hora -- el choque
+   siempre es por mensajero, nunca por el slot horario en sí mismo. */
+var VENTANA_RETORNO_MINUTOS = 240;
+function turnoEnVentanaRetorno(mensajeroId, fecha, hora, excluirRouteId) {
+  var dtNuevo = parseDT(fecha, hora);
+  var conflicto = null, diferenciaMinima = Infinity;
+  state.turnos.forEach(function (r) {
+    if (r.id === excluirRouteId || r.mensajeroId !== mensajeroId || r.fecha !== fecha) return;
+    var diff = Math.abs(minutesDiff(dtNuevo, parseDT(r.fecha, r.hora)));
+    if (diff < VENTANA_RETORNO_MINUTOS && diff < diferenciaMinima) { diferenciaMinima = diff; conflicto = r; }
+  });
+  return conflicto;
+}
+function alertarVentanaRetorno(mensajeroId, conflicto) {
+  var horaPermitidaDT = new Date(parseDT(conflicto.fecha, conflicto.hora).getTime() + VENTANA_RETORNO_MINUTOS * 60000);
+  toast('warn', 'Ventana de retorno no cumplida',
+    getMensajero(mensajeroId).nombre + ' ya está programado a las ' + fmtTime12(conflicto.hora) + '. Por tiempo de operación y retorno (4 hrs mínimas), solo puede volver a programarse a partir de las ' + fmtTime12(fmtTimeHM(horaPermitidaDT)) + '.');
+}
 function openNoUbicaModal(routeId) {
   var route = state.turnos.find(function (r) { return r.id === routeId; });
   if (!route || !route.pendienteAsignacion) return;
@@ -12337,6 +12359,8 @@ function submitTurno(e) {
       toast('warn', 'Turno duplicado', getMensajero(mensajeroIdCreate).nombre + ' ya tiene una ruta programada en ' + sede + ' a las ' + fmtTime12(hora) + '.');
       return;
     }
+    var conflictoRetornoCreate = turnoEnVentanaRetorno(mensajeroIdCreate, fecha, hora, null);
+    if (conflictoRetornoCreate) { alertarVentanaRetorno(mensajeroIdCreate, conflictoRetornoCreate); return; }
   }
   var turnoAfectado = null;
 
@@ -12380,6 +12404,15 @@ function submitTurno(e) {
     } else {
       var route = state.turnos.find(function (r) { return r.id === routeId; });
       if (route) {
+        /* Ver requerimiento "Validación Dinámica de Ventana de Retorno": para 'confirm' se resuelve el
+           mensajero (por cédula, reutilizable) ANTES de mutar nada, para poder validar primero -- se
+           reutiliza el mismo resultado abajo, sin volver a llamar findOrCreateMensajero(). Para 'edit' se
+           valida contra el mensajero actual de la ruta (su identidad real no cambia, solo se clona el
+           snapshot vía forkMensajeroParaEdicion más abajo) -- así no se dispara ese fork antes de saber si
+           la validación pasa. */
+        var mensajeroIdDirecto = modo === 'confirm' ? findOrCreateMensajero(payload) : route.mensajeroId;
+        var conflictoRetornoDirecto = turnoEnVentanaRetorno(mensajeroIdDirecto, route.fecha, hora, route.id);
+        if (conflictoRetornoDirecto) { alertarVentanaRetorno(mensajeroIdDirecto, conflictoRetornoDirecto); return; }
         /* Ver requerimiento "Optimización: Trazabilidad en Historial...", punto 1c (Reasignaciones/Cambios:
            mensajero, vehículo, placa o tipo de flota): esta edición directa (fuera del flujo formal de
            Solicitudes) no dejaba NINGÚN rastro en route.historialCambios -- se captura el snapshot ANTES de
@@ -12389,7 +12422,7 @@ function submitTurno(e) {
         /* 'confirm' asigna un mensajero recurrente (reutiliza por cédula); 'edit' modifica un turno ya
            confirmado y SIEMPRE crea su propio snapshot — ver forkMensajeroParaEdicion (Hallazgo de
            Auditoría #1, item 4: ningún otro turno debe verse afectado por esta edición). */
-        route.mensajeroId = modo === 'confirm' ? findOrCreateMensajero(payload) : forkMensajeroParaEdicion(payload, undefined, route.mensajeroId);
+        route.mensajeroId = modo === 'confirm' ? mensajeroIdDirecto : forkMensajeroParaEdicion(payload, undefined, route.mensajeroId);
         route.vehiculo = vehiculo; route.hora = hora;
         if (modo === 'confirm') route.pendienteAsignacion = false;
         var mensajeroNuevoNombre = getMensajero(route.mensajeroId).nombre;
@@ -17664,6 +17697,8 @@ document.addEventListener('DOMContentLoaded', function () {
       toast('warn', 'Turno duplicado', getMensajero(mensajeroId).nombre + ' ya tiene una ruta programada en ' + sede + ' a las ' + fmtTime12(hora) + '.');
       return;
     }
+    var conflictoRetornoRuta = turnoEnVentanaRetorno(mensajeroId, fechaRuta, hora, editId || null);
+    if (conflictoRetornoRuta) { alertarVentanaRetorno(mensajeroId, conflictoRetornoRuta); return; }
     var turnoModificado;
     if (editId) {
       var route = state.turnos.find(function (r) { return r.id === editId; });
