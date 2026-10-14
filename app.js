@@ -2082,7 +2082,21 @@ function updateLangIcon(lang) {
   var el = document.getElementById('langFlagIcon');
   if (el) el.innerHTML = lang === 'en' ? FLAG_US_SVG : FLAG_ES_SVG;
 }
-function getMensajero(id) { return state.mensajeros.find(function (m) { return m.id === id; }); }
+/* FIX "Pantalla en blanco / Sidebar vacío al iniciar sesión como Aliado": decenas de funciones de render y
+   filtrado (ver solicitudesPendientesUnificadas, entre más de 50 sitios) encadenan getMensajero(id).aliado /
+   .nombre directamente, sin verificar que el mensajero siga existiendo en state.mensajeros -- un mensajeroId
+   que momentáneamente no resuelve (p. ej. turnos ya traídos por scPullAll mientras state.mensajeros todavía
+   refleja el snapshot local justo anterior, antes de que esa misma tanda de Promise.all complete) lanzaba
+   "Cannot read properties of undefined" y abortaba renderShell() a la mitad -- dejando el sidebar sin
+   construir (nav.innerHTML nunca llegó a asignarse) y la vista anterior (de la sesión ya cerrada) todavía
+   activa en pantalla, porque navigate() tampoco alcanzó a ejecutarse. Devolver un mensajero "vacío" en vez de
+   undefined hace que esas comparaciones (.aliado === state.user.aliado, etc.) simplemente no calcen -- la fila
+   huérfana se excluye del filtro en vez de tumbar el render completo. */
+function getMensajero(id) {
+  var found = state.mensajeros.find(function (m) { return m.id === id; });
+  if (found) return found;
+  return { id: id, nombre: '—', placa: '—', cedula: '', telefono: '—', correo: '', aliado: null, sede: null, vehiculo: null };
+}
 function initialsOf(name) { var p = name.split(' '); return (p[0][0] + (p[1] ? p[1][0] : '')).toUpperCase(); }
 function escapeHtml(str) { var d = document.createElement('div'); d.textContent = str == null ? '' : str; return d.innerHTML; }
 function metricTip(label, text, placement) {
