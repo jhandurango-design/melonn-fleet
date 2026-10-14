@@ -1954,7 +1954,19 @@ function metricTip(label, text, placement) {
   else if (placement) cls += ' info-tip-right';
   return '<span class="' + cls + '" tabindex="0"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><path d="M12 17h.01"/></svg><span class="info-tip-box"><strong>' + label + '</strong>' + text + '</span></span>';
 }
-function nextTurnoId() { state.turnoCounter++; return 'TUR-' + String(state.turnoCounter).padStart(4, '0'); }
+/* Ver requerimiento "Programar Flota: Inconsistencia al Guardar Turnos y Filas Duplicadas": mismo bug ya
+   corregido antes para nextUserId() (ver ese comentario) -- state.turnoCounter era un contador fijo que
+   NUNCA se re-derivaba de los turnos ya existentes, así que tras un scPullAll() que trae un dataset más
+   grande (de otro dispositivo/sesión), el próximo turno creado podía repetir un id ya usado y
+   pisar silenciosamente ese registro al subirse a Supabase (el upsert escribe por id). Se deriva ahora del
+   máximo numérico real ya presente en state.turnos, sin depender de ningún contador aparte. */
+function nextTurnoId() {
+  var maxNum = state.turnos.reduce(function (max, t) {
+    var n = parseInt(String(t.id).slice(4), 10);
+    return isNaN(n) ? max : Math.max(max, n);
+  }, 999);
+  return 'TUR-' + String(maxNum + 1).padStart(4, '0');
+}
 function nextMensajeroId() { state.mensajeroCounter++; return 'm' + state.mensajeroCounter; }
 function nextSolicitudGeneralId() { state.solicitudGeneralCounter++; return 'SOL-' + String(state.solicitudGeneralCounter).padStart(3, '0'); }
 
@@ -12247,6 +12259,26 @@ function submitTurno(e) {
   var ws = progEditWindowState();
   var directo = ws === 'open' || ws === 'alert' || ws === 'closed_extended_active';
 
+  /* Ver requerimiento "Programar Flota: Inconsistencia al Guardar Turnos y Filas Duplicadas": el mensajero
+     de un alta nueva se resuelve UNA sola vez aquí (antes se repetía esta misma línea dentro de cada rama --
+     aprobación de cuota vs. directa -- con el mismo resultado), para poder validar duplicados antes de
+     decidir por cuál rama seguir. */
+  var mensajeroIdCreate;
+  if (modo === 'create') {
+    mensajeroIdCreate = pendiente ? crearMensajeroPendiente(payload) : findOrCreateMensajero(payload);
+    /* Antes nada impedía asignar al mismo mensajero 2 veces al mismo bloque sede+fecha+hora -- bastaba un
+       doble clic en "Guardar" para terminar con 2 filas idénticas (caso real reportado: Carlos Arturo Rico
+       Vergara duplicado en Medellín #2 a las 08:30 AM). */
+    var duplicadoAliado = state.turnos.some(function (r) {
+      return r.mensajeroId === mensajeroIdCreate && r.sede === sede && r.fecha === fecha && r.hora === hora;
+    });
+    if (duplicadoAliado) {
+      toast('warn', 'Turno duplicado', getMensajero(mensajeroIdCreate).nombre + ' ya tiene una ruta programada en ' + sede + ' a las ' + fmtTime12(hora) + '.');
+      return;
+    }
+  }
+  var turnoAfectado = null;
+
   /* Módulo Cuotas de Flota (si está activo para el país de la bodega, ver Configuración/Admin en Cuotas de
      Flota): un alta nueva que exceda la cuota asignada, o que caiga en un día festivo del país, SÍ se crea
      de inmediato (trazabilidad completa) pero congelada en el estado "Pendiente de Aprobación por Planner"
@@ -12255,9 +12287,8 @@ function submitTurno(e) {
   if (modo === 'create') {
     var aprobacion = evaluarAprobacionCuota(sede, state.user.aliado, vehiculo, hora, fecha);
     if (aprobacion.requiere) {
-      var mensajeroIdPend = pendiente ? crearMensajeroPendiente(payload) : findOrCreateMensajero(payload);
       var turnoPendienteAprobacion = {
-        id: nextTurnoId(), sede: sede, fecha: fecha, mensajeroId: mensajeroIdPend, vehiculo: vehiculo, hora: hora,
+        id: nextTurnoId(), sede: sede, fecha: fecha, mensajeroId: mensajeroIdCreate, vehiculo: vehiculo, hora: hora,
         llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: pendiente,
         pendienteAprobacionPlanner: true, pendienteAprobacionMotivo: aprobacion.motivo, pendienteAprobacionDetalle: aprobacion.detalle,
         pendienteAprobacionSolicitadoPor: state.user.nombre, pendienteAprobacionSolicitadoEn: fmtClock(state.now),
@@ -12271,19 +12302,20 @@ function submitTurno(e) {
       });
       toast('warn', cuotaCausalLabel(aprobacion.motivo) + ' — requiere aprobación',
         'El turno ' + turnoPendienteAprobacion.id + ' quedó "Pendiente de Aprobación por Planner" en Solicitudes y Cambios.');
-      closeModal();
-      syncAndRender(true);
+      /* Ver nota "Supabase" más abajo (cierre de la función): mismo criterio -- se espera la confirmación
+         del push antes de cerrar el modal. */
+      scPushRows('app_turnos', [turnoPendienteAprobacion]).then(function () { closeModal(); syncAndRender(true); });
       return;
     }
   }
 
   if (directo) {
     if (modo === 'create') {
-      var mensajeroId = pendiente ? crearMensajeroPendiente(payload) : findOrCreateMensajero(payload);
-      var nuevoTurnoDirecto = { id: nextTurnoId(), sede: sede, fecha: fecha, mensajeroId: mensajeroId, vehiculo: vehiculo, hora: hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: pendiente };
+      var nuevoTurnoDirecto = { id: nextTurnoId(), sede: sede, fecha: fecha, mensajeroId: mensajeroIdCreate, vehiculo: vehiculo, hora: hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: pendiente };
       state.turnos.push(nuevoTurnoDirecto);
       registrarCreacionTurno(nuevoTurnoDirecto, state.user.nombre);
       toast('ok', pendiente ? 'Turno pendiente creado' : 'Turno creado', 'Se agregó a la Programación de Flota de ' + (state.progDay === 'tomorrow' ? 'mañana' : 'hoy') + '.');
+      turnoAfectado = nuevoTurnoDirecto;
     } else {
       var route = state.turnos.find(function (r) { return r.id === routeId; });
       if (route) {
@@ -12308,6 +12340,7 @@ function submitTurno(e) {
           registrarHistorialCambio(route, { tipo: 'reasignacion_directa', accion: modo === 'confirm' ? 'mensajero_confirmado' : 'editado', motivo: cambiosDirecto.join(' · '), horaAnterior: horaAnteriorDirecto, horaPropuesta: hora, por: state.user.nombre });
         }
         toast('ok', modo === 'confirm' ? 'Mensajero confirmado' : 'Turno actualizado', route.id + ' fue actualizado.');
+        turnoAfectado = route;
       }
     }
   } else {
@@ -12329,12 +12362,22 @@ function submitTurno(e) {
     });
     if (modo !== 'create') {
       var routeMarcarPendiente = state.turnos.find(function (r) { return r.id === routeId; });
-      if (routeMarcarPendiente) routeMarcarPendiente.solicitudEdicionPendiente = true;
+      if (routeMarcarPendiente) { routeMarcarPendiente.solicitudEdicionPendiente = true; turnoAfectado = routeMarcarPendiente; }
     }
     toast('warn', 'Enviado como Solicitud de Cambio', 'El cambio quedó "Pendiente de Aprobación por Planner" en Solicitudes y Cambios — no se aplicará en vivo hasta que se resuelva.');
   }
-  closeModal();
-  syncAndRender(true);
+  /* Ver nota "Supabase": ningún punto de creación/edición de turnos empujaba NUNCA a app_turnos -- solo
+     quedaban en memoria hasta el autoguardado periódico (~30s) o el logout. Si Admin/Aliado cambiaba de
+     pestaña (scPullAll se dispara al recuperar el foco) o refrescaba antes de esa ventana, el turno recién
+     creado se perdía sin aviso -- esto, sumado a que nextTurnoId() no se re-derivaba de state.turnos tras un
+     pull (mismo bug ya corregido para nextUserId), explica la inconsistencia "a veces aparecen 2, a veces 3"
+     reportada. Se espera la confirmación antes de cerrar el modal. */
+  if (turnoAfectado) {
+    scPushRows('app_turnos', [turnoAfectado]).then(function () { closeModal(); syncAndRender(true); });
+  } else {
+    closeModal();
+    syncAndRender(true);
+  }
 }
 /* ---------------- Flota Habitual (ALIADO) — carga rápida de la flota recurrente ----------------
    Ver requerimiento "Agregar Botón de Carga Rápida 'Flota Habitual' en Programar Flota": NO es un mecanismo de
@@ -12415,6 +12458,10 @@ function cargarFlotaHabitual() {
     if (m && m.cedula) yaProgramados[m.cedula] = true;
   });
   var creados = 0, pendientesAprobacion = 0, solicitudes = 0;
+  /* Ver nota "Supabase" junto a submitTurno(): esta carga masiva tampoco empujaba nunca a app_turnos --
+     se acumulan aquí todos los turnos nuevos de esta pasada para empujarlos juntos en un solo scPushRows
+     al final, en vez de depender del autoguardado periódico. */
+  var turnosNuevos = [];
   plantilla.forEach(function (entry) {
     if (!entry.cedula || yaProgramados[entry.cedula]) return;
     yaProgramados[entry.cedula] = true;
@@ -12435,6 +12482,7 @@ function cargarFlotaHabitual() {
         motivo: (aprobacion.motivo === 'festivo' ? 'Programación en día festivo' : aprobacion.motivo === 'domingo' ? 'Programación como Recurso Adicional (domingo)' : 'Cupo excedido') + ': ' + aprobacion.detalle + ' (carga rápida de Flota Habitual).',
         horaAnterior: null, horaPropuesta: null, por: state.user.nombre
       });
+      turnosNuevos.push(turnoPendienteAprobacion);
       creados++; pendientesAprobacion++;
       return;
     }
@@ -12445,6 +12493,7 @@ function cargarFlotaHabitual() {
       var nuevoTurno = { id: nextTurnoId(), sede: entry.sede, fecha: fecha, mensajeroId: mensajeroId, vehiculo: entry.vehiculo, hora: entry.hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: false };
       state.turnos.push(nuevoTurno);
       registrarCreacionTurno(nuevoTurno, state.user.nombre);
+      turnosNuevos.push(nuevoTurno);
       creados++;
     } else {
       state.solicitudesGenerales.push({
@@ -12467,7 +12516,11 @@ function cargarFlotaHabitual() {
   if (solicitudes) extra.push(solicitudes + ' se enviaron como Solicitud de Cambio, fuera del horario de programación.');
   if (extra.length) msg += ' ' + extra.join(' ');
   toast('ok', 'Flota Recurrente cargada', msg);
-  syncAndRender(true);
+  if (turnosNuevos.length) {
+    scPushRows('app_turnos', turnosNuevos).then(function () { syncAndRender(true); });
+  } else {
+    syncAndRender(true);
+  }
 }
 /* CONMUTACIÓN ESTRICTA: libre desasignación pre-cutoff vs. Solicitud de Cambio post-cutoff — mismo criterio
    de ventana que Editar (progWindowState, ver submitTurno), aplicado a una acción más quirúrgica: solo quita
@@ -17534,6 +17587,20 @@ document.addEventListener('DOMContentLoaded', function () {
     var vehiculo = document.getElementById('rutaVehiculo').value;
     var hora = document.getElementById('rutaHora').value;
     if (!mensajeroId) { toast('warn', 'Selecciona un mensajero', 'No hay mensajeros disponibles para el aliado elegido.'); return; }
+    var fechaRuta = state.progDay === 'tomorrow' ? TOMORROW_STR : TODAY_STR;
+    /* Ver requerimiento "Programar Flota: Inconsistencia al Guardar Turnos y Filas Duplicadas": antes nada
+       impedía asignar al mismo mensajero 2 veces al mismo bloque sede+fecha+hora -- bastaba un doble clic
+       en "Guardar" (o abrir el modal 2 veces seguidas) para terminar con 2 filas idénticas (caso real
+       reportado: Carlos Arturo Rico Vergara duplicado en Medellín #2 a las 08:30 AM). r.id !== editId deja
+       pasar la edición de la propia fila sin marcarla como "duplicado de sí misma". */
+    var duplicado = state.turnos.some(function (r) {
+      return r.id !== editId && r.mensajeroId === mensajeroId && r.sede === sede && r.fecha === fechaRuta && r.hora === hora;
+    });
+    if (duplicado) {
+      toast('warn', 'Turno duplicado', getMensajero(mensajeroId).nombre + ' ya tiene una ruta programada en ' + sede + ' a las ' + fmtTime12(hora) + '.');
+      return;
+    }
+    var turnoModificado;
     if (editId) {
       var route = state.turnos.find(function (r) { return r.id === editId; });
       /* Ver requerimiento "Optimización: Trazabilidad en Historial...", punto 1c -- misma captura de
@@ -17548,16 +17615,26 @@ document.addEventListener('DOMContentLoaded', function () {
       if (cambiosRuta.length) {
         registrarHistorialCambio(route, { tipo: 'reasignacion_directa', accion: 'editado', motivo: cambiosRuta.join(' · '), horaAnterior: horaAnteriorRuta, horaPropuesta: hora, por: state.user.nombre });
       }
+      turnoModificado = route;
       toast('ok', 'Ruta actualizada', editId + ' fue modificada.');
     } else {
       var id = nextTurnoId();
-      var nuevaRuta = { id: id, sede: sede, fecha: state.progDay === 'tomorrow' ? TOMORROW_STR : TODAY_STR, mensajeroId: mensajeroId, vehiculo: vehiculo, hora: hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null };
+      var nuevaRuta = { id: id, sede: sede, fecha: fechaRuta, mensajeroId: mensajeroId, vehiculo: vehiculo, hora: hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null };
       state.turnos.push(nuevaRuta);
       registrarCreacionTurno(nuevaRuta, state.user.nombre);
+      turnoModificado = nuevaRuta;
       toast('ok', 'Ruta creada', id + ' fue añadida a la Programación de Flota.');
     }
-    closeModal();
-    syncAndRender(true);
+    /* Ver nota "Supabase": ningún punto de creación/edición de turnos empujaba NUNCA a app_turnos -- solo
+       quedaban en memoria hasta el autoguardado periódico (~30s) o el logout. Si Admin cambiaba de pestaña
+       (scPullAll se dispara al recuperar el foco, ver ese listener) o refrescaba antes de esa ventana, el
+       turno recién creado se perdía sin aviso -- esto, sumado a que nextTurnoId() no se re-derivaba de
+       state.turnos tras un pull (mismo bug que ya se corrigió para nextUserId), explica la inconsistencia
+       "a veces aparecen 2, a veces 3" reportada. Se espera la confirmación antes de cerrar el modal. */
+    scPushRows('app_turnos', [turnoModificado]).then(function () {
+      closeModal();
+      syncAndRender(true);
+    });
   });
 
   document.getElementById('btnNuevoTurno').addEventListener('click', function () { openTurnoModal('create', null); });
