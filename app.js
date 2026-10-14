@@ -5000,8 +5000,11 @@ function renderContextPill() {
   if (role === 'ADMIN') { labelEl.textContent = t('context.bodegaActual'); valueEl.textContent = state.activeSede || t('context.todasLasSedes'); pill.classList.remove('static'); chevron.style.display = ''; }
   else if (role === 'PLANNER') { labelEl.textContent = t('context.bodegaActual'); valueEl.textContent = state.activeSede; pill.classList.remove('static'); chevron.style.display = ''; }
   else if (role === 'AUDITOR') { labelEl.textContent = t('context.alcanceAuditoria'); valueEl.textContent = state.activeSede || t('context.todasLasSedes'); pill.classList.remove('static'); chevron.style.display = ''; }
-  else if (role === 'BODEGA') { labelEl.textContent = t('context.bodegaAsignada'); valueEl.textContent = state.user.sede; pill.classList.add('static'); chevron.style.display = 'none'; }
-  else { labelEl.textContent = t('context.flotaAliada'); valueEl.textContent = state.user.aliado; pill.classList.add('static'); chevron.style.display = 'none'; }
+  else if (role === 'BODEGA') { labelEl.textContent = t('context.bodegaAsignada'); valueEl.textContent = state.user.sede || t('context.todasLasSedes'); pill.classList.add('static'); chevron.style.display = 'none'; }
+  /* Ver requerimiento "Auditoría y Refactorización Estructural...": fallback defensivo -- un ALIADO sin
+     .aliado asignado (dato incompleto en app_users, nunca debería ocurrir pero no debe mostrar el string
+     literal "undefined" en el Header) cae a un guión en vez de romper la pantalla. */
+  else { labelEl.textContent = t('context.flotaAliada'); valueEl.textContent = state.user.aliado || '—'; pill.classList.add('static'); chevron.style.display = 'none'; }
 }
 function closeSedeMenu() {
   var existing = document.getElementById('sedeDropdownMenu');
