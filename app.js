@@ -366,12 +366,38 @@ function deduplicarUsuariosPorEmail(rows) {
   var sinEmail = rows.filter(function (row) { return !row.value.email; }).map(function (row) { return row.value; });
   return Object.keys(porEmail).map(function (k) { return porEmail[k].value; }).concat(sinEmail);
 }
+/* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota", punto 3:
+   mismo criterio que deduplicarUsuariosPorEmail, pero por asignación (sede+fecha+hora+mensajeroId) en vez de
+   correo -- cubre el caso de 2 filas con id distinto (TUR-XXXX) que terminan representando exactamente el
+   mismo turno, típicamente residuo de colisiones de nextTurnoId() o doble clic antes de que existiera la
+   validación de duplicados en submitTurno/#formRuta. Se queda con la de updated_at más reciente. */
+function deduplicarTurnosPorAsignacion(rows) {
+  var porAsignacion = {};
+  rows.forEach(function (row) {
+    var t = row.value;
+    var key = [t.sede, t.fecha, t.hora, t.mensajeroId].join('|');
+    var existente = porAsignacion[key];
+    if (!existente || new Date(row.updatedAt || 0) > new Date(existente.updatedAt || 0)) porAsignacion[key] = row;
+  });
+  return Object.keys(porAsignacion).map(function (k) { return porAsignacion[k].value; });
+}
 function scPushRows(table, rows) {
   if (!supabaseClient || !rows || !rows.length) return Promise.resolve();
   var payload = rows.map(function (r) { return { id: r.id, data: r }; });
   return supabaseClient.from(table).upsert(payload).then(function (res) {
     if (res.error) console.warn('Supabase: fallo al guardar ' + table + ':', res.error.message);
   }, function (e) { console.warn('Supabase: fallo al guardar ' + table + ':', e); });
+}
+/* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota": las 3
+   tablas eran upsert-only -- un turno quitado localmente (p.ej. "Eliminar Mensajero" sobre un excedente de
+   cuota, o "Cancelar" un turno) nunca se borraba en Supabase, quedaba como fila huérfana que scPullAll()
+   resucitaba en el próximo pull (login/foco/logout). Requiere el GRANT DELETE sobre la tabla para el rol
+   anon (ver supabase_schema.sql) -- si no está, falla igual de silencioso que un push sin red. */
+function scDeleteRows(table, ids) {
+  if (!supabaseClient || !ids || !ids.length) return Promise.resolve();
+  return supabaseClient.from(table).delete().in('id', ids).then(function (res) {
+    if (res.error) console.warn('Supabase: fallo al eliminar de ' + table + ':', res.error.message);
+  }, function (e) { console.warn('Supabase: fallo al eliminar de ' + table + ':', e); });
 }
 /* Empuja el snapshot COMPLETO de las 3 tablas -- se llama en los puntos clave (login, logout, autoguardado
    periódico), nunca en cada mutación individual (ver nota de arriba). */
@@ -390,7 +416,7 @@ function scPullAll() {
     var changed = false;
     if (users && users.length) { state.users = deduplicarUsuariosPorEmail(users); changed = true; }
     if (mensajeros && mensajeros.length) { state.mensajeros = mensajeros.map(function (row) { return row.value; }); changed = true; }
-    if (turnos && turnos.length) { state.turnos = turnos.map(function (row) { return row.value; }); changed = true; }
+    if (turnos && turnos.length) { state.turnos = deduplicarTurnosPorAsignacion(turnos); changed = true; }
     if (changed && state.user) syncAndRender(true);
     return changed;
   });
@@ -2781,6 +2807,10 @@ function resolverSolicitud(routeId, aceptar, motivoRechazo) {
   var claseTxt = s.evaluacionAntelacion ? (' (' + s.evaluacionAntelacion.label + ')') : '';
   var rechazoNota = (!aceptar && s.tipo === 'reprogramacion') ? ' La ruta mantiene su T0 original (' + fmtTime12(s.horaAnterior) + ') y la ventana de tolerancia sigue su conteo normal desde ahí.' : '';
   toast(aceptar ? 'ok' : 'warn', aceptar ? 'Solicitud aprobada' : 'Solicitud rechazada', route.id + claseTxt + ' — ' + tipoLabel + (aceptar ? ' aprobada.' : ' rechazada; la ruta continúa con su programación.') + rechazoNota);
+  /* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota": ninguna
+     resolución de Solicitud (reprogramación/cambio de mensajero/enroque) empujaba el turno afectado a
+     Supabase -- un enroque en particular muta 2 filas (ambas rutas intercambian mensajero). */
+  scPushRows('app_turnos', enroqueRoute2 ? [route, enroqueRoute2] : [route]);
   syncAndRender(true);
 }
 
@@ -3004,6 +3034,7 @@ function confirmarRegularizacionDespachado(routeId) {
   toast('ok', 'Despacho regularizado', route.id + ' quedó despachado (jornada anterior).');
   state.regularizacionFilaActiva = null; state.regularizacionAccionActiva = null;
   renderModalRegularizacion();
+  scPushRows('app_turnos', [route]);
   syncAndRender(true);
 }
 function confirmarRegularizacionCierre(routeId, modo) {
@@ -3036,6 +3067,7 @@ function confirmarRegularizacionCierre(routeId, modo) {
   toast('warn', 'Turno regularizado', route.id + ' quedó como Incumplimiento Confirmado (jornada anterior).');
   state.regularizacionFilaActiva = null; state.regularizacionAccionActiva = null;
   renderModalRegularizacion();
+  scPushRows('app_turnos', [route]);
   syncAndRender(true);
 }
 /* Ver requerimiento "Reconfirmación y Ajustes Finales: Flota Propia México (con Bloqueo Condicional)",
@@ -3059,6 +3091,7 @@ function confirmarRegularizacionFlotaPropiaDespachado(routeId) {
   toast('ok', 'Despacho regularizado', route.id + ' quedó despachado (jornada anterior).');
   state.regularizacionFilaActiva = null; state.regularizacionAccionActiva = null;
   renderModalRegularizacion();
+  scPushRows('app_turnos', [route]);
   syncAndRender(true);
 }
 function confirmarRegularizacionFlotaPropiaNoDespachado(routeId) {
@@ -3078,6 +3111,7 @@ function confirmarRegularizacionFlotaPropiaNoDespachado(routeId) {
   toast('warn', 'Turno regularizado', route.id + ' quedó como "No Despachado" (jornada anterior).');
   state.regularizacionFilaActiva = null; state.regularizacionAccionActiva = null;
   renderModalRegularizacion();
+  scPushRows('app_turnos', [route]);
   syncAndRender(true);
 }
 function continuarTrasRegularizacion() {
@@ -3260,7 +3294,12 @@ function registrarAusentismoHistorico(route) {
   if (computeEstado(route).code === 'cancelado_pendiente_reemplazo') return;
   (route.ausentismoHistorico = route.ausentismoHistorico || []).push({ mensajeroId: route.mensajeroId, hora: route.hora });
 }
+/* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota": devuelve
+   todos los turnos creados/mutados en esta resolución (puede ser más de uno -- una reprogramación masiva
+   afecta N rutas a la vez) para que resolverSolicitudGeneral() los empuje a Supabase en un solo scPushRows,
+   en vez de dejarlos solo en memoria hasta el autoguardado periódico. */
 function aplicarSolicitudGeneral(sol) {
+  var turnosAfectados = [];
   /* Quien aprueba (Planner) nunca tiene state.user.aliado propio — el mensajero/reemplazo siempre
      debe quedar asociado al aliado DUEÑO de la solicitud (sol.aliado), nunca al de la sesión que aprueba
      (ver findOrCreateMensajeroParaAliado/crearMensajeroPendiente). */
@@ -3270,9 +3309,10 @@ function aplicarSolicitudGeneral(sol) {
     state.turnos.push(nuevoTurno);
     /* El creador de trazabilidad es quien originó la solicitud (el Aliado), no quien la aprueba después. */
     registrarCreacionTurno(nuevoTurno, sol.solicitadoPor || state.user.nombre);
+    turnosAfectados.push(nuevoTurno);
   } else if (sol.tipo === 'edicion_turno') {
     var route = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
-    if (!route) return;
+    if (!route) return turnosAfectados;
     /* 'confirm' (asignar mensajero recurrente a un turno "Pendiente / Por Confirmar") reutiliza el registro
        compartido por cédula, igual que su equivalente directo; 'edit' (modificar un turno ya confirmado)
        SIEMPRE crea su propio snapshot vía forkMensajeroParaEdicion — ver Hallazgo de Auditoría #1, item 4. */
@@ -3282,6 +3322,7 @@ function aplicarSolicitudGeneral(sol) {
         : forkMensajeroParaEdicion(sol.detalle, sol.aliado, route.mensajeroId);
     }
     route.vehiculo = sol.detalle.vehiculo; route.hora = sol.detalle.hora; route.pendienteAsignacion = !!sol.detalle.pendiente;
+    turnosAfectados.push(route);
   } else if (sol.tipo === 'reemplazo_alerta') {
     /* Aprobación de Planner sobre "Confirmar Reemplazo" (ver solicitarReemplazoAlerta/openAlertaConfirmar
        ReemplazoModal): impacta la Malla en vivo con la ficha completa del mensajero (incluido el correo),
@@ -3289,7 +3330,7 @@ function aplicarSolicitudGeneral(sol) {
        1/2 de la Matriz de Tiempos) y ajusta T0 cuando ya venció (ver comentario del ajuste de T0 más abajo).
        Corre en la sesión de Planner/Admin — el Aliado nunca ejecuta esta mutación directamente. */
     var routeRe = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
-    if (!routeRe) return;
+    if (!routeRe) return turnosAfectados;
     /* Ver requerimiento "Complemento Regla de Negocio: Atribución de Responsabilidades...": a diferencia del
        Tramo 1 "Gabela" (causal Aliado) y "No Se Autoriza Despacho" (causal Aliado) -- donde SÍ corresponde
        registrar el ausentismo histórico del mensajero original, ver registrarAusentismoHistorico -- el
@@ -3331,12 +3372,13 @@ function aplicarSolicitudGeneral(sol) {
     if (!veniaDeRetiro && !veniaDeNoAutoriza && state.now > parseDT(routeRe.fecha, routeRe.hora)) routeRe.hora = fmtTimeHM(state.now);
     routeRe.reemplazoPendiente = false;
     routeRe.reemplazoConfirmado = true;
+    turnosAfectados.push(routeRe);
   } else if (sol.tipo === 'reemplazo_cancelacion') {
     /* Aprobación de Planner sobre "Cancelar Mensajero" (ver solicitarCancelacionReemplazo/openCancelarModal,
        modo "Ingresar datos de Reemplazo"): mismo motor que 'reemplazo_alerta' arriba, pero originado en una
        cancelación proactiva del Aliado desde Seguimiento, no en una alerta ya activa sobre el turno. */
     var routeCr = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
-    if (!routeCr) return;
+    if (!routeCr) return turnosAfectados;
     registrarAusentismoHistorico(routeCr);
     routeCr.mensajeroId = findOrCreateMensajeroParaAliado(sol.aliado, {
       nombre: sol.detalle.nombre, telefono: sol.detalle.telefono, cedula: sol.detalle.cedula, placa: sol.detalle.placa,
@@ -3350,6 +3392,7 @@ function aplicarSolicitudGeneral(sol) {
     if (state.now > parseDT(routeCr.fecha, routeCr.hora)) routeCr.hora = fmtTimeHM(state.now);
     routeCr.reemplazoPendiente = false;
     routeCr.reemplazoConfirmado = true;
+    turnosAfectados.push(routeCr);
   } else if (sol.tipo === 'reprogramacion_masiva') {
     /* Ver requerimiento "Prompt Consolidador Maestro...", Bloque 3 ("Reprogramación Masiva de Ventana" +
        "Motor de Recálculo en Cascada"): corre en la sesión del ALIADO que acepta (resolverSolicitudGeneral ya
@@ -3387,11 +3430,16 @@ function aplicarSolicitudGeneral(sol) {
        solicitud general (resueltoPor/resueltoFecha/resueltoEn, ya fijados por resolverSolicitudGeneral). */
     sol.detalle.rutasAfectadas = rutasAfectadas.map(function (r) { return r.id; });
     sol.detalle.totalRutasAfectadas = rutasAfectadas.length;
+    turnosAfectados = turnosAfectados.concat(rutasAfectadas);
   }
   if (sol.detalle && sol.detalle.routeId) {
     var routeMarcada = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
-    if (routeMarcada) routeMarcada.solicitudEdicionPendiente = false;
+    if (routeMarcada) {
+      routeMarcada.solicitudEdicionPendiente = false;
+      if (turnosAfectados.indexOf(routeMarcada) === -1) turnosAfectados.push(routeMarcada);
+    }
   }
+  return turnosAfectados;
 }
 function resolverSolicitudGeneral(id, aceptar) {
   var sol = state.solicitudesGenerales.find(function (s) { return s.id === id; });
@@ -3409,12 +3457,13 @@ function resolverSolicitudGeneral(id, aceptar) {
   sol.resueltoFecha = TODAY_STR;
   sol.resueltoPor = state.user.nombre;
   sol.resueltoPorRol = state.user.role;
-  if (aceptar && sol.tipo !== 'prolongacion') aplicarSolicitudGeneral(sol);
+  var turnosParaPush = [];
+  if (aceptar && sol.tipo !== 'prolongacion') turnosParaPush = aplicarSolicitudGeneral(sol) || [];
   /* Rechazada: aplicarSolicitudGeneral (que limpia route.solicitudEdicionPendiente al aprobar) nunca se
      llama, así que hay que soltar la marca aquí también — el turno vuelve a ser editable de inmediato. */
   else if (!aceptar && sol.detalle && sol.detalle.routeId) {
     var routeRechazada = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
-    if (routeRechazada) routeRechazada.solicitudEdicionPendiente = false;
+    if (routeRechazada) { routeRechazada.solicitudEdicionPendiente = false; turnosParaPush.push(routeRechazada); }
   }
   var tipoLabel = solicitudGeneralTipoLabel(sol.tipo);
   if (sol.tipo === 'reprogramacion_masiva' && aceptar) {
@@ -3422,6 +3471,10 @@ function resolverSolicitudGeneral(id, aceptar) {
   } else {
     toast(aceptar ? 'ok' : 'warn', aceptar ? 'Solicitud aprobada' : 'Solicitud rechazada', tipoLabel + ' de ' + sol.aliado + (aceptar ? ' fue aprobada.' : ' fue rechazada.'));
   }
+  /* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota": ningún
+     tipo de Solicitud General (alta de turno, edición, reemplazo por alerta/cancelación, reprogramación
+     masiva) empujaba nunca los turnos afectados a Supabase. */
+  if (turnosParaPush.length) scPushRows('app_turnos', turnosParaPush);
   syncAndRender(true);
 }
 /* Ver requerimiento "Addendum de Funcionalidad: Botón 'Cancelar Solicitud' en 'Mis Solicitudes Enviadas'
@@ -7885,9 +7938,14 @@ function flotaPropiaRowHtml(m) {
    toca aquí -- ya deja de sembrarse solo, de forma natural, vía asegurarFlotaPropiaSembrada (que exige
    flotaPropiaActivo !== false && !superseded). */
 function retirarTurnoPendienteFlotaPropiaHoy(mensajeroId) {
+  var idsRetirados = state.turnos.filter(function (r) {
+    return r.mensajeroId === mensajeroId && r.fecha === TODAY_STR && !r.salida && !r.flotaPropiaNoDespachado;
+  }).map(function (r) { return r.id; });
   state.turnos = state.turnos.filter(function (r) {
     return !(r.mensajeroId === mensajeroId && r.fecha === TODAY_STR && !r.salida && !r.flotaPropiaNoDespachado);
   });
+  /* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota". */
+  if (idsRetirados.length) scDeleteRows('app_turnos', idsRetirados);
 }
 function toggleFlotaPropiaActivo(mensajeroId) {
   if (!canDo('flotaPropia.manage')) return;
@@ -7897,6 +7955,7 @@ function toggleFlotaPropiaActivo(mensajeroId) {
   if (!m.flotaPropiaActivo) retirarTurnoPendienteFlotaPropiaHoy(m.id);
   toast('ok', m.flotaPropiaActivo ? 'Mensajero activado' : 'Mensajero desactivado',
     m.nombre + (m.flotaPropiaActivo ? ' se incluirá de inmediato en la programación de hoy.' : ' se retiró de inmediato de la programación de hoy (si aún no estaba marcado).'));
+  scPushRows('app_mensajeros', [m]);
   syncAndRender(true);
 }
 /* Ver requerimiento "Homologación MX vs CO (Bodega, Auditor y Planner)", punto 1 (Bodega MX): "Agregar
@@ -9007,6 +9066,7 @@ function aprobarCuotaPlanner(routeId) {
     horaAnterior: null, horaPropuesta: null, por: state.user.nombre
   });
   toast('ok', 'Programación aprobada', route.id + ' retomó el ciclo operativo normal.');
+  scPushRows('app_turnos', [route]);
   syncAndRender(true);
 }
 function rechazarCuotaPlanner(routeId) {
@@ -9030,6 +9090,7 @@ function rechazarCuotaPlanner(routeId) {
     horaAnterior: null, horaPropuesta: null, por: state.user.nombre
   });
   toast('warn', 'Programación rechazada', route.id + ' quedó Cancelado.');
+  scPushRows('app_turnos', [route]);
   syncAndRender(true);
 }
 /* Uso exclusivo Planner, desde Programación (Bodega / Zona Común de Despacho). La cancelación de rutas se gestiona
@@ -12573,12 +12634,14 @@ function desasignarMensajero(routeId) {
         horaAnterior: null, horaPropuesta: null, por: state.user.nombre
       });
       toast('ok', 'Mensajero eliminado', route.id + ' quedó "Pendiente / Por Confirmar" — la plaza sigue disponible dentro de tu cuota.');
+      scPushRows('app_turnos', [route]);
     } else {
       var motivoEliminacion = evalCuota === true
         ? 'turno excedente por encima de la cuota asignada'
         : 'Programación Libre — sin cuotas activas para esta bodega';
       state.turnos = state.turnos.filter(function (r) { return r.id !== routeId; });
       toast('ok', 'Mensajero eliminado', route.id + ' fue eliminado por completo (' + motivoEliminacion + '), sin dejar plaza vacante.');
+      scDeleteRows('app_turnos', [routeId]);
     }
   } else {
     state.solicitudesGenerales.push({
@@ -12590,6 +12653,7 @@ function desasignarMensajero(routeId) {
     route.solicitudEdicionPendiente = true;
     registrarHistorialCambio(route, { tipo: 'edicion_turno', accion: 'solicitada', motivo: 'Solicitud de desasignación de mensajero enviada fuera del cutoff.', horaAnterior: null, horaPropuesta: null, por: state.user.nombre });
     toast('warn', 'Enviado como Solicitud de Cambio', 'La desasignación quedó "Pendiente de Aprobación por Planner" en Solicitudes y Cambios — no se aplicará en vivo hasta que se resuelva.');
+    scPushRows('app_turnos', [route]);
   }
   syncAndRender(true);
 }
@@ -18048,6 +18112,10 @@ document.addEventListener('DOMContentLoaded', function () {
             state.turnos = state.turnos.filter(function (r) { return r.id !== id; });
             delete state.statusCache[id];
             toast('ok', 'Ruta cancelada', id + ' fue eliminada de la Programación de Flota.');
+            /* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de
+               Flota": sin esto, la fila quedaba huérfana en Supabase y scPullAll() la resucitaba en el
+               próximo pull (login/foco en otra pestaña). */
+            scDeleteRows('app_turnos', [id]);
             syncAndRender(true);
           }
         });

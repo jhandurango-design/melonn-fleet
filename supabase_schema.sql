@@ -53,7 +53,11 @@ create table public.app_turnos (
 grant usage on schema public to anon;
 grant select, insert, update on public.app_users to anon;
 grant select, insert, update on public.app_mensajeros to anon;
-grant select, insert, update on public.app_turnos to anon;
+-- app_turnos también lleva DELETE (ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de
+-- Programación de Flota"): a diferencia de usuarios/mensajeros (nunca se borran, solo se inactivan), un
+-- turno cancelado/eliminado por el Aliado SÍ se quita de verdad -- sin este GRANT, scDeleteRows() fallaba en
+-- silencio y la fila quedaba huérfana, resucitada por el siguiente scPullAll().
+grant select, insert, update, delete on public.app_turnos to anon;
 
 alter table public.app_users enable row level security;
 alter table public.app_mensajeros enable row level security;
@@ -78,9 +82,11 @@ create policy "anon_update_app_mensajeros" on public.app_mensajeros for update t
 drop policy if exists "anon_select_app_turnos" on public.app_turnos;
 drop policy if exists "anon_insert_app_turnos" on public.app_turnos;
 drop policy if exists "anon_update_app_turnos" on public.app_turnos;
+drop policy if exists "anon_delete_app_turnos" on public.app_turnos;
 create policy "anon_select_app_turnos" on public.app_turnos for select to anon using (true);
 create policy "anon_insert_app_turnos" on public.app_turnos for insert to anon with check (true);
 create policy "anon_update_app_turnos" on public.app_turnos for update to anon using (true) with check (true);
+create policy "anon_delete_app_turnos" on public.app_turnos for delete to anon using (true);
 
 -- Mantiene updated_at al día en cada upsert (informativo -- nada en app.js lo lee todavía).
 create or replace function public.set_updated_at()
