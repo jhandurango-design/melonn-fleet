@@ -12354,15 +12354,38 @@ function initTimePicker(inputId) {
     pendiente.m = Number(b.dataset.m); marcarSeleccion();
   });
 
+  /* scrollIntoView() en vez de esto caminaba por TODOS los ancestros desplazables (incluido .modal,
+     overflow:auto) buscando hacer visible el botón -- otra fuente del mismo "salto de scroll" reportado,
+     además de la posición del panel. Centrar a mano, tocando SOLO el scrollTop de la columna misma, no
+     afecta a ningún ancestro. */
+  function centrarEnColumna(col, btn) {
+    if (!btn) return;
+    col.scrollTop = btn.offsetTop - (col.clientHeight / 2) + (btn.clientHeight / 2);
+  }
+  /* Ver requerimiento "Corrección del Salto de Scroll": posición calculada contra el campo real (mismo
+     patrón que toggleSedeDropdown/.sede-dropdown-menu) en vez de depender de que .timepicker-panel sea
+     descendiente en flujo normal de .timepicker -- con position:fixed ya no lo es. */
+  function posicionar() {
+    var rect = input.getBoundingClientRect();
+    panel.style.top = (rect.bottom + 6) + 'px';
+    panel.style.left = rect.left + 'px';
+    panel.style.width = rect.width + 'px';
+  }
   function abrir() {
     var actual = input.value ? input.value.split(':') : null;
     if (actual) { pendiente.h = parseInt(actual[0], 10); pendiente.m = parseInt(actual[1], 10); }
     marcarSeleccion();
+    posicionar();
     panel.hidden = false;
-    var selH = colHora.querySelector('button.selected'); if (selH) selH.scrollIntoView({ block: 'center' });
-    var selM = colMin.querySelector('button.selected'); if (selM) selM.scrollIntoView({ block: 'center' });
+    centrarEnColumna(colHora, colHora.querySelector('button.selected'));
+    centrarEnColumna(colMin, colMin.querySelector('button.selected'));
   }
   function cerrar() { panel.hidden = true; }
+  /* Si el modal mismo se desplaza (su overflow:auto, ver nota de arriba) mientras el panel sigue abierto,
+     el campo se mueve pero el panel fixed se quedaría anclado a la posición vieja -- se reposiciona en
+     cualquier scroll de un ancestro (capture:true cubre el del propio .modal, no solo window). */
+  document.addEventListener('scroll', function () { if (!panel.hidden) posicionar(); }, true);
+  window.addEventListener('resize', function () { if (!panel.hidden) posicionar(); });
 
   input.addEventListener('click', function () { if (panel.hidden) abrir(); else cerrar(); });
   btnCancelar.addEventListener('click', cerrar);
@@ -17851,10 +17874,20 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('turnoPendiente').addEventListener('change', function (e) {
     var wrap = document.getElementById('turnoDatosMensajero');
     var campos = wrap.querySelectorAll('input');
+    /* Ver requerimiento "Bloqueo de Carga Rápida — Mensajero Recurrente en estado Pendiente": con los campos
+       del mensajero ya deshabilitados, "Carga Rápida" seguía siendo clickeable y su onchange (ver más
+       arriba) igual le asignaba .value a esos inputs -- disabled no bloquea asignaciones por JS, solo la
+       interacción directa del usuario. Deshabilitar el propio <select> le quita la posibilidad de disparar
+       ese onchange en absoluto, y resetear su selección evita que quede una opción "fantasma" marcada
+       mientras está inutilizable. */
+    var recurrenteSel = document.getElementById('turnoRecurrente');
     if (e.target.checked) {
       campos.forEach(function (c) { c.value = ''; c.disabled = true; });
+      recurrenteSel.value = '';
+      recurrenteSel.disabled = true;
     } else {
       campos.forEach(function (c) { c.disabled = false; });
+      recurrenteSel.disabled = false;
     }
     wrap.style.opacity = e.target.checked ? '0.45' : '1';
   });

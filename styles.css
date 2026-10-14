@@ -232,7 +232,14 @@ a{color:inherit;}
 .timepicker{position:relative;}
 .timepicker-input{cursor:pointer;padding-right:30px !important;}
 .timepicker-icon{position:absolute;right:10px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none;}
-.timepicker-panel{position:absolute;top:calc(100% + 6px);left:0;z-index:40;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-lg);width:100%;min-width:200px;overflow:hidden;}
+/* position:fixed (no absolute) a propósito -- ver requerimiento "Corrección del Salto de Scroll al
+   interactuar con el TimePicker": .modal ya es un contenedor con overflow:auto (ver esa regla más abajo);
+   un hijo position:absolute SÍ cuenta dentro de su scrollHeight aunque esté anclado al campo, así que abrir
+   el panel (180px) empujaba el alto scrolleable del modal y producía el salto reportado. position:fixed
+   saca el panel por completo de ese cálculo (mismo truco ya usado en .sede-dropdown-menu/.row-actions-menu
+   de este archivo) -- top/left/width se calculan en JS contra el campo real (ver initTimePicker/abrir()).
+   z-index:1001 iguala a esos mismos menús, por encima de .modal-overlay (100). */
+.timepicker-panel{position:fixed;z-index:1001;background:var(--bg-card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-lg);min-width:200px;overflow:hidden;}
 .timepicker-cols{display:flex;align-items:stretch;height:180px;}
 .timepicker-col{flex:1;overflow-y:auto;padding:4px;scroll-behavior:smooth;}
 .timepicker-col-sep{display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--text-secondary);width:14px;}
