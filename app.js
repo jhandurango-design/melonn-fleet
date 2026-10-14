@@ -13333,6 +13333,21 @@ function loginLockStatus(email) {
   if (Date.now() >= rec.lockedUntil) { rec.lockedUntil = null; rec.count = 0; return null; }
   return rec;
 }
+/* Ver requerimiento "Persistencia de Edición de Usuario y Registro de Intentos Fallidos": state.loginAttempts
+   sigue siendo la fuente RÁPIDA y local para la comprobación de bloqueo en cada submit de login (funciona
+   incluso contra un correo que no existe, para no filtrar por timing si una cuenta es real o no) -- pero
+   antes era SOLO local: Admin viendo Gestión de Usuarios desde OTRO navegador nunca veía los intentos
+   fallidos ni el bloqueo que hubieran ocurrido en el navegador del propio usuario. Se espeja ahora en
+   u.failedLoginCount/u.lockedUntil (parte del JSONB de ese usuario) y se empuja a Supabase cuando el correo
+   sí corresponde a una cuenta real -- un correo inexistente no tiene dónde guardarlo, se queda solo local. */
+function mirrorIntentosFallidosAUsuario(email, rec) {
+  var u = state.users.find(function (x) { return x.email.toLowerCase() === email; });
+  if (!u) return;
+  u.failedLoginCount = rec ? rec.count : 0;
+  u.lockedUntil = rec ? rec.lockedUntil : null;
+  persistUsers();
+  scPushRows('app_users', [u]);
+}
 function registrarIntentoFallido(email) {
   var rec = state.loginAttempts[email] || { count: 0, lockedUntil: null };
   rec.count++;
@@ -13343,11 +13358,13 @@ function registrarIntentoFallido(email) {
     registrarEventoSeguridad('fallo', email, 'Intento de inicio de sesión fallido.');
   }
   state.loginAttempts[email] = rec;
+  mirrorIntentosFallidosAUsuario(email, rec);
   return rec;
 }
 function desbloquearUsuario(email) {
   if (!canDo('users.manage')) return;
   delete state.loginAttempts[email];
+  mirrorIntentosFallidosAUsuario(email, null);
   registrarEventoSeguridad('desbloqueo', email, 'Cuenta desbloqueada manualmente por ' + state.user.nombre + '.');
   toast('ok', 'Cuenta desbloqueada', email + ' puede volver a iniciar sesión.');
   syncAndRender(true);
@@ -13389,7 +13406,15 @@ function restablecerClaveTemporal(userId) {
   u.password = temp;
   u.mustChangePassword = true;
   u.isTemporaryPassword = true;
+  u.failedLoginCount = 0;
+  u.lockedUntil = null;
   delete state.loginAttempts[u.email.toLowerCase()];
+  /* Ver requerimiento "Persistencia de Edición de Usuario y Registro de Intentos Fallidos": esta función
+     nunca había llamado persistUsers()/scPushRows() -- la clave temporal quedaba solo en memoria de esta
+     pestaña, así que el usuario no podía iniciar sesión con ella desde ningún otro dispositivo, y se perdía
+     por completo al refrescar. */
+  persistUsers();
+  scPushRows('app_users', [u]);
   registrarEventoSeguridad('reset', u.email, 'Se generó una nueva clave temporal y se envió (simulado) un correo de restablecimiento a ' + u.email + ', solicitado por ' + state.user.nombre + '. Deberá definir una nueva contraseña en su próximo inicio de sesión.');
   document.getElementById('resetPasswordConfirmStep').hidden = true;
   document.getElementById('resetPasswordDoneStep').hidden = false;
@@ -13464,6 +13489,8 @@ function asignarClaveTemporalRecuperacion(eventId) {
   u.password = temp;
   u.mustChangePassword = true;
   u.isTemporaryPassword = true;
+  u.failedLoginCount = 0;
+  u.lockedUntil = null;
   delete u.recoveryToken;
   delete u.recoveryTokenExpiraEn;
   delete state.loginAttempts[u.email.toLowerCase()];
@@ -13547,8 +13574,14 @@ function establecerPasswordBodegaDirecta(userId, nuevaPassword) {
   u.password = nuevaPassword;
   u.mustChangePassword = false;
   u.isTemporaryPassword = false;
+  u.failedLoginCount = 0;
+  u.lockedUntil = null;
   delete state.loginAttempts[u.email.toLowerCase()];
   persistUsers();
+  /* Ver requerimiento "Persistencia de Edición de Usuario y Registro de Intentos Fallidos": esta función
+     tampoco empujaba nunca a Supabase -- la cuenta de Bodega solo podía loguearse con la clave nueva desde
+     este mismo navegador. */
+  scPushRows('app_users', [u]);
   registrarEventoSeguridad('reset_directo', u.email, 'Contraseña establecida directamente (acceso inmediato, sin correo de confirmación) por ' + state.user.nombre + ' para la cuenta operativa de Bodega ' + u.nombre + '.');
   toast('ok', 'Contraseña establecida', 'La nueva contraseña de ' + u.nombre + ' ya está activa.');
   closeModal();
@@ -13606,9 +13639,15 @@ function mostrarBloqueoLogin(email, lockedUntil) {
 /* ---------------- Render: Seguridad (ADMIN) ---------------- */
 function seguridadUsuarioRowHtml(u) {
   var emailKey = u.email.toLowerCase();
-  var lock = loginLockStatus(emailKey);
+  /* Ver requerimiento "Persistencia de Edición de Usuario y Registro de Intentos Fallidos": state.loginAttempts
+     solo tiene lo que pasó EN ESTA pestaña -- si el intento fallido/bloqueo ocurrió en el dispositivo del
+     propio usuario, Admin viendo esto desde otro navegador no lo veía. Se prioriza state.loginAttempts si
+     existe (feedback inmediato dentro de la misma sesión en la que Admin acaba de desbloquear/reiniciar),
+     y si no, cae a u.failedLoginCount/u.lockedUntil (lo que trajo el último pull de Supabase). */
   var rec = state.loginAttempts[emailKey];
-  var intentos = rec ? rec.count : 0;
+  var intentos = rec ? rec.count : (u.failedLoginCount || 0);
+  var lockedUntil = rec ? rec.lockedUntil : u.lockedUntil;
+  var lock = lockedUntil && Date.now() < lockedUntil ? { lockedUntil: lockedUntil } : null;
   var estadoHtml = lock ? '<span class="badge badge-critical"><i></i>Bloqueado</span>' : '<span class="badge badge-dispatched"><i></i>Activo</span>';
   var acciones = '<div class="row-actions">';
   if (lock) acciones += '<button data-act="desbloquear-usuario" data-id="' + emailKey + '" class="raised">Desbloquear</button>';
@@ -16155,6 +16194,15 @@ document.addEventListener('DOMContentLoaded', function () {
     delete state.loginAttempts[email];
     document.getElementById('loginError').textContent = '';
     document.getElementById('loginSubmitBtn').disabled = false;
+    if (user.failedLoginCount || user.lockedUntil) {
+      user.failedLoginCount = 0;
+      user.lockedUntil = null;
+      persistUsers();
+      /* Ver nota "Supabase" junto a #formCambioObligatorio: encadenado por el mismo motivo -- startSession()
+         dispara scPullAll() justo después. */
+      scPushRows('app_users', [user]).then(function () { startSession(user); });
+      return;
+    }
     startSession(user);
   }
 
@@ -16188,6 +16236,8 @@ document.addEventListener('DOMContentLoaded', function () {
     user.password = nueva;
     user.mustChangePassword = false;
     user.isTemporaryPassword = false;
+    user.failedLoginCount = 0;
+    user.lockedUntil = null;
     persistUsers();
     pendingFirstLoginUser = null;
     closeModal();
@@ -16235,6 +16285,8 @@ document.addEventListener('DOMContentLoaded', function () {
     u.password = nueva;
     u.mustChangePassword = false;
     u.isTemporaryPassword = false;
+    u.failedLoginCount = 0;
+    u.lockedUntil = null;
     delete u.recoveryToken;
     delete u.recoveryTokenExpiraEn;
     delete state.loginAttempts[u.email.toLowerCase()];
@@ -17199,11 +17251,21 @@ document.addEventListener('DOMContentLoaded', function () {
       if (sede !== undefined) existente.sede = sede; else delete existente.sede;
       if (aliado !== undefined) existente.aliado = aliado; else delete existente.aliado;
       persistUsers();
-      /* Ver nota "Supabase": de inmediato -- otro dispositivo con sesión activa de este usuario podría
-         necesitar su rol/sede/aliado actualizado sin depender del autoguardado de 30s. */
-      scPushRows('app_users', [existente]);
-      registrarEventoSeguridad('edicion', email, 'Se editó la cuenta de ' + nombre + ' (' + roles.join(' + ') + ') -- actualizado por ' + state.user.nombre + '.');
-      toast('ok', 'Usuario actualizado', nombre + ' se actualizó correctamente.');
+      /* Ver nota "Supabase": a diferencia de otros pushes "fire and forget" de este archivo, AQUÍ sí importa
+         esperarlo (ver requerimiento "Persistencia de Edición de Usuario y Registro de Intentos Fallidos")
+         -- el bug real reportado en producción era justo este: Admin editaba el aliado, el push salía hacia
+         Supabase pero sin esperarlo, y si Admin refrescaba la página (o cerraba sesión) ANTES de que ese
+         request llegara a confirmarse, el navegador lo cancelaba a medio camino; la próxima carga volvía a
+         traer el dato viejo porque Supabase nunca llegó a recibir el cambio. Cerrando el modal y mostrando
+         el toast de éxito recién cuando el push confirma, Admin nunca ve "Usuario actualizado" antes de que
+         el guardado real haya terminado -- sigue sin bloquear nada si Supabase no responde (ver scPushRows). */
+      scPushRows('app_users', [existente]).then(function () {
+        registrarEventoSeguridad('edicion', email, 'Se editó la cuenta de ' + nombre + ' (' + roles.join(' + ') + ') -- actualizado por ' + state.user.nombre + '.');
+        toast('ok', 'Usuario actualizado', nombre + ' se actualizó correctamente.');
+        closeModal();
+        renderUsuarios();
+      });
+      return;
     } else {
       /* Ver requerimiento "Eliminación del Sistema de Activación por Enlace/Token -- Creación Directa con
          Clave Temporal": se retiró el flujo de invitación/token (fallaba en producción para varios usuarios
@@ -17220,14 +17282,17 @@ document.addEventListener('DOMContentLoaded', function () {
       if (aliado !== undefined) nuevo.aliado = aliado;
       state.users.push(nuevo);
       persistUsers();
-      /* Ver nota "Supabase": de inmediato -- otro dispositivo podría intentar iniciar sesión con esta cuenta
-         en cualquier momento, no puede esperar al autoguardado de 30s. */
-      scPushRows('app_users', [nuevo]);
-      registrarEventoSeguridad('creacion', email, 'Se creó la cuenta de ' + nombre + ' (' + roles.join(' + ') + '), activa de inmediato con clave temporal -- solicitado por ' + state.user.nombre + '. Deberá cambiarla en su primer inicio de sesión.');
-      toast('ok', 'Usuario creado', nombre + ' fue registrado como ' + roles.join(' + ') + ' y ya puede iniciar sesión con la clave temporal ' + CLAVE_TEMPORAL_USUARIO_NUEVO + '.');
+      /* Ver nota "Supabase": esperado por el mismo motivo que la edición de arriba -- si Admin refresca
+         justo después de crear, antes de que este push confirme, el navegador lo cancela a medio camino y
+         el usuario nuevo nunca llega a existir en Supabase (desaparecería al recargar). */
+      scPushRows('app_users', [nuevo]).then(function () {
+        registrarEventoSeguridad('creacion', email, 'Se creó la cuenta de ' + nombre + ' (' + roles.join(' + ') + '), activa de inmediato con clave temporal -- solicitado por ' + state.user.nombre + '. Deberá cambiarla en su primer inicio de sesión.');
+        toast('ok', 'Usuario creado', nombre + ' fue registrado como ' + roles.join(' + ') + ' y ya puede iniciar sesión con la clave temporal ' + CLAVE_TEMPORAL_USUARIO_NUEVO + '.');
+        closeModal();
+        renderUsuarios();
+      });
+      return;
     }
-    closeModal();
-    renderUsuarios();
   });
   document.getElementById('formPermisos').addEventListener('submit', function (e) {
     e.preventDefault();
