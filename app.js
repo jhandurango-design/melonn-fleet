@@ -486,7 +486,15 @@ function scPullAll() {
          (si el usuario ya no existe en el pull, deja state.user intacto -- nunca cierra la sesión por esto). */
       if (state.user) {
         var userFresco = state.users.find(function (u) { return u.id === state.user.id; });
-        if (userFresco) state.user = userFresco;
+        /* Ver requerimiento "La plataforma está totalmente bloqueada en producción" (regresión real causada
+           por el re-anclaje de arriba): user.role es EFÍMERO de sesión -- nunca se persiste a Supabase (se
+           recalcula en cada login desde user.roles[0], o lo fija explícitamente confirmarSeleccionPerfil()
+           para cuentas multirrol) -- el registro recién traído del pull JAMÁS trae .role, solo .roles[].
+           Re-anclar sin preservarlo dejaba state.user.role en undefined a mitad de sesión (el pull de
+           completarInicioSesion() puede resolver DESPUÉS de que el usuario ya eligió perfil en modalSeleccionPerfil),
+           reventando renderSidebar/solicitudesPendientesUnificadas con un TypeError no capturado en cuanto
+           gravityTick disparaba el siguiente render -- causa raíz real del "bloqueo total" reportado en vivo. */
+        if (userFresco) { userFresco.role = state.user.role; state.user = userFresco; }
       }
     }
     if (mensajeros && mensajeros.length) { state.mensajeros = mensajeros.map(function (row) { return row.value; }); changed = true; }
