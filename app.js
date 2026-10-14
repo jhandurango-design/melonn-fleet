@@ -5005,8 +5005,13 @@ function renderContextPill() {
   var role = state.user.role;
   var labelEl = document.getElementById('contextLabel'), valueEl = document.getElementById('contextValue'),
     pill = document.getElementById('contextPill'), chevron = document.getElementById('contextChevron');
-  if (role === 'ADMIN') { labelEl.textContent = t('context.bodegaActual'); valueEl.textContent = state.activeSede || t('context.todasLasSedes'); pill.classList.remove('static'); chevron.style.display = ''; }
-  else if (role === 'PLANNER') { labelEl.textContent = t('context.bodegaActual'); valueEl.textContent = state.activeSede; pill.classList.remove('static'); chevron.style.display = ''; }
+  /* Ver requerimiento "Ajuste de regla de negocio sobre el Header": ADMIN administra la plataforma de forma
+     global -- nunca queda restringido a una bodega puntual (a diferencia de PLANNER, que sí elige "Bodega
+     actual" en vivo desde este mismo pill) ni pertenece a una flota aliada. El pill completo se oculta para
+     este rol en vez de mostrar una etiqueta vacía o un selector de bodega que no aplica a su alcance. */
+  if (role === 'ADMIN') { pill.hidden = true; return; }
+  pill.hidden = false;
+  if (role === 'PLANNER') { labelEl.textContent = t('context.bodegaActual'); valueEl.textContent = state.activeSede; pill.classList.remove('static'); chevron.style.display = ''; }
   else if (role === 'AUDITOR') { labelEl.textContent = t('context.alcanceAuditoria'); valueEl.textContent = state.activeSede || t('context.todasLasSedes'); pill.classList.remove('static'); chevron.style.display = ''; }
   else if (role === 'BODEGA') { labelEl.textContent = t('context.bodegaAsignada'); valueEl.textContent = state.user.sede || t('context.todasLasSedes'); pill.classList.add('static'); chevron.style.display = 'none'; }
   /* Ver requerimiento "Auditoría y Refactorización Estructural...": fallback defensivo -- un ALIADO sin
