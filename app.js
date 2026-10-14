@@ -12307,6 +12307,65 @@ function alertarVentanaRetorno(mensajeroId, conflicto) {
   toast('warn', 'Ventana de retorno no cumplida',
     getMensajero(mensajeroId).nombre + ' ya está programado a las ' + fmtTime12(conflicto.hora) + '. Por tiempo de operación y retorno (4 hrs mínimas), solo puede volver a programarse a partir de las ' + fmtTime12(fmtTimeHM(horaPermitidaDT)) + '.');
 }
+/* Ver requerimiento "Selector de Hora propio con botón Aceptar": reemplaza el picker nativo de
+   <input type="time"> (ver #turnoHora en index.html, ahora type="text" readonly) por un desplegable propio
+   con 2 columnas (hora 00-23 / minutos en pasos de 15) y un botón "Aceptar" explícito al pie -- la selección
+   NO se aplica al campo hasta confirmar, así el Aliado nunca queda en duda de si "ya quedó marcada" o no.
+   "Cancelar"/clic afuera cierran sin aplicar nada. El valor final sigue siendo "HH:MM" en 24h, exactamente
+   el mismo formato que ya lee el resto del código (submitTurno, parseDT, etc.) -- solo cambia CÓMO se
+   asigna, nunca qué se guarda. */
+function initTimePicker(inputId) {
+  var input = document.getElementById(inputId);
+  var wrap = input.closest('.timepicker');
+  var panel = document.getElementById(inputId + 'Panel');
+  var colHora = document.getElementById(inputId + 'ColHora');
+  var colMin = document.getElementById(inputId + 'ColMin');
+  var btnAceptar = document.getElementById(inputId + 'Aceptar');
+  var btnCancelar = document.getElementById(inputId + 'Cancelar');
+  var pendiente = { h: 8, m: 0 };
+
+  colHora.innerHTML = Array.from({ length: 24 }, function (_, h) {
+    return '<button type="button" data-h="' + h + '">' + String(h).padStart(2, '0') + '</button>';
+  }).join('');
+  colMin.innerHTML = [0, 15, 30, 45].map(function (m) {
+    return '<button type="button" data-m="' + m + '">' + String(m).padStart(2, '0') + '</button>';
+  }).join('');
+
+  function marcarSeleccion() {
+    colHora.querySelectorAll('button').forEach(function (b) { b.classList.toggle('selected', Number(b.dataset.h) === pendiente.h); });
+    colMin.querySelectorAll('button').forEach(function (b) { b.classList.toggle('selected', Number(b.dataset.m) === pendiente.m); });
+  }
+  colHora.addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    pendiente.h = Number(b.dataset.h); marcarSeleccion();
+  });
+  colMin.addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    pendiente.m = Number(b.dataset.m); marcarSeleccion();
+  });
+
+  function abrir() {
+    var actual = input.value ? input.value.split(':') : null;
+    if (actual) { pendiente.h = parseInt(actual[0], 10); pendiente.m = parseInt(actual[1], 10); }
+    marcarSeleccion();
+    panel.hidden = false;
+    var selH = colHora.querySelector('button.selected'); if (selH) selH.scrollIntoView({ block: 'center' });
+    var selM = colMin.querySelector('button.selected'); if (selM) selM.scrollIntoView({ block: 'center' });
+  }
+  function cerrar() { panel.hidden = true; }
+
+  input.addEventListener('click', function () { if (panel.hidden) abrir(); else cerrar(); });
+  btnCancelar.addEventListener('click', cerrar);
+  btnAceptar.addEventListener('click', function () {
+    input.value = String(pendiente.h).padStart(2, '0') + ':' + String(pendiente.m).padStart(2, '0');
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    cerrar();
+  });
+  document.addEventListener('click', function (e) {
+    if (!panel.hidden && !wrap.contains(e.target)) cerrar();
+  });
+}
 function openNoUbicaModal(routeId) {
   var route = state.turnos.find(function (r) { return r.id === routeId; });
   if (!route || !route.pendienteAsignacion) return;
@@ -17753,11 +17812,22 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('formFlotaPropiaEditar').addEventListener('submit', submitFlotaPropiaEdit);
   }
   document.getElementById('formTurno').addEventListener('submit', submitTurno);
+  /* Ver requerimiento "Limpieza y bloqueo de campos del mensajero en 'Pendiente / Por Confirmar'": antes
+     solo atenuaba visualmente (opacity + pointer-events:none) -- el texto que el Aliado ya hubiera escrito
+     seguía ahí (foco por teclado, Tab, incluso pegar seguían funcionando) y, más importante, no quedaba
+     claro que esos datos ya NO se iban a usar. Ahora limpia los valores y los deshabilita de verdad
+     (disabled real, no solo CSS) al marcar la casilla; al desmarcarla, vuelven a quedar editables. */
   document.getElementById('turnoPendiente').addEventListener('change', function (e) {
     var wrap = document.getElementById('turnoDatosMensajero');
+    var campos = wrap.querySelectorAll('input');
+    if (e.target.checked) {
+      campos.forEach(function (c) { c.value = ''; c.disabled = true; });
+    } else {
+      campos.forEach(function (c) { c.disabled = false; });
+    }
     wrap.style.opacity = e.target.checked ? '0.45' : '1';
-    wrap.style.pointerEvents = e.target.checked ? 'none' : '';
   });
+  initTimePicker('turnoHora');
   document.getElementById('formNoUbica').addEventListener('submit', function (e) {
     e.preventDefault();
     var routeId = document.getElementById('noUbicaRouteId').value;

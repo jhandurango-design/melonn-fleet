@@ -2380,7 +2380,29 @@
         <div class="field"><label for="turnoPlaca">Placa</label><input type="text" id="turnoPlaca"></div>
         <div class="field"><label for="turnoCorreo">Correo Electrónico</label><input type="email" id="turnoCorreo"></div>
       </div>
-      <div class="field" style="max-width:250px;"><label for="turnoHora">Hora programada</label><input type="time" id="turnoHora" required></div>
+      <!-- Ver requerimiento "Selector de Hora propio con botón Aceptar": el <input type="time"> nativo no
+           admite agregarle un botón de confirmación al pie de su desplegable (lo renderiza el navegador/SO,
+           fuera del alcance de la página) -- se reemplaza por un selector propio (ver initTimePicker en
+           app.js) que sí lo tiene. #turnoHora sigue siendo el campo real que el resto del código lee tal
+           cual (valor "HH:MM" en 24h), solo cambia CÓMO se le asigna el valor. -->
+      <div class="field" style="max-width:250px;">
+        <label for="turnoHora">Hora programada</label>
+        <div class="timepicker" id="turnoHoraTimepicker">
+          <input type="text" id="turnoHora" class="timepicker-input" required readonly autocomplete="off" placeholder="Selecciona la hora">
+          <svg class="timepicker-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <div class="timepicker-panel" id="turnoHoraPanel" hidden>
+            <div class="timepicker-cols">
+              <div class="timepicker-col" id="turnoHoraColHora"></div>
+              <div class="timepicker-col-sep">:</div>
+              <div class="timepicker-col" id="turnoHoraColMin"></div>
+            </div>
+            <div class="timepicker-foot">
+              <button type="button" class="btn btn-ghost" id="turnoHoraCancelar">Cancelar</button>
+              <button type="button" class="btn btn-primary" id="turnoHoraAceptar">Aceptar</button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div class="modal-foot">
         <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
         <button type="submit" class="btn btn-primary" id="turnoSubmitBtn">Guardar turno</button>
