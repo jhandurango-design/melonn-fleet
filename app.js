@@ -7578,6 +7578,7 @@ function renderProgramacion() {
   document.getElementById('btnCargarFlotaHabitual').style.display = state.progDay === 'tomorrow' ? '' : 'none';
   document.getElementById('btnGuardarFlotaHabitual').style.display = state.progDay === 'tomorrow' ? '' : 'none';
   renderProgBanner();
+  renderProgCuotasResumen();
   refreshProgFiltroBodegaOptions();
   var routes = routesInScope(state.progDay);
   if (state.progFiltroBodega) routes = routes.filter(function (r) { return r.sede === state.progFiltroBodega; });
@@ -15051,7 +15052,20 @@ function cuotasMatrizTablaHtml(sede, aliado, esProxima, editable) {
    bodega activa, así que el alcance naturalmente devuelve esa única sede cuando el país activo es MX. */
 function cuotasScopeSedes() {
   var role = Auth.getUserRole();
-  if (role === 'ALIADO') return sedesForAliado(state.user.aliado);
+  if (role === 'ALIADO') {
+    /* Ver requerimiento "Revisión de Filtro de Ciudades en Módulo de Cuotas": sedesForAliado() deriva
+       exclusivamente de state.turnos (bodegas donde este aliado YA tiene turnos programados) -- una bodega
+       con cuota parametrizada en Supabase pero sin ningún turno todavía (p.ej. una ciudad de expansión
+       reciente) quedaba totalmente ausente del selector "#cuotasSede", incluso en modo "Todas las bodegas"
+       (cuotasComboList también deriva de esta misma función). Caso real reportado: Easyway con cuota en 3
+       ciudades pero solo veía Medellín. Se une con las bodegas donde SÍ existe al menos una fila de
+       cuotasMatriz para este aliado, para que el selector refleje TODA su parametrización nacional, no solo
+       dónde ya operó. */
+    var set = {};
+    sedesForAliado(state.user.aliado).forEach(function (s) { set[s] = true; });
+    state.cuotasMatriz.forEach(function (c) { if (c.aliado === state.user.aliado && c.cantidad > 0) set[c.sede] = true; });
+    return Object.keys(set).sort();
+  }
   if (role === 'AUDITOR') return SEDES.slice(); // CO-only, mismo alcance que Auditoría
   return activeWarehouseIds(currentCountryCode());
 }
@@ -15308,6 +15322,48 @@ function cuotasComplianceRecords(sede, aliado) {
   if (!dia || !sede || !aliado) return [];
   return state.cuotasMatrizVigenteHoy.filter(function (c) { return c.sede === sede && c.aliado === aliado && c.dia === dia; })
     .map(function (c) { return { sede: c.sede, aliado: c.aliado, vehiculo: c.vehiculo, franja: c.franja, cantidad: c.cantidad, actuales: turnosProgramadosCount(c.sede, c.aliado, TODAY_STR, c.franja, c.vehiculo) }; });
+}
+/* Ver requerimiento "Integración y Reglas de Cuotas en Programar Flota": mismo motor que
+   cuotasComplianceRecords (checkCuotaExceso/cuotaAsignada), pero agregado por SEDE (sumando todas las
+   franjas/vehículos del día) y para TODAS las bodegas donde este aliado tiene cuota -- no solo el par
+   sede+aliado puntual que esté seleccionado en el módulo de Cuotas. Hoy usa la instantánea vigente congelada
+   (cuotasMatrizVigenteHoy), igual que el resto de la plataforma; cualquier otra fecha (Mañana) usa la matriz
+   en vivo -- mismo criterio que evaluarAprobacionCuota/checkCuotaExceso. Bodegas sin Cuotas activas para su
+   país quedan fuera por completo (ninguna de estas reglas aplica si el módulo está apagado). */
+function cuotasProgresoPorSede(aliado, fecha) {
+  var dia = diaSemanaKey(fecha);
+  if (!dia) return [];
+  var matriz = fecha === TODAY_STR ? state.cuotasMatrizVigenteHoy : state.cuotasMatriz;
+  var porSede = {};
+  matriz.forEach(function (c) {
+    if (c.aliado !== aliado || c.dia !== dia || c.cantidad <= 0) return;
+    if (!cuotasActivoPais(countryForSede(c.sede))) return;
+    if (!porSede[c.sede]) porSede[c.sede] = { sede: c.sede, cuota: 0, actuales: 0 };
+    porSede[c.sede].cuota += c.cantidad;
+    porSede[c.sede].actuales += turnosProgramadosCount(c.sede, aliado, fecha, c.franja, c.vehiculo);
+  });
+  return Object.keys(porSede).sort().map(function (s) { return porSede[s]; });
+}
+/* Widget de avance de cuotas al tope de Programar Flota -- oculto por completo si Cuotas no está activo
+   para ninguna de las bodegas de este aliado en la fecha activa (Hoy/Mañana). Cada bodega con déficit
+   ofrece un atajo directo a "Nuevo Turno" con Pendiente/Por Confirmar ya marcado para esa sede (ver
+   requerimiento "Manejo de Cuotas Incompletas": el recurso faltante se completa así, no hay forma de
+   "auto-generarlo" sin que el Aliado aporte sus propios datos). */
+function renderProgCuotasResumen() {
+  var el = document.getElementById('progCuotasResumen');
+  var fecha = state.progDay === 'tomorrow' ? TOMORROW_STR : TODAY_STR;
+  var progreso = cuotasProgresoPorSede(state.user.aliado, fecha);
+  if (!progreso.length) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  el.innerHTML = '<p class="panel-title">Avance de Cuotas — ' + (state.progDay === 'tomorrow' ? 'Mañana' : 'Hoy') + '</p>' +
+    '<div class="cuotas-resumen-chips">' + progreso.map(function (p) {
+      var cubierto = p.actuales >= p.cuota;
+      var faltan = p.cuota - p.actuales;
+      return '<div class="cuotas-resumen-chip ' + (cubierto ? 'ok' : 'pendiente') + '">' +
+        '<span>' + p.sede + ': ' + p.actuales + '/' + p.cuota + ' recursos</span>' +
+        (cubierto ? '' : ('<button type="button" class="btn-link" data-act="completar-cuota-pendiente" data-sede="' + p.sede + '">Faltan ' + faltan + ' — Completar con Pendiente/Por Confirmar</button>')) +
+        '</div>';
+    }).join('') + '</div>';
 }
 function cuotasComplianceRowHtml(rec) {
   var estado = rec.actuales >= rec.cantidad
@@ -18269,6 +18325,14 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'flota-propia-agregar') openFlotaPropiaCrearModal();
     else if (act === 'no-ubica-recurso') openNoUbicaModal(id);
     else if (act === 'eliminar-turno-pendiente') eliminarTurnoPendiente(id);
+    else if (act === 'completar-cuota-pendiente') {
+      openTurnoModal('create', null);
+      var sedeDeficit = btn.dataset.sede;
+      if (sedeDeficit) document.getElementById('turnoSede').value = sedeDeficit;
+      var cbPendiente = document.getElementById('turnoPendiente');
+      cbPendiente.checked = true;
+      cbPendiente.dispatchEvent(new Event('change'));
+    }
     else if (act === 'aceptar-solicitud-general') resolverSolicitudGeneral(id, true);
     else if (act === 'rechazar-solicitud-general') resolverSolicitudGeneral(id, false);
     else if (act === 'cuota-aprobacion-aprobar') aprobarCuotaPlanner(id);

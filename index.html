@@ -823,6 +823,12 @@
 
         <div class="cutoff-banner" id="cutoffBanner" hidden></div>
 
+        <!-- Ver requerimiento "Integración y Reglas de Cuotas en Programar Flota": avance de cuotas por
+             bodega (ver cuotasProgresoPorSede/renderProgCuotasResumen en app.js) -- solo visible para ALIADO
+             y solo cuando el Módulo de Cuotas está activo para al menos una de sus bodegas en la fecha
+             activa (Hoy/Mañana). Oculto por defecto; render lo muestra/puebla en cada render de la vista. -->
+        <section class="panel" id="progCuotasResumen" hidden></section>
+
         <!-- Filtros dinámicos (ver requerimiento de auditoría "Filtros Dinámicos" — refreshProgFiltroBodegaOptions/
              refreshProgFiltroMensajeroOptions en app.js): Bodega solo lista sedes con operación real de este
              Aliado; Mensajero solo lista mensajeros propios con turno programado en la fecha activa. -->
