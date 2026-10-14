@@ -471,7 +471,24 @@ function scPullAll() {
   return Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales')]).then(function (res) {
     var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3];
     var changed = false;
-    if (users && users.length) { state.users = deduplicarUsuariosPorEmail(users); changed = true; }
+    if (users && users.length) {
+      state.users = deduplicarUsuariosPorEmail(users);
+      changed = true;
+      /* Ver requerimiento "Bug de Persistencia: Cambio de Contraseña Voluntario": state.users se REEMPLAZA
+         aquí por un arreglo completamente nuevo, pero state.user (la sesión activa, asignada una sola vez en
+         completarInicioSesion) seguía apuntando al objeto VIEJO -- nunca se re-anclaba al registro fresco de
+         este mismo pull. Resultado real reproducido: justo después de completarInicioSesion() (que dispara
+         este mismo scPullAll sin esperarlo), si el pull trae de vuelta una fila más reciente que la que
+         completarInicioSesion() usó para fijar state.user (p. ej. la sesión se restauró en memoria desde un
+         snapshot local antes de que Supabase respondiera), ese cambio más fresco nunca llegaba a reflejarse
+         en la sesión activa -- el usuario seguía "viendo" en memoria datos obsoletos (password, roles,
+         mustChangePassword) de su propia cuenta hasta el siguiente logout/login completo. Re-ancla por id
+         (si el usuario ya no existe en el pull, deja state.user intacto -- nunca cierra la sesión por esto). */
+      if (state.user) {
+        var userFresco = state.users.find(function (u) { return u.id === state.user.id; });
+        if (userFresco) state.user = userFresco;
+      }
+    }
     if (mensajeros && mensajeros.length) { state.mensajeros = mensajeros.map(function (row) { return row.value; }); changed = true; }
     if (turnos && turnos.length) { state.turnos = deduplicarTurnosPorAsignacion(turnos); changed = true; }
     if (solicitudesGenerales && solicitudesGenerales.length) { state.solicitudesGenerales = solicitudesGenerales.map(function (row) { return row.value; }); changed = true; }
@@ -16670,14 +16687,15 @@ document.addEventListener('DOMContentLoaded', function () {
     if (nueva !== confirmar) { errorEl.textContent = 'La confirmación no coincide con la nueva contraseña.'; return; }
     errorEl.textContent = '';
     var user = pendingFirstLoginUser;
+    var passwordAnterior = user.password, mustChangeAnterior = user.mustChangePassword, temporalAnterior = user.isTemporaryPassword;
     user.password = nueva;
     user.mustChangePassword = false;
     user.isTemporaryPassword = false;
     user.failedLoginCount = 0;
     user.lockedUntil = null;
     persistUsers();
-    pendingFirstLoginUser = null;
-    closeModal();
+    var submitBtnObligatoria = e.target.querySelector('button[type="submit"]');
+    if (submitBtnObligatoria) submitBtnObligatoria.disabled = true;
     /* Ver nota "Supabase": push inmediato, igual que cualquier otro cambio de credenciales -- no puede
        esperar al autoguardado periódico de 30s ni al logout. CRÍTICO: startSession() tiene que esperar a que
        este push TERMINE antes de ejecutarse -- completarInicioSesion() dispara scPullAll() como primer paso,
@@ -16685,9 +16703,22 @@ document.addEventListener('DOMContentLoaded', function () {
        vuelta la fila VIEJA (clave temporal, mustChangePassword:true) y la usa para reemplazar state.users,
        deshaciendo en memoria el cambio que el usuario acaba de hacer (bug real reportado en producción:
        "la clave vuelve a ser la inicial al refrescar"). Encadenado en vez de disparado en paralelo, elimina
-       la carrera -- scPushRows() nunca rechaza (ver su propio catch), así que esto jamás se queda colgado
-       aunque Supabase no responda. */
-    scPushRows('app_users', [user]).then(function () {
+       la carrera. Ver requerimiento "Bug de Persistencia: Cambio de Contraseña Voluntario": scPushRows ya NO
+       resuelve ciegamente como éxito ante un fallo real de Supabase (ver su propio comentario) -- hay que
+       revisar res.ok antes de avanzar a startSession(), o un push genuinamente fallido (no solo una carrera)
+       dejaría pasar al usuario igual, con la clave viviendo solo en este navegador hasta el próximo pull. */
+    scPushRows('app_users', [user]).then(function (res) {
+      if (submitBtnObligatoria) submitBtnObligatoria.disabled = false;
+      if (!res.ok) {
+        user.password = passwordAnterior;
+        user.mustChangePassword = mustChangeAnterior;
+        user.isTemporaryPassword = temporalAnterior;
+        persistUsers();
+        errorEl.textContent = 'No se pudo confirmar el cambio en Supabase. Verifica tu conexión e intenta de nuevo.';
+        return;
+      }
+      pendingFirstLoginUser = null;
+      closeModal();
       startSession(user);
     });
   });
@@ -16719,6 +16750,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (nueva.length < 6) { errorEl.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
     if (nueva !== confirmar) { errorEl.textContent = 'La confirmación no coincide con la contraseña.'; return; }
     errorEl.textContent = '';
+    var passwordAnteriorRec = u.password, mustChangeAnteriorRec = u.mustChangePassword, temporalAnteriorRec = u.isTemporaryPassword;
     u.password = nueva;
     u.mustChangePassword = false;
     u.isTemporaryPassword = false;
@@ -16728,20 +16760,33 @@ document.addEventListener('DOMContentLoaded', function () {
     delete u.recoveryTokenExpiraEn;
     delete state.loginAttempts[u.email.toLowerCase()];
     persistUsers();
-    /* Cierra cualquier solicitud de recuperación que siguiera 'pendiente' para este correo -- cubre el caso
-       de una segunda solicitud duplicada que Admin todavía no había atendido: el usuario ya resolvió su
-       acceso por su cuenta, así que no debe quedar una fila pendiente eterna en el panel de Admin. */
-    state.securityEvents.forEach(function (ev) {
-      if (ev.tipo === 'recuperacion' && ev.estado === 'pendiente' && ev.email.toLowerCase() === u.email.toLowerCase()) {
-        resolverEventoRecuperacion(ev.id, 'El propio usuario completó su restablecimiento de contraseña a través del enlace de recuperación.');
+    var submitBtnRecovery = e.target.querySelector('button[type="submit"]');
+    if (submitBtnRecovery) submitBtnRecovery.disabled = true;
+    /* Ver requerimiento "Bug de Persistencia: Cambio de Contraseña Voluntario": mismo criterio que
+       #formCambioObligatorio -- revisa res.ok antes de dar la restauración por completada y avanzar a
+       startSession(); si Supabase rechaza o se cuelga el guardado, revierte la clave en memoria y deja al
+       usuario en la propia pantalla de recuperación con un error, en vez de dejarlo entrar con un cambio que
+       en realidad nunca llegó a la nube. */
+    scPushRows('app_users', [u]).then(function (res) {
+      if (submitBtnRecovery) submitBtnRecovery.disabled = false;
+      if (!res.ok) {
+        u.password = passwordAnteriorRec;
+        u.mustChangePassword = mustChangeAnteriorRec;
+        u.isTemporaryPassword = temporalAnteriorRec;
+        persistUsers();
+        errorEl.textContent = 'No se pudo confirmar el cambio en Supabase. Verifica tu conexión e intenta de nuevo.';
+        return;
       }
-    });
-    registrarEventoSeguridad('recuperacion_completada', u.email, 'El usuario restableció su propia contraseña a través del enlace de recuperación.');
-    document.getElementById('recoveryScreen').hidden = true;
-    /* Ver nota "Supabase" junto al submit de #formCambioObligatorio: mismo motivo exacto -- startSession()
-       dispara un scPullAll() que puede ganarle la carrera a este push si se disparan en paralelo, trayendo
-       de vuelta la clave vieja. Encadenado para eliminar la carrera. */
-    scPushRows('app_users', [u]).then(function () {
+      /* Cierra cualquier solicitud de recuperación que siguiera 'pendiente' para este correo -- cubre el caso
+         de una segunda solicitud duplicada que Admin todavía no había atendido: el usuario ya resolvió su
+         acceso por su cuenta, así que no debe quedar una fila pendiente eterna en el panel de Admin. */
+      state.securityEvents.forEach(function (ev) {
+        if (ev.tipo === 'recuperacion' && ev.estado === 'pendiente' && ev.email.toLowerCase() === u.email.toLowerCase()) {
+          resolverEventoRecuperacion(ev.id, 'El propio usuario completó su restablecimiento de contraseña a través del enlace de recuperación.');
+        }
+      });
+      registrarEventoSeguridad('recuperacion_completada', u.email, 'El usuario restableció su propia contraseña a través del enlace de recuperación.');
+      document.getElementById('recoveryScreen').hidden = true;
       startSession(u);
     });
   });
@@ -16782,14 +16827,37 @@ document.addEventListener('DOMContentLoaded', function () {
     if (nueva.length < 6) { errorEl.textContent = 'La nueva contraseña debe tener al menos 6 caracteres.'; return; }
     if (nueva !== confirmar) { errorEl.textContent = 'La confirmación no coincide con la nueva contraseña.'; return; }
     errorEl.textContent = '';
-    /* state.user es el mismo objeto referenciado dentro de state.users (viene de state.users.find en el
-       login), así que mutar .password aquí ya actualiza el arreglo en memoria — persistUsers() lo baja
-       a localStorage para que sobreviva a un logout/recarga real. */
+    /* Ver requerimiento "Bug de Persistencia: Cambio de Contraseña Voluntario": a diferencia de
+       #formCambioObligatorio/formRecuperarCuenta (primer login / enlace de recuperación, ya corregidos antes
+       en este mismo archivo), ESTE flujo -- "Cambiar Contraseña" desde el menú de la cuenta, con la sesión ya
+       activa -- nunca empujaba a Supabase, solo persistUsers() (localStorage). Cualquier scPullAll posterior
+       (cambio de pestaña/foco, logout, recarga) traía de vuelta la fila vieja de app_users y revertía la
+       clave en memoria sin aviso -- exactamente el bug reportado ("la clave nueva funciona hasta refrescar").
+       state.user es el mismo objeto referenciado dentro de state.users (viene de state.users.find en el
+       login), así que mutar .password aquí ya actualiza el arreglo en memoria. */
+    var passwordAnterior = state.user.password;
     state.user.password = nueva;
+    state.user.mustChangePassword = false;
+    state.user.isTemporaryPassword = false;
     persistUsers();
-    toast('ok', 'Contraseña actualizada', 'Tu contraseña fue cambiada correctamente.');
-    document.getElementById('formCambiarPassword').reset();
-    closeModal();
+    var submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+    scPushRows('app_users', [state.user]).then(function (res) {
+      if (submitBtn) submitBtn.disabled = false;
+      if (!res.ok) {
+        /* No confirmado en Supabase: revierte el cambio en memoria/localStorage y deja el modal abierto --
+           nunca mostrar "Contraseña actualizada" cuando en realidad solo vive en este navegador (scPushRows
+           ya disparó su propio toast "Sin conexión con Supabase", esto solo añade el motivo puntual en el
+           formulario mismo). */
+        state.user.password = passwordAnterior;
+        persistUsers();
+        errorEl.textContent = 'No se pudo confirmar el cambio en Supabase — tu contraseña sigue siendo la anterior. Verifica tu conexión e intenta de nuevo.';
+        return;
+      }
+      toast('ok', 'Contraseña actualizada', 'Tu contraseña fue cambiada correctamente.');
+      document.getElementById('formCambiarPassword').reset();
+      closeModal();
+    });
   });
 
   document.getElementById('btnPreferencias').addEventListener('click', function () {
