@@ -16544,6 +16544,17 @@ function logout() {
   state.solicitudesFiltroBodega = '';
   state.sidebarGroupsOpen = { programacion: false, aliado_prog_flota: false };
   lastMetricsHtml = {};
+  /* Ver requerimiento "Aislamiento de sesión en el DOM (evitar efecto 'fusión')": #appShell ya queda
+     oculto justo abajo (cubre por completo cualquier residuo visual mientras dura la pantalla de login),
+     pero se vacía también el HTML del menú y del contexto del Header -- defensa en profundidad para que,
+     aunque algo external fuerce mostrar #appShell antes de que renderSidebar()/renderContextPill() del
+     siguiente login terminen de correr, nunca se vea ni por una fracción de segundo el nombre, rol o
+     módulos de la cuenta anterior. */
+  document.getElementById('sidebarNav').innerHTML = '';
+  document.getElementById('userName').textContent = '—';
+  document.getElementById('contextLabel').textContent = '';
+  document.getElementById('contextValue').textContent = '';
+  document.getElementById('contextPill').hidden = true;
   document.getElementById('appShell').hidden = true;
   document.getElementById('loginScreen').style.display = '';
   document.getElementById('loginForm').reset();
