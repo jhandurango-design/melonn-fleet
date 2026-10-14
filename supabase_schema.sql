@@ -1,9 +1,9 @@
 -- Melonn Fleet -- esquema Supabase para persistencia multiusuario.
 -- Ejecutar completo en el SQL Editor de Supabase (Project > SQL Editor > New query).
 --
--- Diseño: 3 tablas "espejo" (snapshot jsonb completo por fila), una por cada arreglo de state.* que
+-- Diseño: 4 tablas "espejo" (snapshot jsonb completo por fila), una por cada arreglo de state.* que
 -- app.js sincroniza (ver scPullAll/scPushAll/scPullTable/scPushRows en app.js): app_users, app_mensajeros,
--- app_turnos. No se normalizan en columnas individuales a propósito -- estos objetos acumulan campos
+-- app_turnos, app_solicitudes_generales. No se normalizan en columnas individuales a propósito -- estos objetos acumulan campos
 -- opcionales con el tiempo (ver turnos: llegadaScript, novedadElementos, arriboResolucion, etc.) y mapearlos
 -- 1:1 a columnas obligaría a migrar el esquema cada vez que el modelo de datos del front crezca. `id` es el
 -- mismo id que ya usa cada registro en memoria (u1, m-qa-..., TUR-1001, etc.).
@@ -26,6 +26,7 @@
 drop table if exists public.app_users cascade;
 drop table if exists public.app_mensajeros cascade;
 drop table if exists public.app_turnos cascade;
+drop table if exists public.app_solicitudes_generales cascade;
 
 create table public.app_users (
   id text primary key,
@@ -45,6 +46,16 @@ create table public.app_turnos (
   updated_at timestamptz not null default now()
 );
 
+-- Ver requerimiento "Persistencia Crítica: Aprobar Prolongación de Tiempo en Supabase": state.solicitudesGenerales
+-- (Prolongación de Flota, Nuevo Turno/Cupo Adicional fuera de ventana, Reemplazo por Alerta/Cancelación,
+-- Reprogramación Masiva, etc.) nunca tuvo tabla espejo -- vivía 100% en memoria y se perdía por completo en
+-- cada recarga (incluyendo cualquier Aceptar/Rechazar ya resuelto por Planner/Admin).
+create table public.app_solicitudes_generales (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 -- Ver "Diagnóstico en vivo, 2026-10-13": las políticas RLS de abajo NO bastan por sí solas -- en Postgres,
 -- el GRANT de tabla y las políticas RLS son 2 capas distintas. RLS decide QUÉ FILAS puede ver/tocar un rol
 -- que YA tiene permiso sobre la tabla; sin el GRANT, Postgres rechaza la consulta ANTES de llegar a evaluar
@@ -58,10 +69,15 @@ grant select, insert, update on public.app_mensajeros to anon;
 -- turno cancelado/eliminado por el Aliado SÍ se quita de verdad -- sin este GRANT, scDeleteRows() fallaba en
 -- silencio y la fila quedaba huérfana, resucitada por el siguiente scPullAll().
 grant select, insert, update, delete on public.app_turnos to anon;
+-- app_solicitudes_generales también lleva DELETE por simetría con app_turnos, aunque app.js hoy solo
+-- hace upsert (ninguna solicitud se borra de verdad, solo cambia de estado) -- deja la puerta abierta sin
+-- requerir otra migración si eso cambia más adelante.
+grant select, insert, update, delete on public.app_solicitudes_generales to anon;
 
 alter table public.app_users enable row level security;
 alter table public.app_mensajeros enable row level security;
 alter table public.app_turnos enable row level security;
+alter table public.app_solicitudes_generales enable row level security;
 
 -- drop+create (no "if not exists" para policies en Postgres) -- hace el script seguro de volver a correr
 -- completo en el futuro sin fallar por "policy already exists".
@@ -88,6 +104,15 @@ create policy "anon_insert_app_turnos" on public.app_turnos for insert to anon w
 create policy "anon_update_app_turnos" on public.app_turnos for update to anon using (true) with check (true);
 create policy "anon_delete_app_turnos" on public.app_turnos for delete to anon using (true);
 
+drop policy if exists "anon_select_app_solicitudes_generales" on public.app_solicitudes_generales;
+drop policy if exists "anon_insert_app_solicitudes_generales" on public.app_solicitudes_generales;
+drop policy if exists "anon_update_app_solicitudes_generales" on public.app_solicitudes_generales;
+drop policy if exists "anon_delete_app_solicitudes_generales" on public.app_solicitudes_generales;
+create policy "anon_select_app_solicitudes_generales" on public.app_solicitudes_generales for select to anon using (true);
+create policy "anon_insert_app_solicitudes_generales" on public.app_solicitudes_generales for insert to anon with check (true);
+create policy "anon_update_app_solicitudes_generales" on public.app_solicitudes_generales for update to anon using (true) with check (true);
+create policy "anon_delete_app_solicitudes_generales" on public.app_solicitudes_generales for delete to anon using (true);
+
 -- Mantiene updated_at al día en cada upsert (informativo -- nada en app.js lo lee todavía).
 create or replace function public.set_updated_at()
 returns trigger as $$
@@ -102,4 +127,6 @@ create trigger trg_app_users_updated_at before update on public.app_users
 create trigger trg_app_mensajeros_updated_at before update on public.app_mensajeros
   for each row execute function public.set_updated_at();
 create trigger trg_app_turnos_updated_at before update on public.app_turnos
+  for each row execute function public.set_updated_at();
+create trigger trg_app_solicitudes_generales_updated_at before update on public.app_solicitudes_generales
   for each row execute function public.set_updated_at();

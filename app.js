@@ -405,18 +405,20 @@ function scPushAll() {
   scPushRows('app_users', state.users);
   scPushRows('app_mensajeros', state.mensajeros);
   scPushRows('app_turnos', state.turnos);
+  scPushRows('app_solicitudes_generales', state.solicitudesGenerales);
 }
 /* Trae las 3 tablas y, si Supabase tiene datos, los adopta como fuente de verdad en memoria -- un fallo de
    red o una tabla todavía vacía (primer arranque antes de que nadie haya empujado nada) deja el dataset
    local (seed o localStorage) exactamente como estaba, sin romper nada. Si ya hay una sesión activa cuando
    llega la respuesta, vuelve a renderizar para reflejar el dataset fresco. */
 function scPullAll() {
-  return Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos')]).then(function (res) {
-    var users = res[0], mensajeros = res[1], turnos = res[2];
+  return Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales')]).then(function (res) {
+    var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3];
     var changed = false;
     if (users && users.length) { state.users = deduplicarUsuariosPorEmail(users); changed = true; }
     if (mensajeros && mensajeros.length) { state.mensajeros = mensajeros.map(function (row) { return row.value; }); changed = true; }
     if (turnos && turnos.length) { state.turnos = deduplicarTurnosPorAsignacion(turnos); changed = true; }
+    if (solicitudesGenerales && solicitudesGenerales.length) { state.solicitudesGenerales = solicitudesGenerales.map(function (row) { return row.value; }); changed = true; }
     if (changed && state.user) syncAndRender(true);
     return changed;
   });
@@ -1994,7 +1996,18 @@ function nextTurnoId() {
   return 'TUR-' + String(maxNum + 1).padStart(4, '0');
 }
 function nextMensajeroId() { state.mensajeroCounter++; return 'm' + state.mensajeroCounter; }
-function nextSolicitudGeneralId() { state.solicitudGeneralCounter++; return 'SOL-' + String(state.solicitudGeneralCounter).padStart(3, '0'); }
+/* Ver requerimiento "Persistencia Crítica: Aprobar Prolongación de Tiempo en Supabase": mismo bug de
+   contador obsoleto ya corregido para nextTurnoId/nextUserId -- ahora que state.solicitudesGenerales SÍ se
+   trae de Supabase (scPullAll), derivar el siguiente id del propio contador en memoria (que arranca en 0 en
+   cada carga) volvería a generar SOL-001 encima de una solicitud SOL-007 ya real traída del pull. Se deriva
+   del máximo id YA presente en el array, igual que las otras 2 colecciones. */
+function nextSolicitudGeneralId() {
+  var maxNum = state.solicitudesGenerales.reduce(function (max, s) {
+    var n = parseInt(String(s.id).slice(4), 10);
+    return isNaN(n) ? max : Math.max(max, n);
+  }, 0);
+  return 'SOL-' + String(maxNum + 1).padStart(3, '0');
+}
 
 /* ---------------- Permisos ----------------
    canDo() queda como wrapper de compatibilidad: la matriz de permisos vive
@@ -3259,12 +3272,14 @@ function solicitarProlongacion() {
   var existente = aliadoProlongacionSolicitud();
   if (existente && existente.estado === 'pendiente') { toast('warn', 'Ya enviada', 'Tu solicitud de prolongación ya está pendiente de respuesta.'); return; }
   if (existente && existente.estado === 'aceptada') return;
-  state.solicitudesGenerales.push({
+  var solProlongacion = {
     id: nextSolicitudGeneralId(), tipo: 'prolongacion', estado: 'pendiente', aliado: state.user.aliado,
     solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), fecha: TODAY_STR,
     motivo: 'Solicitud de prolongación de tiempo para completar la programación de mañana (hasta las 12:00 AM).', detalle: {}
-  });
+  };
+  state.solicitudesGenerales.push(solProlongacion);
   toast('warn', 'Prolongación solicitada', 'Tu solicitud fue enviada al Planner/Admin para aprobación.');
+  scPushRows('app_solicitudes_generales', [solProlongacion]);
   syncAndRender(true);
 }
 /* Ver requerimiento "Refactorización de Módulo Cumplimiento y Calidad: Lógica de Métricas, UI, Nomenclatura y
@@ -3475,6 +3490,12 @@ function resolverSolicitudGeneral(id, aceptar) {
      tipo de Solicitud General (alta de turno, edición, reemplazo por alerta/cancelación, reprogramación
      masiva) empujaba nunca los turnos afectados a Supabase. */
   if (turnosParaPush.length) scPushRows('app_turnos', turnosParaPush);
+  /* Ver requerimiento "Persistencia Crítica: Aprobar Prolongación de Tiempo en Supabase": la solicitud
+     general resuelta (sol.estado/resueltoPor/resueltoEn/...) tampoco se empujaba nunca -- state.solicitudesGenerales
+     no tenía NINGUNA tabla espejo en Supabase (a diferencia de app_users/app_mensajeros/app_turnos), así que
+     cualquier Aceptar/Rechazar (prolongación, nuevo turno, cupo adicional, reemplazo, reprogramación masiva)
+     se perdía al recargar o al llegar el próximo scPullAll (login/foco/logout) desde otra sesión. */
+  scPushRows('app_solicitudes_generales', [sol]);
   syncAndRender(true);
 }
 /* Ver requerimiento "Addendum de Funcionalidad: Botón 'Cancelar Solicitud' en 'Mis Solicitudes Enviadas'
@@ -3502,6 +3523,10 @@ function cancelarSolicitudPropia(rowId, isRoute, motivo) {
     s.canceladoPorRol = role;
     registrarHistorialCambio(route, { tipo: s.tipo, accion: 'cancelada_por_emisor', motivo: motivo, horaAnterior: s.horaAnterior, horaPropuesta: s.nuevaHora, por: state.user.nombre, rol: role });
     toast('warn', 'Solicitud cancelada', route.id + ' — retiraste tu propia solicitud antes de que fuera resuelta.');
+    /* Ver requerimiento "Persistencia Crítica: Aprobar Prolongación de Tiempo en Supabase": mismo hallazgo
+       aplicado aquí -- route.solicitud (embebida en el turno) tampoco se empujaba a app_turnos al
+       retractarse, así que la cancelación se perdía igual al recargar. */
+    scPushRows('app_turnos', [route]);
   } else {
     var sol = state.solicitudesGenerales.find(function (x) { return x.id === rowId; });
     if (!sol || sol.estado !== 'pendiente') return;
@@ -3518,9 +3543,10 @@ function cancelarSolicitudPropia(rowId, isRoute, motivo) {
        que el turno vuelva a ser editable de inmediato. */
     if (sol.detalle && sol.detalle.routeId) {
       var routeRel = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
-      if (routeRel) routeRel.solicitudEdicionPendiente = false;
+      if (routeRel) { routeRel.solicitudEdicionPendiente = false; scPushRows('app_turnos', [routeRel]); }
     }
     toast('warn', 'Solicitud cancelada', solicitudGeneralTipoLabel(sol.tipo) + ' — retiraste tu propia solicitud antes de que fuera resuelta.');
+    scPushRows('app_solicitudes_generales', [sol]);
   }
   syncAndRender(true);
 }
@@ -3836,7 +3862,7 @@ function solicitarReemplazoAlerta(routeId, payload) {
   if (!canDo('schedule.aliado.manage')) return;
   var route = state.turnos.find(function (r) { return r.id === routeId; });
   if (!route || !alertaConfirmarReemplazoElegible(route)) return;
-  state.solicitudesGenerales.push({
+  var solReemplazoAlerta = {
     id: nextSolicitudGeneralId(), tipo: 'reemplazo_alerta', estado: 'pendiente', aliado: state.user.aliado,
     solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), fecha: TODAY_STR,
     motivo: 'Reemplazo de mensajero solicitado por el Aliado desde Alertas Activas — ' + route.id + '.',
@@ -3844,8 +3870,10 @@ function solicitarReemplazoAlerta(routeId, payload) {
       routeId: routeId, sede: route.sede, nombre: payload.nombre, telefono: payload.telefono,
       cedula: payload.cedula, placa: payload.placa, vehiculo: payload.vehiculo, correo: payload.correo
     }
-  });
+  };
+  state.solicitudesGenerales.push(solReemplazoAlerta);
   toast('warn', 'Reemplazo enviado a Planner', route.id + ' — el reemplazo quedó "Reemplazo Pendiente de Aprobación" en Solicitudes y Cambios.');
+  scPushRows('app_solicitudes_generales', [solReemplazoAlerta]);
   syncAndRender(true);
 }
 /* ---------------- Solicitud Extraordinaria de Recurso (Camino 2 del retiro — demora en despacho previa) ----
@@ -4011,7 +4039,7 @@ function solicitarCancelacionReemplazo(routeId, payload) {
   if (!canDo('schedule.aliado.manage')) return;
   var route = state.turnos.find(function (r) { return r.id === routeId; });
   if (!route || route.solicitudEdicionPendiente) return;
-  state.solicitudesGenerales.push({
+  var solCancelacionReemplazo = {
     id: nextSolicitudGeneralId(), tipo: 'reemplazo_cancelacion', estado: 'pendiente', aliado: state.user.aliado,
     solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), fecha: TODAY_STR,
     motivo: 'Cancelación de mensajero con reemplazo solicitada por el Aliado desde Seguimiento — ' + route.id + '.',
@@ -4019,10 +4047,13 @@ function solicitarCancelacionReemplazo(routeId, payload) {
       routeId: routeId, sede: route.sede, nombre: payload.nombre, telefono: payload.telefono,
       cedula: payload.cedula, placa: payload.placa, vehiculo: payload.vehiculo, correo: payload.correo
     }
-  });
+  };
+  state.solicitudesGenerales.push(solCancelacionReemplazo);
   route.solicitudEdicionPendiente = true;
   registrarHistorialCambio(route, { tipo: 'cancelacion', accion: 'solicitada', motivo: 'El aliado solicitó cancelar al mensajero asignado con reemplazo; pendiente de aprobación por Planner.', horaAnterior: route.hora, horaPropuesta: null, por: state.user.nombre });
   toast('warn', 'Cancelación enviada a Planner', route.id + ' — la cancelación y el reemplazo quedaron "Pendiente de Aprobación" en Solicitudes y Cambios.');
+  scPushRows('app_solicitudes_generales', [solCancelacionReemplazo]);
+  scPushRows('app_turnos', [route]);
   syncAndRender(true);
 }
 function openCancelarModal(routeId) {
@@ -7850,7 +7881,11 @@ function rowHtmlProg(route) {
        abrir una segunda edición en paralelo sobre el mismo turno. */
     actions = '<span class="badge badge-warn"><i></i>Cambio Pendiente de Aprobación por Planner' + badgeInfoTipHtml('Ya existe una cancelación con reemplazo enviada por el Aliado, a la espera de que Planner la apruebe o rechace.') + '</span>';
   } else if (route.pendienteAsignacion) {
-    actions += '<button data-act="confirmar-mensajero" data-id="' + route.id + '">Confirmar datos de mensajero</button>';
+    /* Ver requerimiento "Estandarización de Botones en Programar Flota (Pestaña Mañana)": "Confirmar datos
+       de mensajero" era demasiado largo y, junto al botón de borrado, forzaba la columna Acciones mucho más
+       allá del ancho visible -- acortado a "Confirmar recurso" sin cambiar el flujo ni el título del modal
+       que abre (openTurnoModal, modo 'confirm'). */
+    actions += '<button data-act="confirmar-mensajero" data-id="' + route.id + '">Confirmar recurso</button>';
     /* Ver requerimiento "Corrección de Flujo: Acciones de Programar Flota según Pestaña (Mañana vs. Hoy)
        para Turnos Pendientes": "No se ubica recurso" es un evento OPERATIVO del día en curso -- dispara
        cancelación con penalización e Incumplimiento (ver noUbicaRecurso/sinReemplazoAusencia), impropio
@@ -7858,7 +7893,7 @@ function rowHtmlProg(route) {
        Aliado solo necesita poder BORRAR el cupo si cancela -- sin penalización, sin afectación, ver
        eliminarTurnoPendiente. "Hoy" conserva exactamente el botón y flujo de siempre. */
     if (state.progDay === 'tomorrow') {
-      actions += '<button data-act="eliminar-turno-pendiente" data-id="' + route.id + '" class="danger">Eliminar</button>';
+      actions += '<button data-act="eliminar-turno-pendiente" data-id="' + route.id + '" class="danger">Eliminar mensajero</button>';
     } else {
       actions += '<button data-act="no-ubica-recurso" data-id="' + route.id + '" class="danger">No se ubica recurso</button>';
     }
@@ -7869,16 +7904,18 @@ function rowHtmlProg(route) {
     actions += iconEditButtonHtml('editar-turno', ' data-id="' + route.id + '"');
     /* CONMUTACIÓN ESTRICTA (ver desasignarMensajero): exclusivo de la vista "Mañana" — mismo botón siempre,
        pero su etiqueta y su efecto cambian según el cutoff (progWindowState), igual que el banner de Editar.
-       Etiqueta "Eliminar Mensajero" (ver requerimiento "Ajustes de Copies y Lógica de Eliminación de Turnos
-       según Modelo de Cuotas / Programación Libre", antes "Borrar Mensajero") -- el efecto real
-       (desasignarMensajero) distingue Programación Libre/cupo excedente (elimina el turno por completo) de
-       cupo obligatorio (deja la plaza "Pendiente / Por Confirmar"), ver turnoEsExcedenteDeCuota. */
+       Etiqueta "Eliminar mensajero" (ver requerimiento "Ajustes de Copies y Lógica de Eliminación de Turnos
+       según Modelo de Cuotas / Programación Libre", antes "Borrar Mensajero"; minúscula normalizada por
+       "Estandarización de Botones en Programar Flota (Pestaña Mañana)" para que coincida EXACTO con el botón
+       de borrado del turno 'Pendiente / Por Confirmar' arriba) -- el efecto real (desasignarMensajero)
+       distingue Programación Libre/cupo excedente (elimina el turno por completo) de cupo obligatorio (deja
+       la plaza "Pendiente / Por Confirmar"), ver turnoEsExcedenteDeCuota. */
     if (state.progDay === 'tomorrow') {
       var wsDes = progWindowState();
       var directoDes = wsDes === 'open' || wsDes === 'alert' || wsDes === 'closed_extended_active';
       actions += '<button data-act="desasignar-mensajero" data-id="' + route.id + '" class="danger" data-tip="' +
         (directoDes ? 'Elimina el mensajero de inmediato, sin crear ninguna solicitud ni penalización.' : 'Fuera del cutoff: se enviará como Solicitud de Cambio, pendiente de aprobación de Planner.') + '">' +
-        (directoDes ? 'Eliminar Mensajero' : 'Solicitar Desasignación de Mensajero') + '</button>';
+        (directoDes ? 'Eliminar mensajero' : 'Solicitar Desasignación de Mensajero') + '</button>';
     }
   }
   if (!actions) actions = '<span class="courier-sub">Solo lectura</span>';
@@ -12465,6 +12502,7 @@ function submitTurno(e) {
     if (conflictoRetornoCreate) { alertarVentanaRetorno(mensajeroIdCreate, conflictoRetornoCreate); return; }
   }
   var turnoAfectado = null;
+  var solGeneralCreada = null;
 
   /* Módulo Cuotas de Flota (si está activo para el país de la bodega, ver Configuración/Admin en Cuotas de
      Flota): un alta nueva que exceda la cuota asignada, o que caiga en un día festivo del país, SÍ se crea
@@ -12546,7 +12584,7 @@ function submitTurno(e) {
     var motivoSol = tipoSol === 'nuevo_turno'
       ? 'Alta de nuevo turno enviada fuera del horario de programación.'
       : (ws === 'today_solicitud' ? 'Edición de un turno de hoy — toda modificación del día en curso requiere aprobación de Planner.' : 'Edición de turno enviada fuera del horario de programación.');
-    state.solicitudesGenerales.push({
+    solGeneralCreada = {
       id: nextSolicitudGeneralId(), tipo: tipoSol, estado: 'pendiente', aliado: state.user.aliado,
       solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), fecha: TODAY_STR,
       motivo: motivoSol,
@@ -12555,7 +12593,8 @@ function submitTurno(e) {
          ese mismo comentario en la otra creación de 'nuevo_turno' (flota habitual) y en scanSolicitudesSla. */
       creadaEnVivo: true,
       detalle: detalle
-    });
+    };
+    state.solicitudesGenerales.push(solGeneralCreada);
     if (modo !== 'create') {
       var routeMarcarPendiente = state.turnos.find(function (r) { return r.id === routeId; });
       if (routeMarcarPendiente) { routeMarcarPendiente.solicitudEdicionPendiente = true; turnoAfectado = routeMarcarPendiente; }
@@ -12568,8 +12607,14 @@ function submitTurno(e) {
      creado se perdía sin aviso -- esto, sumado a que nextTurnoId() no se re-derivaba de state.turnos tras un
      pull (mismo bug ya corregido para nextUserId), explica la inconsistencia "a veces aparecen 2, a veces 3"
      reportada. Se espera la confirmación antes de cerrar el modal. */
-  if (turnoAfectado) {
-    scPushRows('app_turnos', [turnoAfectado]).then(function () { closeModal(); syncAndRender(true); });
+  /* Ver requerimiento "Persistencia Crítica: Aprobar Prolongación de Tiempo en Supabase": la Solicitud
+     General creada aquí (alta/edición fuera de ventana) tampoco se empujaba nunca -- mismo criterio que
+     turnoAfectado, con la misma espera de confirmación antes de cerrar el modal. */
+  var pushesSubmitTurno = [];
+  if (turnoAfectado) pushesSubmitTurno.push(scPushRows('app_turnos', [turnoAfectado]));
+  if (solGeneralCreada) pushesSubmitTurno.push(scPushRows('app_solicitudes_generales', [solGeneralCreada]));
+  if (pushesSubmitTurno.length) {
+    Promise.all(pushesSubmitTurno).then(function () { closeModal(); syncAndRender(true); });
   } else {
     closeModal();
     syncAndRender(true);
@@ -12658,6 +12703,7 @@ function cargarFlotaHabitual() {
      se acumulan aquí todos los turnos nuevos de esta pasada para empujarlos juntos en un solo scPushRows
      al final, en vez de depender del autoguardado periódico. */
   var turnosNuevos = [];
+  var solicitudesGeneralesNuevas = [];
   plantilla.forEach(function (entry) {
     if (!entry.cedula || yaProgramados[entry.cedula]) return;
     yaProgramados[entry.cedula] = true;
@@ -12692,13 +12738,15 @@ function cargarFlotaHabitual() {
       turnosNuevos.push(nuevoTurno);
       creados++;
     } else {
-      state.solicitudesGenerales.push({
+      var solFlotaHabitual = {
         id: nextSolicitudGeneralId(), tipo: 'nuevo_turno', estado: 'pendiente', aliado: state.user.aliado,
         solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), fecha: TODAY_STR,
         motivo: 'Alta de turno (carga rápida de Flota Habitual) enviada fuera del horario de programación.',
         creadaEnVivo: true,
         detalle: payload
-      });
+      };
+      state.solicitudesGenerales.push(solFlotaHabitual);
+      solicitudesGeneralesNuevas.push(solFlotaHabitual);
       creados++; solicitudes++;
     }
   });
@@ -12712,8 +12760,11 @@ function cargarFlotaHabitual() {
   if (solicitudes) extra.push(solicitudes + ' se enviaron como Solicitud de Cambio, fuera del horario de programación.');
   if (extra.length) msg += ' ' + extra.join(' ');
   toast('ok', 'Flota Recurrente cargada', msg);
-  if (turnosNuevos.length) {
-    scPushRows('app_turnos', turnosNuevos).then(function () { syncAndRender(true); });
+  var pushesFlotaHabitual = [];
+  if (turnosNuevos.length) pushesFlotaHabitual.push(scPushRows('app_turnos', turnosNuevos));
+  if (solicitudesGeneralesNuevas.length) pushesFlotaHabitual.push(scPushRows('app_solicitudes_generales', solicitudesGeneralesNuevas));
+  if (pushesFlotaHabitual.length) {
+    Promise.all(pushesFlotaHabitual).then(function () { syncAndRender(true); });
   } else {
     syncAndRender(true);
   }
@@ -12800,16 +12851,18 @@ function desasignarMensajero(routeId) {
       scDeleteRows('app_turnos', [routeId]);
     }
   } else {
-    state.solicitudesGenerales.push({
+    var solDesasignar = {
       id: nextSolicitudGeneralId(), tipo: 'edicion_turno', estado: 'pendiente', aliado: state.user.aliado,
       solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), fecha: TODAY_STR,
       motivo: 'Desasignación de mensajero solicitada fuera de la ventana de cutoff — requiere aprobación de Planner.',
       detalle: { routeId: routeId, pendiente: true, vehiculo: route.vehiculo, hora: route.hora, sede: route.sede, modoOriginal: 'desasignar' }
-    });
+    };
+    state.solicitudesGenerales.push(solDesasignar);
     route.solicitudEdicionPendiente = true;
     registrarHistorialCambio(route, { tipo: 'edicion_turno', accion: 'solicitada', motivo: 'Solicitud de desasignación de mensajero enviada fuera del cutoff.', horaAnterior: null, horaPropuesta: null, por: state.user.nombre });
     toast('warn', 'Enviado como Solicitud de Cambio', 'La desasignación quedó "Pendiente de Aprobación por Planner" en Solicitudes y Cambios — no se aplicará en vivo hasta que se resuelva.');
     scPushRows('app_turnos', [route]);
+    scPushRows('app_solicitudes_generales', [solDesasignar]);
   }
   syncAndRender(true);
 }
@@ -14509,13 +14562,13 @@ function ayudaContentByRole(role) {
       '<section class="panel"><p class="panel-title">Asignar flota propia a cupos aprobados</p><ol class="help-steps">' +
         '<li>Carga tu Programación de Flota en el segmentado <strong>Hoy / Mañana</strong> (reubicado justo encima de "Filtrar"). "Mañana" es tu alta directa normal; "Hoy" es de solo lectura para editar un turno ya confirmado, pero <strong>sí</strong> puedes dar de alta un turno nuevo ahí con "+ Nuevo Turno" — ver el punto siguiente.</li>' +
         '<li>El botón <strong>+ Nuevo Turno</strong> (único, visible tanto en Hoy como en Mañana) abre el mismo formulario de carga: Bodega/Ciudad, Tipo de Vehículo, Nombre del Mensajero, Teléfono, CÉDULA / INE, Placa y Correo Electrónico, más la Hora programada. En <strong>Mañana</strong> el alta se aplica de inmediato (dentro del cutoff); en <strong>Hoy</strong>, el propio modal te avisa que el turno se registrará como <strong>Solicitud de Cambio (Pendiente de Aprobación por Planner)</strong> en vez de aplicarse en vivo, ya que el día en curso siempre exige aprobación.</li>' +
-        '<li>Usa <strong>Carga rápida — mensajero recurrente</strong> (dentro del formulario de "Nuevo Turno" o "Confirmar datos de mensajero") para seleccionar un mensajero ya registrado y autocompletar sus datos al instante — no está disponible al <strong>Editar</strong> un turno ya confirmado, para no sobreescribir por error sus datos reales.</li>' +
+        '<li>Usa <strong>Carga rápida — mensajero recurrente</strong> (dentro del formulario de "Nuevo Turno" o "Confirmar recurso") para seleccionar un mensajero ya registrado y autocompletar sus datos al instante — no está disponible al <strong>Editar</strong> un turno ya confirmado, para no sobreescribir por error sus datos reales.</li>' +
         '<li>Los botones <strong>Guardar como Flota Recurrente</strong> y <strong>Cargar Flota Recurrente</strong> (visibles solo en "Mañana") operan sobre tu flota completa del día: "Guardar" toma una foto de todos los turnos con mensajero ya asignado en tu Programación actual, y "Cargar" los vuelve a dar de alta de una sola vez la próxima vez que programes — sin duplicar a ningún mensajero que ya tengas programado para ese día (se identifica por Cédula/INE).</li>' +
         '<li>Marca <strong>Programar como Pendiente / Por Confirmar</strong> si aún no tienes el conductor asignado: el cupo queda reservado y visible para Melonn.</li>' +
-        '<li>Sobre un turno <strong>Pendiente / Por Confirmar</strong> usa <strong>Confirmar datos de mensajero</strong> para asignar tu flota definitiva a ese cupo ya aprobado, o <strong>No se ubica recurso</strong> si no vas a cubrirlo.</li>' +
+        '<li>Sobre un turno <strong>Pendiente / Por Confirmar</strong> usa <strong>Confirmar recurso</strong> para asignar tu flota definitiva a ese cupo ya aprobado, o <strong>No se ubica recurso</strong> si no vas a cubrirlo.</li>' +
         '<li><strong>Ventana horaria (Mañana):</strong> puedes programar y editar la flota de mañana hasta las <strong>10:00 PM</strong> de hoy. A las <strong>9:00 PM</strong> aparece un aviso de cierre en 1 hora, y pasado el cierre puedes usar <strong>Solicitar Prolongación de Tiempo</strong> (hasta las 12:00 AM).</li>' +
         '<li>Si corriges los datos de un mensajero (nombre, documento, placa) al <strong>Editar</strong> un turno ya confirmado, el cambio se aplica a ese turno y queda como el dato vigente para sus próximas asignaciones — pero nunca altera turnos ya cerrados: cada uno conserva exactamente los datos con los que se ejecutó, como registro inmutable de auditoría.</li>' +
-        '<li><strong>Eliminar Mensajero</strong> (vista Mañana): dentro del cutoff (o su ampliación activa), quita al mensajero de inmediato. En <strong>Programación Libre</strong> (sin cuotas activas para esa bodega) o si el turno es un <strong>excedente</strong> por encima de la cuota asignada, el turno se elimina por completo, sin dejar plaza vacante; si el turno cubría una <strong>cuota obligatoria</strong>, la plaza queda <strong>Pendiente / Por Confirmar</strong> dentro de tu misma cuota — en ningún caso se crea solicitud ni penalización. Una vez vencido el cutoff, el mismo botón cambia a <strong>"Solicitar Desasignación de Mensajero"</strong> y se tramita como Solicitud de Cambio — requiere aprobación de Planner antes de aplicarse.</li>' +
+        '<li><strong>Eliminar mensajero</strong> (vista Mañana): dentro del cutoff (o su ampliación activa), quita al mensajero de inmediato. En <strong>Programación Libre</strong> (sin cuotas activas para esa bodega) o si el turno es un <strong>excedente</strong> por encima de la cuota asignada, el turno se elimina por completo, sin dejar plaza vacante; si el turno cubría una <strong>cuota obligatoria</strong>, la plaza queda <strong>Pendiente / Por Confirmar</strong> dentro de tu misma cuota — en ningún caso se crea solicitud ni penalización. Una vez vencido el cutoff, el mismo botón cambia a <strong>"Solicitar Desasignación de Mensajero"</strong> y se tramita como Solicitud de Cambio — requiere aprobación de Planner antes de aplicarse.</li>' +
         '<li><strong>Domingos y festivos:</strong> un turno no se bloquea nunca por caer en domingo o festivo, aunque el módulo de Cuotas esté activo para tu país — se crea igual y queda "Pendiente de Aprobación por Planner" bajo la causal <strong>Día Festivo</strong> o <strong>Recurso Adicional (Domingo)</strong> (domingo no tiene cuota base configurada), visible para ti en tu propio Historial de Solicitudes una vez Planner lo resuelva.</li>' +
       '</ol></section>',
       '<section class="panel"><p class="panel-title">Programación — seguimiento en vivo</p><ol class="help-steps">' +
@@ -14560,7 +14613,7 @@ function ayudaContentByRole(role) {
     );
     panels.glosario.push(glosarioPanelHtml());
     faqs.programacion = [
-      ['¿Cómo asigno un conductor a un cupo ya aprobado?', 'En <strong>Programar Flota</strong>, sobre el turno "Pendiente / Por Confirmar", usa <strong>"Confirmar datos de mensajero"</strong>.'],
+      ['¿Cómo asigno un conductor a un cupo ya aprobado?', 'En <strong>Programar Flota</strong>, sobre el turno "Pendiente / Por Confirmar", usa <strong>"Confirmar recurso"</strong>.'],
       ['¿Qué pasa si cargo un turno después de las 10:00 PM?', 'Se registra como solicitud en Solicitudes y Cambios y debe ser aprobada por Planner; antes de esa hora puedes usar "Solicitar Prolongación de Tiempo".']
     ];
     faqs.solicitudes = [
@@ -17359,8 +17412,7 @@ document.addEventListener('DOMContentLoaded', function () {
       };
       state.solicitudesGenerales.push(solNt);
       toast('warn', 'Solicitud de nuevo turno enviada', solNt.id + ' — a la espera de aprobación de Planner.');
-      closeModal();
-      syncAndRender(true);
+      scPushRows('app_solicitudes_generales', [solNt]).then(function () { closeModal(); syncAndRender(true); });
       return;
     }
     var routeId = document.getElementById('nsRuta').value;
@@ -17488,17 +17540,21 @@ document.addEventListener('DOMContentLoaded', function () {
         : Array.from(document.querySelectorAll('.np-masiva-aliado:checked')).map(function (el) { return el.value; });
       if (!aliadosObjetivo.length) { toast('warn', 'Selecciona al menos un Aliado', 'Elige "Todos los aliados" o marca al menos uno de la lista.'); return; }
       var desplazamientoMasiva = parseInt(document.getElementById('npMasivaDesplazamiento').value, 10);
-      aliadosObjetivo.forEach(function (aliadoObjetivo) {
-        state.solicitudesGenerales.push({
+      var solsMasivas = aliadosObjetivo.map(function (aliadoObjetivo) {
+        var solMasiva = {
           id: nextSolicitudGeneralId(), tipo: 'reprogramacion_masiva', estado: 'pendiente',
           aliado: aliadoObjetivo, motivo: motivoMasiva, fecha: TODAY_STR,
           solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), origen: 'planner',
           detalle: { sede: sedeMasiva, franjas: franjasMasiva, desplazamientoMinutos: desplazamientoMasiva }
-        });
+        };
+        /* nextSolicitudGeneralId() deriva del máximo id YA en state.solicitudesGenerales -- hay que
+           empujar cada una antes de pedir el siguiente id, o las N solicitudes de este lote colisionarían
+           todas en el mismo SOL-XXX (el array seguiría vacío de estas hasta después del .map). */
+        state.solicitudesGenerales.push(solMasiva);
+        return solMasiva;
       });
       toast('warn', 'Reprogramación masiva enviada', aliadosObjetivo.length + ' aliado(s) de ' + sedeMasiva + ' recibieron la propuesta de desplazar +' + desplazamientoMasiva + ' min — a la espera de su respuesta.');
-      closeModal();
-      syncAndRender(true);
+      scPushRows('app_solicitudes_generales', solsMasivas).then(function () { closeModal(); syncAndRender(true); });
       return;
     }
     var routeId = document.getElementById('npRuta').value;
