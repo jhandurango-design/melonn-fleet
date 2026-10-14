@@ -381,23 +381,79 @@ function deduplicarTurnosPorAsignacion(rows) {
   });
   return Object.keys(porAsignacion).map(function (k) { return porAsignacion[k].value; });
 }
+/* Ver requerimiento "Persistencia inmediata obligatoria / corrección de guardado congelado": antes, un push
+   fallido (RLS/GRANT mal configurado, red caída, o simplemente un fetch() que se cuelga sin error -- fetch
+   no trae timeout propio) quedaba en absoluto silencio para el usuario: scPushRows solo hacía console.warn y
+   SIEMPRE resolvía igual que un éxito, así que cualquier `.then(function () { closeModal(); ... })` encadenado
+   cerraba el modal como si el guardado en la nube hubiera funcionado -- el turno vivía solo en memoria del
+   navegador hasta la próxima recarga/limpieza de caché, momento en el que scPullAll() lo reemplazaba por el
+   dataset real de Supabase (vacío), perdiéndolo sin ningún aviso. Caso real reportado: 4 turnos "guardados"
+   en la UI, ninguno sobrevivió a un borrado de caché. Dos cambios: 1) SC_PUSH_TIMEOUT_MS acota cualquier
+   llamada que se cuelgue indefinidamente (sin esto, un turno que nunca resuelve deja el botón "Guardar
+   turno"/el modal bloqueados para siempre -- el síntoma reportado de "botón congelado"); 2)
+   scNotificarFalloSupabase() ya no es un console.warn silencioso -- alerta explícitamente en la UI (toast)
+   para que el Aliado sepa que debe reintentar antes de cerrar la pestaña o borrar caché. El contrato de la
+   función (siempre RESUELVE, nunca rechaza) se mantiene exactamente igual que antes para no romper ninguno de
+   los ~20 `.then()` ya encadenados en el resto del archivo -- ahora simplemente resuelve con {ok, error}. */
+var SC_PUSH_TIMEOUT_MS = 10000;
+var scUltimoAvisoFalloEn = 0;
+function scNotificarFalloSupabase(table) {
+  /* Antirráfaga: scPushAll (login/logout/autoguardado) empuja las 4 tablas en la misma pasada -- si la red
+     está caída, las 4 fallarían casi simultáneamente; sin este límite el Aliado vería 4 toasts idénticos de
+     golpe en vez de un solo aviso claro. */
+  var ahora = Date.now();
+  if (ahora - scUltimoAvisoFalloEn < 4000) return;
+  scUltimoAvisoFalloEn = ahora;
+  toast('warn', 'Sin conexión con Supabase', 'No se pudo confirmar el guardado en la nube (tabla ' + table + '). El cambio quedó solo en este navegador — evita cerrar la pestaña o borrar la caché hasta reconectar y volver a intentar.');
+}
 function scPushRows(table, rows) {
-  if (!supabaseClient || !rows || !rows.length) return Promise.resolve();
+  if (!supabaseClient || !rows || !rows.length) return Promise.resolve({ ok: true });
   var payload = rows.map(function (r) { return { id: r.id, data: r }; });
-  return supabaseClient.from(table).upsert(payload).then(function (res) {
-    if (res.error) console.warn('Supabase: fallo al guardar ' + table + ':', res.error.message);
-  }, function (e) { console.warn('Supabase: fallo al guardar ' + table + ':', e); });
+  var upsertPromise;
+  try {
+    upsertPromise = supabaseClient.from(table).upsert(payload);
+  } catch (e) {
+    console.warn('Supabase: excepción al preparar guardado de ' + table + ':', e);
+    scNotificarFalloSupabase(table);
+    return Promise.resolve({ ok: false, error: e });
+  }
+  var timeoutPromise = new Promise(function (resolve) { setTimeout(function () { resolve({ timedOut: true }); }, SC_PUSH_TIMEOUT_MS); });
+  return Promise.race([upsertPromise, timeoutPromise]).then(function (res) {
+    if (res && res.timedOut) { console.warn('Supabase: tiempo de espera agotado al guardar ' + table); scNotificarFalloSupabase(table); return { ok: false, error: 'timeout' }; }
+    if (res.error) { console.warn('Supabase: fallo al guardar ' + table + ':', res.error.message); scNotificarFalloSupabase(table); return { ok: false, error: res.error }; }
+    return { ok: true };
+  }, function (e) {
+    console.warn('Supabase: fallo al guardar ' + table + ':', e);
+    scNotificarFalloSupabase(table);
+    return { ok: false, error: e };
+  });
 }
 /* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota": las 3
    tablas eran upsert-only -- un turno quitado localmente (p.ej. "Eliminar Mensajero" sobre un excedente de
    cuota, o "Cancelar" un turno) nunca se borraba en Supabase, quedaba como fila huérfana que scPullAll()
    resucitaba en el próximo pull (login/foco/logout). Requiere el GRANT DELETE sobre la tabla para el rol
-   anon (ver supabase_schema.sql) -- si no está, falla igual de silencioso que un push sin red. */
+   anon (ver supabase_schema.sql) -- si no está, falla igual de silencioso que un push sin red. Mismo criterio
+   de timeout + alerta en UI que scPushRows (ver comentario de arriba). */
 function scDeleteRows(table, ids) {
-  if (!supabaseClient || !ids || !ids.length) return Promise.resolve();
-  return supabaseClient.from(table).delete().in('id', ids).then(function (res) {
-    if (res.error) console.warn('Supabase: fallo al eliminar de ' + table + ':', res.error.message);
-  }, function (e) { console.warn('Supabase: fallo al eliminar de ' + table + ':', e); });
+  if (!supabaseClient || !ids || !ids.length) return Promise.resolve({ ok: true });
+  var deletePromise;
+  try {
+    deletePromise = supabaseClient.from(table).delete().in('id', ids);
+  } catch (e) {
+    console.warn('Supabase: excepción al preparar eliminación de ' + table + ':', e);
+    scNotificarFalloSupabase(table);
+    return Promise.resolve({ ok: false, error: e });
+  }
+  var timeoutPromiseDel = new Promise(function (resolve) { setTimeout(function () { resolve({ timedOut: true }); }, SC_PUSH_TIMEOUT_MS); });
+  return Promise.race([deletePromise, timeoutPromiseDel]).then(function (res) {
+    if (res && res.timedOut) { console.warn('Supabase: tiempo de espera agotado al eliminar de ' + table); scNotificarFalloSupabase(table); return { ok: false, error: 'timeout' }; }
+    if (res.error) { console.warn('Supabase: fallo al eliminar de ' + table + ':', res.error.message); scNotificarFalloSupabase(table); return { ok: false, error: res.error }; }
+    return { ok: true };
+  }, function (e) {
+    console.warn('Supabase: fallo al eliminar de ' + table + ':', e);
+    scNotificarFalloSupabase(table);
+    return { ok: false, error: e };
+  });
 }
 /* Empuja el snapshot COMPLETO de las 3 tablas -- se llama en los puntos clave (login, logout, autoguardado
    periódico), nunca en cada mutación individual (ver nota de arriba). */
