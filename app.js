@@ -409,7 +409,17 @@ function scNotificarFalloSupabase(table) {
 }
 function scPushRows(table, rows) {
   if (!supabaseClient || !rows || !rows.length) return Promise.resolve({ ok: true });
-  var payload = rows.map(function (r) { return { id: r.id, data: r }; });
+  /* Ver requerimiento "Fallo crítico de arquitectura: contraseña revertida a la genérica tras redeploy":
+     .role (exclusivo de app_users) es EFÍMERO de sesión -- nunca debe aterrizar en Supabase, sea cual sea
+     la carrera que dispare el push (nunca se lee de vuelta, scPullAll/startSession siempre lo recalculan
+     desde .roles[0] o la elección explícita de perfil). Segunda capa de defensa, independiente de que
+     scPushAll ya espere cualquier pull en vuelo antes de empujar. */
+  var payload = rows.map(function (r) {
+    if (table !== 'app_users' || !('role' in r)) return { id: r.id, data: r };
+    var sinRoleEfimero = Object.assign({}, r);
+    delete sinRoleEfimero.role;
+    return { id: r.id, data: sinRoleEfimero };
+  });
   var upsertPromise;
   try {
     upsertPromise = supabaseClient.from(table).upsert(payload);
@@ -457,19 +467,35 @@ function scDeleteRows(table, ids) {
   });
 }
 /* Empuja el snapshot COMPLETO de las 3 tablas -- se llama en los puntos clave (login, logout, autoguardado
-   periódico), nunca en cada mutación individual (ver nota de arriba). */
+   periódico), nunca en cada mutación individual (ver nota de arriba).
+   Ver requerimiento "Fallo crítico de arquitectura: contraseña revertida a la genérica tras redeploy":
+   causa raíz real (nada que ver con "reseeding" de servidor -- este despliegue es un contenedor nginx
+   100% estático, sin ningún proceso Node que arranque o resiembre nada) -- scPushAll() (disparado por
+   logout(), entre otros) empujaba state.users TAL COMO ESTUVIERA EN MEMORIA en ese instante, sin
+   garantía de que ya reflejara el último pull. completarInicioSesion() dispara su propio scPullAll() SIN
+   esperarlo (a propósito, para no bloquear el login) -- si esa consulta todavía estaba en vuelo y el
+   usuario cerraba sesión casi de inmediato, logout()->scPushAll() podía ganarle la carrera y sobrescribir
+   en Supabase la fila recién actualizada con lo que esta pestaña tenía en memoria ANTES de que el pull
+   trajera la contraseña real -- revirtiéndola en la nube a lo que fuera que esta pestaña trajera (seed
+   local o una sesión vieja restaurada). Se espera aquí cualquier pull en vuelo antes de empujar nada. */
 function scPushAll() {
-  scPushRows('app_users', state.users);
-  scPushRows('app_mensajeros', state.mensajeros);
-  scPushRows('app_turnos', state.turnos);
-  scPushRows('app_solicitudes_generales', state.solicitudesGenerales);
+  (scPullEnVuelo || Promise.resolve()).then(function () {
+    scPushRows('app_users', state.users);
+    scPushRows('app_mensajeros', state.mensajeros);
+    scPushRows('app_turnos', state.turnos);
+    scPushRows('app_solicitudes_generales', state.solicitudesGenerales);
+  });
 }
 /* Trae las 3 tablas y, si Supabase tiene datos, los adopta como fuente de verdad en memoria -- un fallo de
    red o una tabla todavía vacía (primer arranque antes de que nadie haya empujado nada) deja el dataset
    local (seed o localStorage) exactamente como estaba, sin romper nada. Si ya hay una sesión activa cuando
    llega la respuesta, vuelve a renderizar para reflejar el dataset fresco. */
+/* Promesa del pull en vuelo más reciente -- ver requerimiento "Fallo crítico de arquitectura: contraseña
+   revertida a la genérica tras redeploy" junto a scPushAll(): expuesta a nivel de módulo para que
+   scPushAll() pueda esperarla antes de empujar nada, sin cambiar la firma pública de scPullAll(). */
+var scPullEnVuelo = null;
 function scPullAll() {
-  return Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales')]).then(function (res) {
+  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales')]).then(function (res) {
     var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3];
     var changed = false;
     if (users && users.length) {
@@ -504,6 +530,7 @@ function scPullAll() {
     if (changed && state.user) syncAndRender(true);
     return changed;
   });
+  return scPullEnVuelo;
 }
 
 /* ---------------- Mensajeros y Turnos (datos de simulación) ----------------
