@@ -12365,9 +12365,18 @@ function initTimePicker(inputId) {
   /* Ver requerimiento "Corrección del Salto de Scroll": posición calculada contra el campo real (mismo
      patrón que toggleSedeDropdown/.sede-dropdown-menu) en vez de depender de que .timepicker-panel sea
      descendiente en flujo normal de .timepicker -- con position:fixed ya no lo es. */
+  /* Ver requerimiento "Posicionamiento dinámico del TimePicker (Smart Placement)": #turnoHora suele quedar
+     al final del modal -- desplegar siempre hacia abajo lo sacaba del viewport y tapaba Cancelar/Aceptar.
+     panel.offsetHeight exige que el panel ya esté visible (hidden=false) para medir de verdad; por eso
+     abrir() lo desoculta ANTES de llamar a posicionar(), con 225 como respaldo (altura real esperada: 180 de
+     columnas + footer) solo por si el primer layout aún no resolvió. */
   function posicionar() {
     var rect = input.getBoundingClientRect();
-    panel.style.top = (rect.bottom + 6) + 'px';
+    var panelHeight = panel.offsetHeight || 225;
+    var espacioAbajo = window.innerHeight - rect.bottom;
+    var espacioArriba = rect.top;
+    var haciaArriba = espacioAbajo < (panelHeight + 14) && espacioArriba > espacioAbajo;
+    panel.style.top = (haciaArriba ? (rect.top - panelHeight - 8) : (rect.bottom + 6)) + 'px';
     panel.style.left = rect.left + 'px';
     panel.style.width = rect.width + 'px';
   }
@@ -12375,8 +12384,8 @@ function initTimePicker(inputId) {
     var actual = input.value ? input.value.split(':') : null;
     if (actual) { pendiente.h = parseInt(actual[0], 10); pendiente.m = parseInt(actual[1], 10); }
     marcarSeleccion();
-    posicionar();
     panel.hidden = false;
+    posicionar();
     centrarEnColumna(colHora, colHora.querySelector('button.selected'));
     centrarEnColumna(colMin, colMin.querySelector('button.selected'));
   }
