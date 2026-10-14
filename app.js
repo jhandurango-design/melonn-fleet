@@ -7850,7 +7850,17 @@ function rowHtmlProg(route) {
     actions = '<span class="badge badge-warn"><i></i>Cambio Pendiente de Aprobación por Planner' + badgeInfoTipHtml('Ya existe una cancelación con reemplazo enviada por el Aliado, a la espera de que Planner la apruebe o rechace.') + '</span>';
   } else if (route.pendienteAsignacion) {
     actions += '<button data-act="confirmar-mensajero" data-id="' + route.id + '">Confirmar datos de mensajero</button>';
-    actions += '<button data-act="no-ubica-recurso" data-id="' + route.id + '" class="danger">No se ubica recurso</button>';
+    /* Ver requerimiento "Corrección de Flujo: Acciones de Programar Flota según Pestaña (Mañana vs. Hoy)
+       para Turnos Pendientes": "No se ubica recurso" es un evento OPERATIVO del día en curso -- dispara
+       cancelación con penalización e Incumplimiento (ver noUbicaRecurso/sinReemplazoAusencia), impropio
+       todavía en "Mañana" (fase de borrador: el turno ni siquiera ha llegado a su hora de citación). Ahí el
+       Aliado solo necesita poder BORRAR el cupo si cancela -- sin penalización, sin afectación, ver
+       eliminarTurnoPendiente. "Hoy" conserva exactamente el botón y flujo de siempre. */
+    if (state.progDay === 'tomorrow') {
+      actions += '<button data-act="eliminar-turno-pendiente" data-id="' + route.id + '" class="danger">Eliminar</button>';
+    } else {
+      actions += '<button data-act="no-ubica-recurso" data-id="' + route.id + '" class="danger">No se ubica recurso</button>';
+    }
   } else if (!yaEnCiclo) {
     /* Editar ya no depende de state.progDay === 'tomorrow': Hoy y Mañana admiten edición por igual, solo
        que el resultado (directo vs. Solicitud de Cambio) lo decide progEditWindowState() dentro del modal
@@ -12707,6 +12717,27 @@ function turnoEsExcedenteDeCuota(route) {
   if (cantidad <= 0) return null;
   var actuales = turnosProgramadosCount(route.sede, aliado, route.fecha, franja, route.vehiculo);
   return actuales > cantidad;
+}
+/* Ver requerimiento "Corrección de Flujo: Acciones de Programar Flota según Pestaña (Mañana vs. Hoy) para
+   Turnos Pendientes": a diferencia de desasignarMensajero() (quita un mensajero YA asignado), esta acción es
+   para un cupo que NUNCA llegó a tener mensajero real -- el Aliado simplemente cancela el cupo en fase de
+   borrador. Sin penalización, sin afectación, sin Solicitud de Cambio: "Mañana" sigue siendo edición libre
+   mientras no se haya cerrado la ventana de programación. Exclusivo de la pestaña "Mañana" -- en "Hoy" la
+   acción correspondiente sigue siendo "No se ubica recurso" (ver rowHtmlProg/noUbicaRecurso). */
+function eliminarTurnoPendiente(routeId) {
+  if (!canDo('schedule.aliado.manage')) return;
+  var route = state.turnos.find(function (r) { return r.id === routeId; });
+  if (!route || route.fecha !== TOMORROW_STR || !route.pendienteAsignacion) return;
+  openConfirmModal({
+    title: 'Eliminar turno pendiente', confirmText: 'Sí, eliminar',
+    message: '¿Eliminar el cupo ' + route.id + ' (' + route.sede + ' · ' + fmtTime12(route.hora) + ')? Esta acción no se puede deshacer.',
+    onConfirm: function () {
+      state.turnos = state.turnos.filter(function (r) { return r.id !== routeId; });
+      toast('ok', 'Turno eliminado', route.id + ' fue eliminado de la Programación de Flota.');
+      scDeleteRows('app_turnos', [routeId]);
+      syncAndRender(true);
+    }
+  });
 }
 function desasignarMensajero(routeId) {
   if (!canDo('schedule.aliado.manage')) return;
@@ -18195,6 +18226,7 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'flota-propia-eliminar') eliminarFlotaPropiaMensajero(id);
     else if (act === 'flota-propia-agregar') openFlotaPropiaCrearModal();
     else if (act === 'no-ubica-recurso') openNoUbicaModal(id);
+    else if (act === 'eliminar-turno-pendiente') eliminarTurnoPendiente(id);
     else if (act === 'aceptar-solicitud-general') resolverSolicitudGeneral(id, true);
     else if (act === 'rechazar-solicitud-general') resolverSolicitudGeneral(id, false);
     else if (act === 'cuota-aprobacion-aprobar') aprobarCuotaPlanner(id);
