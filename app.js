@@ -2206,7 +2206,25 @@ function nextTurnoId() {
   }, 999);
   return 'TUR-' + String(maxNum + 1).padStart(4, '0');
 }
-function nextMensajeroId() { state.mensajeroCounter++; return 'm' + state.mensajeroCounter; }
+/* FIX "Colisión real de IDs de mensajero (incidente en producción, carga Easyway)": a diferencia de
+   nextTurnoId/nextUserId/nextSolicitudGeneralId (ver sus comentarios, ya corregidos antes), esta función
+   quedó afuera de ese mismo fix -- seguía usando state.mensajeroCounter, un contador fijo que arranca en 111
+   (el tamaño del roster semilla local) y NUNCA se re-derivaba de los mensajeros reales traídos por
+   scPullAll(). Incidente real reproducido: con m112/m113/m114 ya existentes en Supabase (de pruebas
+   anteriores), el primer mensajero nuevo creado en esta sesión recibía 'm112' de vuelta -- colisionando con
+   un mensajero YA EXISTENTE (Carlos Arturo Rico Vergara). state.mensajeros quedaba con DOS objetos con el
+   mismo id (el original + el duplicado recién creado); getMensajero() devolvía el PRIMERO del arreglo (el
+   original) para cualquier turno que en realidad apuntara al duplicado -- el turno nuevo se mostraba con la
+   identidad de OTRO mensajero por completo, y el push a Supabase sobrescribía silenciosamente el registro
+   real existente. Mismo criterio que las otras 3 colecciones: se deriva del máximo numérico YA presente en
+   state.mensajeros, nunca de un contador aparte que pueda quedar desactualizado tras un pull. */
+function nextMensajeroId() {
+  var maxNum = state.mensajeros.reduce(function (max, m) {
+    var n = parseInt(String(m.id).slice(1), 10);
+    return isNaN(n) ? max : Math.max(max, n);
+  }, 111);
+  return 'm' + (maxNum + 1);
+}
 /* Ver requerimiento "Persistencia Crítica: Aprobar Prolongación de Tiempo en Supabase": mismo bug de
    contador obsoleto ya corregido para nextTurnoId/nextUserId -- ahora que state.solicitudesGenerales SÍ se
    trae de Supabase (scPullAll), derivar el siguiente id del propio contador en memoria (que arranca en 0 en
