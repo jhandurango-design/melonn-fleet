@@ -7,5 +7,13 @@ server {
 
     location / {
         try_files $uri $uri/ =404;
+        # Sin esto, el navegador puede aplicar cache heuristico (no hay Cache-Control -- solo ETag/
+        # Last-Modified) y seguir sirviendo app.js/index.html viejos tras un deploy nuevo hasta que el
+        # usuario fuerce un hard refresh -- un fix ya desplegado puede "no verse" por este motivo, sin
+        # que el codigo tenga ningun problema real. no-cache (no no-store) sigue permitiendo que el
+        # navegador GUARDE el archivo, pero lo obliga a revalidar con el servidor en cada carga (ETag
+        # condicional, 304 si no cambio) -- practicamente gratis en latencia, nunca sirve una version
+        # vieja en silencio.
+        add_header Cache-Control "no-cache";
     }
 }
