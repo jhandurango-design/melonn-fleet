@@ -445,22 +445,41 @@ function scPushRows(table, rows) {
    resucitaba en el próximo pull (login/foco/logout). Requiere el GRANT DELETE sobre la tabla para el rol
    anon (ver supabase_schema.sql) -- si no está, falla igual de silencioso que un push sin red. Mismo criterio
    de timeout + alerta en UI que scPushRows (ver comentario de arriba). */
+/* FIX "Eliminar mensajero/turno reaparece tras la sincronización": window 'focus'/'visibilitychange' disparan
+   su propio scPullAll() (ver abajo, wiring de DOMContentLoaded) de forma totalmente independiente a cualquier
+   scDeleteRows() en vuelo -- si el Aliado elimina un turno y, en el segundo exacto en que esa llamada sigue
+   en camino (red lenta, o simplemente el timing normal de un round-trip), cambia de pestaña/app y vuelve
+   (dispara el pull de foco), ese pull puede resolver ANTES de que el delete termine de confirmarse en
+   Supabase -- trae de vuelta la fila todavía no borrada y la resucita en state.turnos/state.mensajeros,
+   deshaciendo visualmente la eliminación unos segundos después, sin que el usuario haya hecho nada mal.
+   scTablasConBorradoEnVuelo lleva, por tabla, el set de ids con un scDeleteRows() todavía sin resolver --
+   scPullAll() los excluye de lo que adopte mientras tanto (ver su propio merge, abajo). Se liberan al
+   resolver la llamada (éxito o fallo): si falló de verdad, la fila sigue existiendo en Supabase y el
+   PRÓXIMO pull (ya sin este filtro) la trae de vuelta correctamente -- este filtro solo cierra la ventana
+   de carrera puntual de la llamada en curso, nunca oculta un fallo real de forma permanente. */
+var scTablasConBorradoEnVuelo = {};
 function scDeleteRows(table, ids) {
   if (!supabaseClient || !ids || !ids.length) return Promise.resolve({ ok: true });
+  var pendientes = scTablasConBorradoEnVuelo[table] || (scTablasConBorradoEnVuelo[table] = {});
+  ids.forEach(function (id) { pendientes[id] = true; });
+  function liberar() { ids.forEach(function (id) { delete pendientes[id]; }); }
   var deletePromise;
   try {
     deletePromise = supabaseClient.from(table).delete().in('id', ids);
   } catch (e) {
     console.warn('Supabase: excepción al preparar eliminación de ' + table + ':', e);
     scNotificarFalloSupabase(table);
+    liberar();
     return Promise.resolve({ ok: false, error: e });
   }
   var timeoutPromiseDel = new Promise(function (resolve) { setTimeout(function () { resolve({ timedOut: true }); }, SC_PUSH_TIMEOUT_MS); });
   return Promise.race([deletePromise, timeoutPromiseDel]).then(function (res) {
+    liberar();
     if (res && res.timedOut) { console.warn('Supabase: tiempo de espera agotado al eliminar de ' + table); scNotificarFalloSupabase(table); return { ok: false, error: 'timeout' }; }
     if (res.error) { console.warn('Supabase: fallo al eliminar de ' + table + ':', res.error.message); scNotificarFalloSupabase(table); return { ok: false, error: res.error }; }
     return { ok: true };
   }, function (e) {
+    liberar();
     console.warn('Supabase: fallo al eliminar de ' + table + ':', e);
     scNotificarFalloSupabase(table);
     return { ok: false, error: e };
@@ -556,7 +575,14 @@ function scPullAll() {
       }
     }
     if (mensajeros && mensajeros.length) { state.mensajeros = mensajeros.map(function (row) { return row.value; }); changed = true; }
-    if (turnos && turnos.length) { state.turnos = deduplicarTurnosPorAsignacion(turnos); changed = true; }
+    if (turnos && turnos.length) {
+      /* Ver scDeleteRows/scTablasConBorradoEnVuelo: excluye cualquier turno cuyo DELETE siga en vuelo en este
+         mismo instante -- sin esto, un pull de foco/visibilitychange que gane la carrera contra un
+         scDeleteRows() todavía sin confirmar resucita la fila que el usuario acaba de eliminar. */
+      var turnosBorrandose = scTablasConBorradoEnVuelo['app_turnos'] || {};
+      state.turnos = deduplicarTurnosPorAsignacion(turnos).filter(function (t) { return !turnosBorrandose[t.id]; });
+      changed = true;
+    }
     if (solicitudesGenerales && solicitudesGenerales.length) { state.solicitudesGenerales = solicitudesGenerales.map(function (row) { return row.value; }); changed = true; }
     if (cuotasConfig && cuotasConfig.length) {
       var cfg = cuotasConfig[0].value;
@@ -12792,8 +12818,24 @@ function submitTurno(e) {
      aprobación de cuota vs. directa -- con el mismo resultado), para poder validar duplicados antes de
      decidir por cuál rama seguir. */
   var mensajeroIdCreate;
+  var mensajeroNuevoCreado = null;
   if (modo === 'create') {
+    /* FIX "No se puede crear/visualizar un mensajero nuevo (queda bloqueado por 'ya existe')": findOrCreateMensajero/
+       crearMensajeroPendiente agregan el mensajero nuevo SOLO a state.mensajeros -- nunca se empujaba a
+       Supabase aquí mismo, quedaba a merced del autoguardado periódico (~30s, ver scPushAll) o del logout. Si
+       ese push periódico fallaba (el toast "Sin conexión con Supabase (tabla app_mensajeros)" reportado) o el
+       usuario cerraba/recargaba antes de esos ~30s, el mensajero nunca llegaba a existir en Supabase -- pero
+       SÍ seguía viviendo en memoria/localStorage de ESTA pestaña. Un reintento con la misma cédula lo
+       encontraba vía findOrCreateMensajero (coincidencia local) y reutilizaba su id, y el chequeo de "Turno
+       duplicado" de abajo entonces bloqueaba el reintento con "ya tiene una ruta programada" -- un fantasma
+       puramente local, invisible para Supabase/cualquier otro dispositivo, pero que impedía crear el turno de
+       verdad. Se detecta aquí si la llamada ACABA de crear un mensajero nuevo (no uno ya existente reutilizado
+       por cédula) para empujarlo de inmediato junto al turno (ver el Promise.all al final de esta función) y,
+       si el push falla, deshacer la creación local -- así nunca queda un fantasma bloqueando el siguiente
+       intento. */
+    var mensajerosIdsAntes = state.mensajeros.map(function (m) { return m.id; });
     mensajeroIdCreate = pendiente ? crearMensajeroPendiente(payload) : findOrCreateMensajero(payload);
+    if (mensajerosIdsAntes.indexOf(mensajeroIdCreate) === -1) mensajeroNuevoCreado = getMensajero(mensajeroIdCreate);
     /* Antes nada impedía asignar al mismo mensajero 2 veces al mismo bloque sede+fecha+hora -- bastaba un
        doble clic en "Guardar" para terminar con 2 filas idénticas (caso real reportado: Carlos Arturo Rico
        Vergara duplicado en Medellín #2 a las 08:30 AM). */
@@ -12834,8 +12876,20 @@ function submitTurno(e) {
       toast('warn', cuotaCausalLabel(aprobacion.motivo) + ' — requiere aprobación',
         'El turno ' + turnoPendienteAprobacion.id + ' quedó "Pendiente de Aprobación por Planner" en Solicitudes y Cambios.');
       /* Ver nota "Supabase" más abajo (cierre de la función): mismo criterio -- se espera la confirmación
-         del push antes de cerrar el modal. */
-      scPushRows('app_turnos', [turnoPendienteAprobacion]).then(function () { closeModal(); syncAndRender(true); });
+         del push antes de cerrar el modal. Ver FIX "mensajero fantasma" más arriba: el mensajero nuevo (si lo
+         hay) se empuja aquí también, con el mismo rollback si algo falla. */
+      var pushesCuotaPendiente = [scPushRows('app_turnos', [turnoPendienteAprobacion])];
+      if (mensajeroNuevoCreado) pushesCuotaPendiente.push(scPushRows('app_mensajeros', [mensajeroNuevoCreado]));
+      Promise.all(pushesCuotaPendiente).then(function (results) {
+        if (results.some(function (r) { return r && r.ok === false; })) {
+          state.turnos = state.turnos.filter(function (r) { return r.id !== turnoPendienteAprobacion.id; });
+          if (mensajeroNuevoCreado) state.mensajeros = state.mensajeros.filter(function (m) { return m.id !== mensajeroNuevoCreado.id; });
+          toast('warn', 'No se pudo confirmar en la nube', 'El turno no se guardó — revisa tu conexión e inténtalo de nuevo.');
+          syncAndRender(true);
+          return;
+        }
+        closeModal(); syncAndRender(true);
+      });
       return;
     }
   }
@@ -12916,11 +12970,27 @@ function submitTurno(e) {
   /* Ver requerimiento "Persistencia Crítica: Aprobar Prolongación de Tiempo en Supabase": la Solicitud
      General creada aquí (alta/edición fuera de ventana) tampoco se empujaba nunca -- mismo criterio que
      turnoAfectado, con la misma espera de confirmación antes de cerrar el modal. */
+  /* Ver FIX "mensajero fantasma" más arriba: el mensajero nuevo (si lo hay) se empuja junto con el turno/
+     solicitud, nunca se deja solo para el autoguardado periódico. */
   var pushesSubmitTurno = [];
   if (turnoAfectado) pushesSubmitTurno.push(scPushRows('app_turnos', [turnoAfectado]));
   if (solGeneralCreada) pushesSubmitTurno.push(scPushRows('app_solicitudes_generales', [solGeneralCreada]));
+  if (mensajeroNuevoCreado) pushesSubmitTurno.push(scPushRows('app_mensajeros', [mensajeroNuevoCreado]));
   if (pushesSubmitTurno.length) {
-    Promise.all(pushesSubmitTurno).then(function () { closeModal(); syncAndRender(true); });
+    Promise.all(pushesSubmitTurno).then(function (results) {
+      if (results.some(function (r) { return r && r.ok === false; })) {
+        /* Deshace SOLO lo que esta llamada acaba de crear -- turnoAfectado solo se revierte si es un alta
+           nueva (modo === 'create'); en 'confirm'/'edit' es una ruta YA EXISTENTE antes de esta llamada, así
+           que removerla de state.turnos borraría un registro real que no se creó aquí. */
+        if (modo === 'create' && turnoAfectado) state.turnos = state.turnos.filter(function (r) { return r.id !== turnoAfectado.id; });
+        if (mensajeroNuevoCreado) state.mensajeros = state.mensajeros.filter(function (m) { return m.id !== mensajeroNuevoCreado.id; });
+        if (solGeneralCreada) state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return s.id !== solGeneralCreada.id; });
+        toast('warn', 'No se pudo confirmar en la nube', 'El cambio no se guardó — revisa tu conexión e inténtalo de nuevo.');
+        syncAndRender(true);
+        return;
+      }
+      closeModal(); syncAndRender(true);
+    });
   } else {
     closeModal();
     syncAndRender(true);
