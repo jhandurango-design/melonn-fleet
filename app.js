@@ -3393,8 +3393,20 @@ function scanSolicitudesSla() {
     sol.resueltoEn = fmtClock(state.now); sol.resueltoFecha = TODAY_STR;
   });
 }
+/* FIX "Prolongación habilitada sin solicitud/aprobación del día": esta función no filtraba por fecha -- una
+   solicitud de prolongación APROBADA en un día anterior (ej. 2026-10-13) seguía encontrándose como "la más
+   reciente" de ese aliado para SIEMPRE, sin importar qué día fuera hoy. progWindowState() la toma tal cual
+   para decidir si el cutoff de HOY queda extendido ('closed_extended_active') -- resultado real reproducido:
+   un Aliado veía "Prolongación aprobada" y seguía pudiendo editar la Programación de Flota después del
+   cutoff en un día donde nadie había solicitado ni aprobado nada, solo porque alguna vez, cualquier día
+   anterior, sí se aprobó una. Además bloqueaba en silencio solicitarProlongacion() (ver ese `if (existente &&
+   existente.estado === 'aceptada') return;`): el Aliado ni siquiera podía enviar una solicitud NUEVA para hoy
+   porque la función creía que ya tenía una vigente. Una prolongación es, por diseño, válida solo para el
+   cutoff del día en que se solicitó (fecha: TODAY_STR al crearla, ver solicitarProlongacion) -- se filtra
+   aquí mismo, en el único punto de lectura, para que los 3 consumidores (progWindowState,
+   solicitarProlongacion, renderProgBanner) queden corregidos a la vez. */
 function aliadoProlongacionSolicitud() {
-  var propias = state.solicitudesGenerales.filter(function (s) { return s.tipo === 'prolongacion' && s.aliado === state.user.aliado; });
+  var propias = state.solicitudesGenerales.filter(function (s) { return s.tipo === 'prolongacion' && s.aliado === state.user.aliado && s.fecha === TODAY_STR; });
   propias.sort(function (a, b) { return b.solicitadoEn.localeCompare(a.solicitadoEn); });
   return propias[0] || null;
 }
