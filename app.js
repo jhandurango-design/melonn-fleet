@@ -555,8 +555,8 @@ var scPullEnVuelo = null;
    real que ya existía. */
 var cuotasVigenteHoySincronizadaReal = false;
 function scPullAll() {
-  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual')]).then(function (res) {
-    var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4], flotaHabitualRows = res[5];
+  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual'), scPullTable('app_config_settings')]).then(function (res) {
+    var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4], flotaHabitualRows = res[5], configSettingsRows = res[6];
     var changed = false;
     if (users && users.length) {
       state.users = deduplicarUsuariosPorEmail(users);
@@ -624,6 +624,12 @@ function scPullAll() {
         state.flotaHabitual[row.value.id] = row.value.plantilla || [];
       });
       try { localStorage.setItem(FLOTA_HABITUAL_STORAGE_KEY, JSON.stringify(state.flotaHabitual)); } catch (e) {}
+      changed = true;
+    }
+    if (configSettingsRows && configSettingsRows.length) {
+      state.configSettings = configSettingsRows[0].value.settings;
+      try { localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(state.configSettings)); } catch (e) {}
+      syncCatalogosDesdeConfig();
       changed = true;
     }
     if (changed && state.user) syncAndRender(true);
@@ -16360,7 +16366,19 @@ function loadConfigSettings() {
     return defaults;
   }
 }
-function persistConfigSettings() { localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(state.configSettings)); }
+/* FIX "Cuotas activada por Admin no se reflejaba en ninguna otra sesión" (3er caso de este mismo hueco
+   arquitectónico en esta sesión, ver scPushCuotasConfig/scPushFlotaHabitual): state.configSettings --
+   incluye cuotasActivoCO/MX, pero TAMBIÉN los catálogos de Sedes/Aliados, Gravity, Notificaciones y
+   Comunicados -- vivía EXCLUSIVAMENTE en localStorage. Admin activó Cuotas para Colombia hace 2-3 días desde
+   su propio navegador: esa escritura nunca salió de esa sesión, así que cualquier otra (Planner, Aliado, o
+   esta misma sesión de pruebas) seguía viendo cuotasActivoCO en su valor de fábrica (false) -- el módulo de
+   Cuotas, aunque ya configurado con cifras reales (ver app_cuotas_config), nunca llegó a aplicarse de verdad
+   en ningún lado excepto en el navegador donde Admin lo prendió. Una sola fila 'global' (mismo patrón que
+   app_cuotas_config) sincroniza TODO el objeto -- no solo los 2 interruptores de Cuotas. */
+function scPushConfigSettings() {
+  scPushRows('app_config_settings', [{ id: 'global', settings: state.configSettings }]);
+}
+function persistConfigSettings() { localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(state.configSettings)); scPushConfigSettings(); }
 /* Reconstruye en vivo los catálogos globales (WAREHOUSES/SEDES/ALIADOS/ALIADOS_MX/ALIADOS_ALL) y los expone
    también en state.bodegas/state.aliados, a partir de state.configSettings.sedes/aliados — ver requerimiento
    "Sincronización y Reactividad Real de Catálogos Base". Se llama una vez al cargar la config (arranque de la
