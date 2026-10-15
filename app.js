@@ -16687,16 +16687,26 @@ document.addEventListener('DOMContentLoaded', function () {
     var lock = loginLockStatus(email);
     if (lock) { mostrarBloqueoLogin(email, lock.lockedUntil); return; }
     var emailConocido = state.users.some(function (u) { return u.email.toLowerCase() === email; });
-    if (!emailConocido) {
-      document.getElementById('loginSubmitBtn').disabled = true;
-      document.getElementById('loginError').textContent = '';
-      scPullAll().then(function () {
-        document.getElementById('loginSubmitBtn').disabled = false;
-        resolverCredenciales(email, password);
-      });
-      return;
-    }
-    resolverCredenciales(email, password);
+    document.getElementById('loginSubmitBtn').disabled = true;
+    document.getElementById('loginError').textContent = '';
+    /* FIX "mustChangePassword vuelve a pedirse tras borrar caché": un correo ya conocido localmente antes
+       solo esperaba el pull si era desconocido -- pero en un navegador recién limpiado, state.users ARRANCA
+       como el roster semilla hardcodeado (ver loadPersistedUsers/USERS), que incluye TODOS los correos reales
+       con la clave genérica y mustChangePassword:true de fábrica. Si el usuario ya tecleaba su clave real
+       (ya cambiada en una sesión anterior) más rápido de lo que tardaba en resolver el scPullAll() disparado
+       al cargar (ver DOMContentLoaded), emailConocido daba true de inmediato (el correo SÍ está en la semilla)
+       y resolverCredenciales() validaba contra ese registro todavía desactualizado -- la clave real no
+       calzaba contra la genérica de la semilla ("incorrecta"), o si por costumbre tecleaba la genérica, sí
+       calzaba y relanzaba el gate de cambio obligatorio ya resuelto antes. Esperar SIEMPRE el pull en vuelo
+       (scPullEnVuelo, el mismo que ya usa scPushAll -- ver ese fix) antes de resolver credenciales cierra esa
+       ventana de carrera; si ya resolvió, el then() corre casi instantáneo y no se nota. Un correo
+       desconocido sigue forzando un pull fresco aparte (puede ser un usuario recién creado que esta pestaña
+       ni siquiera alcanzó a traer en el primer pull). */
+    var espera = emailConocido ? (scPullEnVuelo || Promise.resolve()) : scPullAll();
+    espera.then(function () {
+      document.getElementById('loginSubmitBtn').disabled = false;
+      resolverCredenciales(email, password);
+    });
   }
   function resolverCredenciales(email, password) {
     var user = state.users.find(function (u) { return u.email.toLowerCase() === email && u.password === password; });
