@@ -8920,15 +8920,18 @@ var ALERTAS_KPI_LABELS = { riesgo: 'Atención Inmediata' };
    - PLANNER/ADMIN: bloqueos o demoras que ya superaron la tolerancia asignada ('critical', 'sustitucion_riesgo'
      antes de escalar, y 'sin_reemplazo' — jornada cerrada sin reemplazo confirmado).
    - ALIADO: solicitudes/turnos de su propia flota pendientes de que ÉL confirme algo (asignar mensajero,
-     confirmar reemplazo) — no cuenta 'critical' en general (esa es responsabilidad de seguimiento de
-     Bodega/Planner), solo el caso puntual en que 'critical' es explícitamente "Bodega no autorizó el
-     despacho, requiere que el Aliado asigne un reemplazo" (route.noAutorizaDespacho) y el de 'retirado' con
-     reemplazoPendienteTrasRetiro (mismo texto de acción, ver alertDetailText). */
+     confirmar reemplazo). 'critical' SIEMPRE cuenta para Aliado -- tanto el caso "Bodega no autorizó el
+     despacho" (route.noAutorizaDespacho) como el caso base "no llegó a la cita, dentro de la ventana de
+     gestión" ofrecen el mismo botón "Confirmar Reemplazo" exclusivo del Aliado (ver alertRowHtml, código
+     'critical'), así que ambos exigen su acción inmediata por igual -- y el de 'retirado' con
+     reemplazoPendienteTrasRetiro (mismo texto de acción, ver alertDetailText). Ver requerimiento "Corrección
+     de Tarjeta 'Atención Inmediata' para Aliado": la tarjeta marcaba 0 mientras la tabla sí mostraba filas
+     'critical' accionables (sin noAutorizaDespacho), porque este filtro exigía esa bandera de más. */
 function alertaEsAccionInmediata(a, role) {
   var code = a.est.code;
   if (role === 'ALIADO') {
     if (['pendiente_asignacion', 'cancelado_pendiente_reemplazo', 'sustitucion_riesgo'].indexOf(code) !== -1) return true;
-    if (code === 'critical' && a.route.noAutorizaDespacho) return true;
+    if (code === 'critical') return true;
     if (code === 'retirado' && (a.route.reemplazoPendienteTrasRetiro || a.route.recursoExtraordinarioPendiente)) return true;
     return false;
   }
