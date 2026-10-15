@@ -16975,7 +16975,14 @@ document.addEventListener('DOMContentLoaded', function () {
   state.cuotasMatrizProxima = loadPersistedCuotasMatrizProxima();
   state.cuotasFechaProxima = loadPersistedCuotasFechaProxima();
   state.cuotasBannerCO = loadPersistedCuotasBannerCO(state.cuotasBannerCO);
-  cuotasAutoSwapVigencia();
+  /* FIX "Admin activó Cuotas y quedó revertido solo" (mismo mecanismo, ver el fix de configSettings justo
+     arriba): NO se llama cuotasAutoSwapVigencia() aquí -- si llegara a aplicar un swap (state.cuotasFechaProxima
+     local ya vencida), sus persistCuotasXxx() empujarían a Supabase el snapshot LOCAL/semilla de esta pestaña
+     (leído arriba, ANTES de que scPullAll() -- disparado más arriba, sin esperar -- resuelva con el dato REAL),
+     sobreescribiendo en la nube la matriz/calendario real que Admin ya configuró. scPullAll() ya llama a
+     cuotasAutoSwapVigencia() por su cuenta en cuanto el pull real resuelve (ver su propio código), y
+     renderCuotas() también la re-evalúa cada vez que se visita el módulo -- cobertura suficiente sin arriesgar
+     este push prematuro. */
   state.permisosPais = loadPermisosPais();
   /* Trazabilidad de creación para los turnos semilla (no tienen un creador real, son datos de demostración
      cargados al iniciar la app) — los turnos creados desde la app en adelante ya traen su propio creadoPor
@@ -16998,8 +17005,15 @@ document.addEventListener('DOMContentLoaded', function () {
   /* Persiste de inmediato lo recién cargado — si loadConfigSettings() acaba de migrar datos antiguos (Bodega
      de México faltante, nombres de Aliados Colombia obsoletos, ver esas migraciones más arriba), esta escritura
      deja localStorage ya corregido desde el primer arranque, en vez de depender de que la migración se repita
-     en cada carga futura. Sin cambios que migrar, es una reescritura idéntica, sin efecto. */
-  persistConfigSettings();
+     en cada carga futura. Sin cambios que migrar, es una reescritura idéntica, sin efecto.
+     FIX "Admin activó Cuotas y quedó revertido solo": SOLO localStorage aquí, nunca scPushConfigSettings()
+     (a diferencia de persistConfigSettings() normal) -- este punto corre en CADA carga de página, ANTES de
+     que scPullAll() (disparado arriba, sin esperar) alcance a resolver con el config REAL ya sincronizado.
+     Si se empujara aquí, el snapshot local/default de esta pestaña (p. ej. cuotasActivoCO:false de fábrica)
+     sobreescribiría en Supabase, en CADA carga de CUALQUIER sesión, el valor real que Admin ya había
+     guardado -- exactamente la reversión reportada. El pull real (más abajo en este mismo arranque) ya se
+     encarga de traer y persistir localmente el config verdadero; nada necesita reenviarlo aquí. */
+  try { localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(state.configSettings)); } catch (e) {}
   syncCatalogosDesdeConfig();
   wireSidebarDelegation();
 
