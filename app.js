@@ -528,8 +528,20 @@ function scPushFlotaHabitual(aliado) {
    en Supabase la fila recién actualizada con lo que esta pestaña tenía en memoria ANTES de que el pull
    trajera la contraseña real -- revirtiéndola en la nube a lo que fuera que esta pestaña trajera (seed
    local o una sesión vieja restaurada). Se espera aquí cualquier pull en vuelo antes de empujar nada. */
+/* Ver requerimiento "Fallo crítico de arquitectura: Persistencia No Sincrónica de Marcaciones de Despacho/
+   Bodega" (incidente real reproducido: 55 marcaciones de llegada/salida corregidas manualmente en producción
+   fueron revertidas a vacío por el autoguardado de una pestaña vieja con state.turnos desactualizado). Ya no
+   basta con esperar un pull EN VUELO (ver comentario de arriba) -- este empuje periódico/de logout dispara
+   su PROPIO scPullAll() primero y espera a que resuelva antes de empujar nada. Si Supabase ya tiene datos
+   más frescos que esta pestaña (p. ej. otra sesión marcó una llegada/despacho hace unos segundos), ese pull
+   los adopta en state.* ANTES del push -- así este empuje de respaldo nunca puede pisar un cambio ajeno más
+   reciente con una copia local obsoleta, solo reafirma la verdad ya vigente. Las mutaciones individuales
+   (submitTurno, registrarLlegadaBodega, registrarSalida, etc.) siguen empujando su propio cambio de inmediato
+   -- este sigue siendo solo una red de respaldo periódica, nunca el mecanismo primario de persistencia. */
 function scPushAll() {
   (scPullEnVuelo || Promise.resolve()).then(function () {
+    return scPullAll();
+  }).then(function () {
     scPushRows('app_users', state.users);
     scPushRows('app_mensajeros', state.mensajeros);
     scPushRows('app_turnos', state.turnos);
@@ -4522,6 +4534,19 @@ function registrarSalida(routeId) {
   }
   toast('ok', 'Salida registrada', route.id + ' fue despachada.' + (route.afectacionBodegaDemora ? ' Espera prolongada en bodega registrada.' : ''));
   syncAndRender(true);
+  /* Ver requerimiento "Fallo crítico de arquitectura: Persistencia No Sincrónica de Marcaciones de
+     Despacho/Bodega": esta marcación, igual que (antes) la creación de turnos en submitTurno, quedaba SOLO
+     en memoria hasta el autoguardado periódico (~30s, ver scPushAll/gravityTick) o el logout — si cualquier
+     otra pestaña con state.turnos desactualizado disparaba su propio snapshot completo antes de que ese
+     ciclo llegara, pisaba esta marca sin dejar rastro ni aviso (incidente real reproducido: 55 turnos
+     corregidos manualmente revertidos a llegada/salida vacíos por el autoguardado de una pestaña vieja).
+     Empuje inmediato de ESTE turno puntual, independiente del autoguardado — no se revierte en memoria si
+     falla (el despacho físico ya ocurrió), solo se avisa para reintentar la sincronización. */
+  scPushRows('app_turnos', [route]).then(function (res) {
+    if (res && res.ok === false) {
+      toast('warn', 'Despacho no confirmado en la nube', route.id + ' se guardó localmente pero no se pudo sincronizar con Supabase — revisa tu conexión.');
+    }
+  });
 }
 
 /* ---------------- Toasts ---------------- */
@@ -7383,6 +7408,16 @@ function registrarLlegadaBodega(routeId) {
   registrarHistorialCambio(route, { tipo: 'llegada', accion: 'registrada', motivo: 'Llegada a bodega registrada — ' + fmtTime12(route.llegada) + '.', horaAnterior: null, horaPropuesta: null, por: state.user.nombre, puntualidad: puntualidad });
   toast('ok', 'Llegada registrada', route.id + ' ingresó a bodega.');
   syncAndRender(true);
+  /* Ver requerimiento "Fallo crítico de arquitectura: Persistencia No Sincrónica de Marcaciones de
+     Despacho/Bodega" (mismo fix que registrarSalida): esta marcación quedaba SOLO en memoria hasta el
+     autoguardado periódico (~30s) o el logout — una pestaña vieja con snapshot desactualizado podía pisarla
+     sin dejar rastro. Empuje inmediato de ESTE turno puntual, sin revertir en memoria si falla (la llegada
+     física ya ocurrió), solo avisando para reintentar la sincronización. */
+  scPushRows('app_turnos', [route]).then(function (res) {
+    if (res && res.ok === false) {
+      toast('warn', 'Llegada no confirmada en la nube', route.id + ' se guardó localmente pero no se pudo sincronizar con Supabase — revisa tu conexión.');
+    }
+  });
 }
 function toggleMaleta(routeId, checked) {
   if (!canDo('despacho.manage')) return;
