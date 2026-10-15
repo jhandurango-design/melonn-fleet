@@ -3743,6 +3743,23 @@ function resolverSolicitudGeneral(id, aceptar) {
     ? (Auth.getUserRole() === 'ALIADO' && sol.aliado === state.user.aliado)
     : canDo('solicitud.resolve.general');
   if (!puedeResolver) return;
+  /* Ver requerimiento "Extensión al Flujo del Planner": la solicitud pudo quedar pendiente horas/días -- entre
+     su creación y esta aprobación, otro aliado puede haber programado al mismo mensajero (por cédula, placa,
+     correo o nombre) para la misma fecha. Mismo criterio de 4 vías y mismo mensaje que el flujo directo del
+     Aliado (ver submitTurno) -- la solicitud queda intacta como 'pendiente' si se bloquea, para que Planner
+     decida (rechazarla o pedirle al Aliado otro mensajero), nunca se consume sola. Solo aplica a los tipos
+     que asignan un mensajero real a un turno (alta nueva, cupo adicional, edición) y nunca si el detalle es
+     "Pendiente / Por Confirmar" (sin identidad real que cruzar). */
+  if (aceptar && ['nuevo_turno', 'cupo_adicional', 'edicion_turno'].indexOf(sol.tipo) !== -1 && sol.detalle && !sol.detalle.pendiente) {
+    var conflictoPlanner = mensajeroProgramadoPorOtroAliado(
+      { cedula: sol.detalle.cedula, placa: sol.detalle.placa, correo: sol.detalle.correo, nombre: sol.detalle.nombre },
+      sol.detalle.fecha, sol.aliado
+    );
+    if (conflictoPlanner) {
+      toast('warn', 'No se puede aprobar la solicitud', mensajeDuplicidadAliado(conflictoPlanner));
+      return;
+    }
+  }
   sol.estado = aceptar ? 'aceptada' : 'rechazada';
   sol.resueltoEn = fmtClock(state.now);
   sol.resueltoFecha = TODAY_STR;
@@ -12772,25 +12789,52 @@ function alertarVentanaRetorno(mensajeroId, conflicto) {
   toast('warn', 'Ventana de retorno no cumplida',
     getMensajero(mensajeroId).nombre + ' ya está programado a las ' + fmtTime12(conflicto.hora) + '. Por tiempo de operación y retorno (4 hrs mínimas), solo puede volver a programarse a partir de las ' + fmtTime12(fmtTimeHM(horaPermitidaDT)) + '.');
 }
-/* Ver requerimiento "Validación de Exclusividad de Mensajeros por Fecha": un mismo mensajero (identificado por
-   cédula -- el dato real de la persona, no mensajeroId, que es un registro independiente POR ALIADO, ver
-   findOrCreateMensajero) no puede quedar programado el mismo día por 2 aliados distintos. Se busca entre TODOS
-   los turnos de esa fecha (cualquier sede) un mensajero con la misma cédula cuyo registro pertenezca a un
-   aliado DIFERENTE al que está programando ahora -- ignorando turnos ya 'cancelled' (computeEstado), ya que
-   una cancelación de verdad libera al mensajero de inmediato para que cualquier otro aliado lo programe ese
-   mismo día (ver punto 2 del requerimiento). Sin cédula (turno "Pendiente / Por Confirmar") no hay identidad
-   real que cruzar, así que no aplica. */
-function mensajeroProgramadoPorOtroAliado(cedula, fecha, aliadoActual) {
-  if (!cedula) return null;
+/* Ver requerimiento "Validación de Exclusividad de Mensajeros por Fecha" + ampliación "4 Criterios de
+   Identidad": un mismo mensajero (identidad real de la persona, no mensajeroId -- que es un registro
+   independiente POR ALIADO, ver findOrCreateMensajero) no puede quedar programado el mismo día por 2 aliados
+   distintos. Se cruzan 4 señales de identidad (cédula, placa, correo, nombre normalizado) contra TODOS los
+   turnos de esa fecha (cualquier sede) -- cualquiera que coincida con un mensajero de un aliado DIFERENTE
+   cuenta como duplicado, ya que cada campo por separado ya identifica de forma razonable a la misma persona
+   o al mismo vehículo. Se ignoran turnos ya 'cancelled' (computeEstado), ya que una cancelación de verdad
+   libera al mensajero de inmediato para que cualquier otro aliado lo programe ese mismo día. */
+function normalizarNombrePersona(s) {
+  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+/* Excluye placas genéricas/provisionales ("—" de Mensajero por Confirmar, "SIN-PLACA-..." de altas con dato
+   real pendiente, "N/A"): cruzar por un valor compartido por decenas de registros sin placa real generaría
+   falsos positivos masivos entre aliados distintos. */
+function placaEsIdentificable(placa) {
+  if (!placa) return false;
+  var p = placa.trim().toUpperCase();
+  if (!p || p === '—' || p === 'N/A' || p === 'NA') return false;
+  if (p.indexOf('SIN-PLACA') === 0 || p.indexOf('SIN PLACA') === 0) return false;
+  return true;
+}
+function mensajeroProgramadoPorOtroAliado(identidad, fecha, aliadoActual) {
+  var cedula = (identidad.cedula || '').trim();
+  var correo = (identidad.correo || '').trim().toLowerCase();
+  var nombreNorm = normalizarNombrePersona(identidad.nombre);
+  var placaBuscada = placaEsIdentificable(identidad.placa) ? identidad.placa.trim().toUpperCase() : null;
+  if (!cedula && !correo && !nombreNorm && !placaBuscada) return null;
   for (var i = 0; i < state.turnos.length; i++) {
     var r = state.turnos[i];
     if (r.fecha !== fecha) continue;
     var m = getMensajero(r.mensajeroId);
-    if (!m || m.cedula !== cedula || m.aliado === aliadoActual) continue;
+    if (!m || m.aliado === aliadoActual) continue;
     if (computeEstado(r).code === 'cancelled') continue;
-    return { route: r, mensajero: m };
+    if (cedula && m.cedula && m.cedula.trim() === cedula) return { route: r, mensajero: m, criterio: 'cedula', valor: cedula };
+    if (placaBuscada && placaEsIdentificable(m.placa) && m.placa.trim().toUpperCase() === placaBuscada) return { route: r, mensajero: m, criterio: 'placa', valor: placaBuscada };
+    if (correo && m.correo && m.correo.trim().toLowerCase() === correo) return { route: r, mensajero: m, criterio: 'correo', valor: correo };
+    if (nombreNorm && normalizarNombrePersona(m.nombre) === nombreNorm) return { route: r, mensajero: m, criterio: 'nombre', valor: m.nombre };
   }
   return null;
+}
+/* Mensaje único para ambos puntos de enganche (submitTurno directo del Aliado y resolverSolicitudGeneral al
+   aprobar Planner) -- el criterio 'placa' se nombra explícitamente (ej. "El vehículo con placa XYZ123..."),
+   el resto se refiere siempre al mensajero por su nombre real ya registrado en el turno en conflicto. */
+function mensajeDuplicidadAliado(conflicto) {
+  var sujeto = conflicto.criterio === 'placa' ? 'El vehículo con placa ' + conflicto.valor : 'El mensajero ' + conflicto.mensajero.nombre;
+  return sujeto + ' ya se encuentra programado para esta fecha con el proveedor ' + conflicto.mensajero.aliado + '.';
 }
 /* Ver requerimiento "Selector de Hora propio con botón Aceptar": reemplaza el picker nativo de
    <input type="time"> (ver #turnoHora en index.html, ahora type="text" readonly) por un desplegable propio
@@ -12920,9 +12964,9 @@ function submitTurno(e) {
      cédula contra TODOS los aliados. Sin cédula (turno "Pendiente / Por Confirmar") no hay identidad real que
      cruzar todavía, así que no aplica. */
   if (!pendiente) {
-    var conflictoOtroAliado = mensajeroProgramadoPorOtroAliado(cedula, fecha, state.user.aliado);
+    var conflictoOtroAliado = mensajeroProgramadoPorOtroAliado({ cedula: cedula, placa: placa, correo: correo, nombre: nombre }, fecha, state.user.aliado);
     if (conflictoOtroAliado) {
-      toast('warn', 'Mensajero ya programado', 'El mensajero ' + conflictoOtroAliado.mensajero.nombre + ' ya se encuentra programado para esta fecha con el proveedor ' + conflictoOtroAliado.mensajero.aliado + '.');
+      toast('warn', 'Mensajero ya programado', mensajeDuplicidadAliado(conflictoOtroAliado));
       return;
     }
   }
