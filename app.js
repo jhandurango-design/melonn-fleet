@@ -506,6 +506,16 @@ function scPushCuotasConfig() {
     observaciones: state.cuotasObservaciones
   }]);
 }
+/* FIX "Guardar/Cargar Flota Habitual solo vivía en localStorage" (mismo hueco arquitectónico que Cuotas, ver
+   scPushCuotasConfig): cada Aliado solo veía su propia plantilla de Flota Recurrente en el navegador donde la
+   guardó -- inútil desde cualquier otro dispositivo/sesión (ej. un flujo operado por terceros en nombre del
+   Aliado, como esta misma sesión de pruebas). Una fila por aliado en app_flota_habitual (id = nombre del
+   aliado, mismo patrón {id,data} que el resto) en vez de una fila única global como Cuotas -- cada Aliado
+   gestiona la suya de forma independiente, sin necesidad de traer/bundlear la de todos los demás en cada
+   guardado. */
+function scPushFlotaHabitual(aliado) {
+  scPushRows('app_flota_habitual', [{ id: aliado, plantilla: state.flotaHabitual[aliado] || [] }]);
+}
 /* Empuja el snapshot COMPLETO de las 3 tablas -- se llama en los puntos clave (login, logout, autoguardado
    periódico), nunca en cada mutación individual (ver nota de arriba).
    Ver requerimiento "Fallo crítico de arquitectura: contraseña revertida a la genérica tras redeploy":
@@ -545,8 +555,8 @@ var scPullEnVuelo = null;
    real que ya existía. */
 var cuotasVigenteHoySincronizadaReal = false;
 function scPullAll() {
-  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config')]).then(function (res) {
-    var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4];
+  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual')]).then(function (res) {
+    var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4], flotaHabitualRows = res[5];
     var changed = false;
     if (users && users.length) {
       state.users = deduplicarUsuariosPorEmail(users);
@@ -607,6 +617,13 @@ function scPullAll() {
         cuotasVigenteHoySincronizadaReal = true;
       }
       cuotasAutoSwapVigencia();
+      changed = true;
+    }
+    if (flotaHabitualRows && flotaHabitualRows.length) {
+      flotaHabitualRows.forEach(function (row) {
+        state.flotaHabitual[row.value.id] = row.value.plantilla || [];
+      });
+      try { localStorage.setItem(FLOTA_HABITUAL_STORAGE_KEY, JSON.stringify(state.flotaHabitual)); } catch (e) {}
       changed = true;
     }
     if (changed && state.user) syncAndRender(true);
@@ -13085,6 +13102,7 @@ function guardarFlotaHabitual() {
   });
   state.flotaHabitual[state.user.aliado] = plantilla;
   persistFlotaHabitual();
+  scPushFlotaHabitual(state.user.aliado);
   toast('ok', 'Flota Recurrente', 'Programación actual guardada como Flota Recurrente (' + plantilla.length + ' turno' + (plantilla.length === 1 ? '' : 's') + ').');
 }
 /* "Cargar Flota Habitual": exclusiva de la vista "Mañana" (ver visibilidad del botón en renderProgramacion,
@@ -13110,13 +13128,24 @@ function cargarFlotaHabitual() {
      al final, en vez de depender del autoguardado periódico. */
   var turnosNuevos = [];
   var solicitudesGeneralesNuevas = [];
+  /* FIX "mensajero fantasma" (ver mismo fix en submitTurno): findOrCreateMensajero crea mensajeros nuevos
+     SOLO en memoria -- esta carga masiva tampoco los empujaba nunca a app_mensajeros, quedaban a merced del
+     autoguardado periódico igual que submitTurno antes de su propio fix. Se detecta aquí cada mensajero
+     genuinamente NUEVO (no uno ya existente reutilizado por cédula) para empujarlo junto con los turnos. */
+  var mensajerosNuevos = [];
+  function resolverMensajero(payload) {
+    var idsAntes = state.mensajeros.map(function (m) { return m.id; });
+    var id = findOrCreateMensajero(payload);
+    if (idsAntes.indexOf(id) === -1) mensajerosNuevos.push(getMensajero(id));
+    return id;
+  }
   plantilla.forEach(function (entry) {
     if (!entry.cedula || yaProgramados[entry.cedula]) return;
     yaProgramados[entry.cedula] = true;
     var payload = { sede: entry.sede, vehiculo: entry.vehiculo, hora: entry.hora, nombre: entry.nombre, telefono: entry.telefono, cedula: entry.cedula, placa: entry.placa, correo: entry.correo, pendiente: false, fecha: fecha };
     var aprobacion = evaluarAprobacionCuota(entry.sede, state.user.aliado, entry.vehiculo, entry.hora, fecha);
     if (aprobacion.requiere) {
-      var mensajeroIdPend = findOrCreateMensajero(payload);
+      var mensajeroIdPend = resolverMensajero(payload);
       var turnoPendienteAprobacion = {
         id: nextTurnoId(), sede: entry.sede, fecha: fecha, mensajeroId: mensajeroIdPend, vehiculo: entry.vehiculo, hora: entry.hora,
         llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: false,
@@ -13137,7 +13166,7 @@ function cargarFlotaHabitual() {
     var ws = progEditWindowState();
     var directo = ws === 'open' || ws === 'alert' || ws === 'closed_extended_active';
     if (directo) {
-      var mensajeroId = findOrCreateMensajero(payload);
+      var mensajeroId = resolverMensajero(payload);
       var nuevoTurno = { id: nextTurnoId(), sede: entry.sede, fecha: fecha, mensajeroId: mensajeroId, vehiculo: entry.vehiculo, hora: entry.hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: false };
       state.turnos.push(nuevoTurno);
       registrarCreacionTurno(nuevoTurno, state.user.nombre);
@@ -13167,10 +13196,27 @@ function cargarFlotaHabitual() {
   if (extra.length) msg += ' ' + extra.join(' ');
   toast('ok', 'Flota Recurrente cargada', msg);
   var pushesFlotaHabitual = [];
+  if (mensajerosNuevos.length) pushesFlotaHabitual.push(scPushRows('app_mensajeros', mensajerosNuevos));
   if (turnosNuevos.length) pushesFlotaHabitual.push(scPushRows('app_turnos', turnosNuevos));
   if (solicitudesGeneralesNuevas.length) pushesFlotaHabitual.push(scPushRows('app_solicitudes_generales', solicitudesGeneralesNuevas));
   if (pushesFlotaHabitual.length) {
-    Promise.all(pushesFlotaHabitual).then(function () { syncAndRender(true); });
+    Promise.all(pushesFlotaHabitual).then(function (results) {
+      if (results.some(function (r) { return r && r.ok === false; })) {
+        /* Ver mismo rollback en submitTurno: deshace SOLO lo que esta llamada acaba de crear, para que un
+           reintento no choque contra fantasmas locales (mensajero/turno/solicitud nunca confirmados en
+           Supabase). */
+        var idsTurnosNuevos = turnosNuevos.map(function (t) { return t.id; });
+        var idsMensajerosNuevos = mensajerosNuevos.map(function (m) { return m.id; });
+        var idsSolicitudesNuevas = solicitudesGeneralesNuevas.map(function (s) { return s.id; });
+        state.turnos = state.turnos.filter(function (t) { return idsTurnosNuevos.indexOf(t.id) === -1; });
+        state.mensajeros = state.mensajeros.filter(function (m) { return idsMensajerosNuevos.indexOf(m.id) === -1; });
+        state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return idsSolicitudesNuevas.indexOf(s.id) === -1; });
+        toast('warn', 'No se pudo confirmar en la nube', 'La carga de Flota Recurrente no se guardó — revisa tu conexión e inténtalo de nuevo.');
+        syncAndRender(true);
+        return;
+      }
+      syncAndRender(true);
+    });
   } else {
     syncAndRender(true);
   }

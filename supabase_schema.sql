@@ -164,3 +164,29 @@ create policy "anon_update_app_cuotas_config" on public.app_cuotas_config for up
 drop trigger if exists trg_app_cuotas_config_updated_at on public.app_cuotas_config;
 create trigger trg_app_cuotas_config_updated_at before update on public.app_cuotas_config
   for each row execute function public.set_updated_at();
+
+-- ============================================================================
+-- MIGRACIÓN INCREMENTAL (2026-10-15b) -- igual que la de arriba: create table if not exists, nunca drop.
+-- Ver requerimiento "Guardar/Cargar Flota Habitual solo vivía en localStorage" (mismo hueco que Cuotas) --
+-- una fila por aliado (id = nombre del aliado) con su plantilla de Flota Recurrente.
+-- ============================================================================
+create table if not exists public.app_flota_habitual (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+grant select, insert, update on public.app_flota_habitual to anon;
+
+alter table public.app_flota_habitual enable row level security;
+
+drop policy if exists "anon_select_app_flota_habitual" on public.app_flota_habitual;
+drop policy if exists "anon_insert_app_flota_habitual" on public.app_flota_habitual;
+drop policy if exists "anon_update_app_flota_habitual" on public.app_flota_habitual;
+create policy "anon_select_app_flota_habitual" on public.app_flota_habitual for select to anon using (true);
+create policy "anon_insert_app_flota_habitual" on public.app_flota_habitual for insert to anon with check (true);
+create policy "anon_update_app_flota_habitual" on public.app_flota_habitual for update to anon using (true) with check (true);
+
+drop trigger if exists trg_app_flota_habitual_updated_at on public.app_flota_habitual;
+create trigger trg_app_flota_habitual_updated_at before update on public.app_flota_habitual
+  for each row execute function public.set_updated_at();
