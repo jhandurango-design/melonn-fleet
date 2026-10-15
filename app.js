@@ -6431,6 +6431,7 @@ function renderConsolidado() {
   document.getElementById('consolCuerpoDiaMes').hidden = enModoManana;
   document.getElementById('consolCuerpoManana').hidden = !enModoManana;
   document.getElementById('consolFiltrosDiaMes').style.display = enModoManana ? 'none' : 'contents';
+  document.getElementById('consolFiltrosManana').style.display = enModoManana ? 'contents' : 'none';
   if (enModoManana) { renderConsolidadoManana(); return; }
   /* "Operación del Día" fuerza TODAY_STR sin importar lo que haya en el <input> de fecha (oculto en este
      modo); "Historial" respeta el Rango de Fechas que el usuario eligió ahí (ver requerimiento "Registro
@@ -6504,10 +6505,9 @@ function renderConsolidado() {
    mañana desde Programar Flota, cruzado contra Cuotas -- sin esperar al corte de medianoche. Cobertura total
    por defecto; los selectores Bodega/Aliado/Estado de carga (ver consolCuerpoManana en index.html) acotan el
    alcance igual que el resto de filtros de la plataforma. */
-/* actuales/requerido genérico (en vez de leer .cuota/.cantidad directo) porque los 2 shapes que consume este
-   helper nombran el campo distinto: cuotasProgresoPorAliadoManana devuelve {cuota}, cuotasComplianceRecordsManana
-   devuelve {cantidad} -- un único punto de traducción evita que una de las 2 llamadas quede comparando contra
-   undefined (ver bug detectado en verificación: la matriz mostraba "Pendiente" en filas ya 100% cubiertas). */
+/* actuales/requerido genérico (en vez de leer .cuota directo) para no acoplar este helper al nombre exacto del
+   campo en cada shape que lo consuma (ver bug detectado en verificación previa: comparar contra un campo con
+   nombre distinto al esperado dejaba todo marcado como "Pendiente" aunque ya estuviera 100% cubierto). */
 function cuotasEstadoManana(actuales, requerido) {
   if (actuales <= 0) return 'vacio';
   return actuales >= requerido ? 'ok' : 'pendiente';
@@ -6527,13 +6527,27 @@ function consolManChipHtml(p) {
     '<span>' + escapeHtml(p.aliado) + ': ' + p.actuales + '/' + p.cuota + ' recursos (' + etiqueta + ')</span>' +
     '</div>';
 }
-function consolManRowHtml(rec) {
-  var estado = cuotasEstadoManana(rec.actuales, rec.cantidad);
-  var badge = estado === 'ok' ? '<span class="badge badge-dispatched"><i></i>Cubierto</span>'
-    : estado === 'pendiente' ? '<span class="badge badge-pending"><i></i>Pendiente por Programar (' + (rec.cantidad - rec.actuales) + ')</span>'
-    : '<span class="badge badge-pending"><i></i>Sin iniciar</span>';
-  var vehiculoLabel = cuotasVehiculoLabel(rec.vehiculo, countryForSede(rec.sede));
-  return '<tr><td>' + rec.sede + '</td><td>' + escapeHtml(rec.aliado) + '</td><td>' + escapeHtml(vehiculoLabel) + '</td><td>' + fmtTime12(rec.franja) + '</td><td>' + rec.cantidad + '</td><td>' + rec.actuales + '</td><td>' + badge + '</td></tr>';
+/* Ver requerimiento "Ajustes finales de estructura... Avance y Carga T+1", punto 3: la tabla de detalle lista
+   REGISTROS reales (un turno = una fila) -- ya no combinaciones agregadas sede/aliado/vehículo/franja. Mismo
+   alcance Bodega/Aliado que el resto de la pestaña, siempre sobre TOMORROW_STR. */
+function routesForConsolidadoManana(sedeFiltro, aliadoFiltro) {
+  return state.turnos.filter(function (r) {
+    if (r.fecha !== TOMORROW_STR) return false;
+    if (sedeFiltro && r.sede !== sedeFiltro) return false;
+    if (aliadoFiltro && getMensajero(r.mensajeroId).aliado !== aliadoFiltro) return false;
+    return true;
+  }).sort(function (a, b) { return a.sede.localeCompare(b.sede) || a.hora.localeCompare(b.hora); });
+}
+function consolManDetalleRowHtml(route) {
+  var m = getMensajero(route.mensajeroId), est = computeEstado(route);
+  return '<tr data-route="' + route.id + '">' +
+    '<td>' + aliadoLabelHtml(m.aliado) + '</td>' +
+    '<td><div class="courier"><div><div class="courier-name">' + escapeHtml(m.nombre) + '</div><div class="courier-sub">Placa ' + escapeHtml(m.placa) + '</div></div></div></td>' +
+    '<td>' + escapeHtml(route.vehiculo) + '</td>' +
+    '<td>' + fmtTime12(route.hora) + '</td>' +
+    '<td><span class="badge ' + badgeClassFor(est.code) + '"><i></i>' + est.label + '</span></td>' +
+    '<td>' + escapeHtml(route.sede) + '</td>' +
+    '</tr>';
 }
 function refreshConsolManAliadoOptions() {
   var sel = document.getElementById('consolManAliado');
@@ -6549,17 +6563,19 @@ function renderConsolidadoManana() {
   var qAliado = document.getElementById('consolManAliado').value;
   var qEstado = document.getElementById('consolManEstado').value;
 
+  /* "Estado de carga" (Cubierto/Pendiente) es un atributo de CUMPLIMIENTO DE CUOTA por aliado (agregado), no
+     de una ruta puntual -- sigue acotando únicamente el Panel de Avance de Cuotas; la tabla de detalle de
+     abajo (un turno real por fila) se acota solo por Bodega/Aliado. */
   var progreso = cuotasProgresoPorAliadoManana(state.consolManFiltroBodega);
   if (qAliado) progreso = progreso.filter(function (p) { return p.aliado === qAliado; });
   if (qEstado) progreso = progreso.filter(function (p) { return cuotasEstadoMananaMatchFiltro(cuotasEstadoManana(p.actuales, p.cuota), qEstado); });
   document.getElementById('consolManComplianceChips').innerHTML = progreso.map(consolManChipHtml).join('');
   document.getElementById('consolManComplianceEmpty').classList.toggle('show', progreso.length === 0);
 
-  var records = cuotasComplianceRecordsManana(state.consolManFiltroBodega, qAliado);
-  if (qEstado) records = records.filter(function (r) { return cuotasEstadoMananaMatchFiltro(cuotasEstadoManana(r.actuales, r.cantidad), qEstado); });
-  document.getElementById('consolManTbody').innerHTML = records.map(consolManRowHtml).join('');
-  document.getElementById('consolManCount').textContent = records.length;
-  document.getElementById('consolManEmpty').classList.toggle('show', records.length === 0);
+  var routes = routesForConsolidadoManana(state.consolManFiltroBodega, qAliado);
+  document.getElementById('consolManTbody').innerHTML = routes.map(consolManDetalleRowHtml).join('');
+  document.getElementById('consolManCount').textContent = routes.length;
+  document.getElementById('consolManEmpty').classList.toggle('show', routes.length === 0);
 }
 function limpiarFiltroConsolMan() {
   state.consolManFiltroBodega = '';
@@ -15650,23 +15666,6 @@ function cuotasProgresoPorAliadoManana(sedeFiltro) {
     porAliado[c.aliado].actuales += turnosProgramadosCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo);
   });
   return Object.keys(porAliado).sort().map(function (a) { return porAliado[a]; });
-}
-/* Matriz detallada de la misma pestaña (sede+aliado+vehículo+franja, con cuota asignada vs. ya cargado) --
-   mismo shape de fila que cuotasComplianceRecords (ver cuotasComplianceRowHtml, reutilizada tal cual), pero
-   para TOMORROW_STR/matriz en vivo y sin acotar a un único par sede+aliado: sedeFiltro/aliadoFiltro (ambos
-   opcionales) acotan el universo, igual que el resto de filtros de Consolidado. */
-function cuotasComplianceRecordsManana(sedeFiltro, aliadoFiltro) {
-  var dia = diaSemanaKey(TOMORROW_STR);
-  if (!dia) return [];
-  return state.cuotasMatriz.filter(function (c) {
-    if (c.dia !== dia || c.cantidad <= 0) return false;
-    if (!cuotasActivoPais(countryForSede(c.sede))) return false;
-    if (sedeFiltro && c.sede !== sedeFiltro) return false;
-    if (aliadoFiltro && c.aliado !== aliadoFiltro) return false;
-    return true;
-  }).map(function (c) {
-    return { sede: c.sede, aliado: c.aliado, vehiculo: c.vehiculo, franja: c.franja, cantidad: c.cantidad, actuales: turnosProgramadosCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo) };
-  }).sort(function (a, b) { return a.sede.localeCompare(b.sede) || a.aliado.localeCompare(b.aliado) || a.franja.localeCompare(b.franja); });
 }
 /* Widget de avance de cuotas al tope de Programar Flota -- oculto por completo si Cuotas no está activo
    para ninguna de las bodegas de este aliado en la fecha activa (Hoy/Mañana). Cada bodega con déficit

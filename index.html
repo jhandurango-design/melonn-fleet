@@ -483,9 +483,9 @@
           </div>
           <div class="page-head-actions">
             <div class="segmented" id="consolModoSegment">
+              <button type="button" data-modo="manana">Avance y Carga T+1</button>
               <button type="button" data-modo="dia" class="active">Operación del Día</button>
               <button type="button" data-modo="mes">Historial del Mes</button>
-              <button type="button" data-modo="manana">Avance y Carga T+1</button>
             </div>
             <!-- Ver requerimiento "Zona ciega nocturna — Avance y Carga T+1": todo este grupo (toggle
                  Día/Rango, fechas, Bodega/Aliado/Mensajero, Limpiar Filtro) es EXCLUSIVO de las pestañas
@@ -537,6 +537,32 @@
               <div class="field filter-bar-clear">
                 <label>&nbsp;</label>
                 <button type="button" class="btn btn-ghost" id="btnLimpiarConsolidadoFiltro">Limpiar Filtro</button>
+              </div>
+            </div>
+            <!-- Ver requerimiento "Ajustes finales de estructura... Avance y Carga T+1", punto 2: la barra de
+                 filtros de esta pestaña vive en la MISMA posición/fila que la de "Operación del Día" (este
+                 mismo page-head-actions) -- no en un panel aparte más abajo en el cuerpo. Oculta como bloque
+                 único mientras se está en Día/Mes (ver consolFiltrosDiaMes, arriba), mismo criterio inverso. -->
+            <div id="consolFiltrosManana" style="display:none;">
+              <div class="field" style="min-width:160px;">
+                <label for="consolManBodega">Bodega</label>
+                <select id="consolManBodega"></select>
+              </div>
+              <div class="field" style="min-width:160px;">
+                <label for="consolManAliado">Aliado</label>
+                <select id="consolManAliado"></select>
+              </div>
+              <div class="field" style="min-width:160px;">
+                <label for="consolManEstado">Estado de carga</label>
+                <select id="consolManEstado">
+                  <option value="">Todos</option>
+                  <option value="cubierto">Cubierto</option>
+                  <option value="pendiente">Pendiente por cargar</option>
+                </select>
+              </div>
+              <div class="field filter-bar-clear">
+                <label>&nbsp;</label>
+                <button type="button" class="btn btn-ghost" id="btnLimpiarConsolManFiltro">Limpiar Filtro</button>
               </div>
             </div>
           </div>
@@ -600,11 +626,6 @@
              vez, no solo el aliado en sesión). Cobertura total por defecto ("Todas las bodegas"/"Todos los
              aliados"), con los mismos selectores Bodega/Aliado ya usados en el resto de Consolidado. -->
         <div id="consolCuerpoManana" hidden>
-          <div class="cutoff-banner" id="consolManBanner">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>
-            <span id="consolManBannerTexto">Avance en vivo de la carga que los aliados están guardando para mañana — no afecta la operación de hoy.</span>
-          </div>
-
           <section class="panel">
             <p class="panel-title">Avance de Cuotas por Aliado — Mañana</p>
             <div class="cuotas-resumen-chips" id="consolManComplianceChips"></div>
@@ -614,47 +635,34 @@
             </div>
           </section>
 
-          <section class="panel">
-            <p class="panel-title">Filtrar</p>
-            <div class="filter-bar">
-              <div class="field" style="min-width:160px;">
-                <label for="consolManBodega">Bodega</label>
-                <select id="consolManBodega"></select>
-              </div>
-              <div class="field" style="min-width:160px;">
-                <label for="consolManAliado">Aliado</label>
-                <select id="consolManAliado"></select>
-              </div>
-              <div class="field" style="min-width:160px;">
-                <label for="consolManEstado">Estado de carga</label>
-                <select id="consolManEstado">
-                  <option value="">Todos</option>
-                  <option value="cubierto">Cubierto</option>
-                  <option value="pendiente">Pendiente por cargar</option>
-                </select>
-              </div>
-              <button type="button" class="btn btn-ghost filter-bar-clear" id="btnLimpiarConsolManFiltro">Limpiar Filtro</button>
-            </div>
-          </section>
+          <!-- Ver requerimiento "Ajustes finales de estructura... Avance y Carga T+1", punto 1: el banner
+               informativo va INMEDIATAMENTE antes de la tabla de detalle (ya no en la cabecera superior). -->
+          <div class="cutoff-banner" id="consolManBanner">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>
+            <span id="consolManBannerTexto">Avance en vivo de la carga que los aliados están guardando para mañana — no afecta la operación de hoy.</span>
+          </div>
 
+          <!-- Ver requerimiento punto 3: reemplaza la Matriz de combinaciones sede/aliado/vehículo/franja por
+               una tabla de REGISTROS reales (un turno = una fila), mismo criterio que la tabla de "Operación
+               del Día" (ver consolTable) -- aquí sobre TOMORROW_STR en vez de TODAY_STR. -->
           <section class="table-card">
             <div class="table-head">
               <div>
-                <h2>Matriz de Programación T+1</h2>
-                <div class="count"><span id="consolManCount">0</span> combinaciones sede/aliado/vehículo/franja</div>
+                <h2>Programación cargada — Mañana</h2>
+                <div class="count"><span id="consolManCount">0</span> rutas cargadas para mañana</div>
               </div>
             </div>
             <div class="table-scroll">
               <table id="consolManTable">
                 <thead>
-                  <tr><th>Bodega</th><th>Aliado</th><th>Vehículo</th><th>Franja</th><th>Cuota asignada</th><th>Cargado</th><th>Estado</th></tr>
+                  <tr><th>Aliado</th><th>Mensajero / Conductor</th><th>Vehículo</th><th>Hora programada</th><th>Estado</th><th>Bodega</th></tr>
                 </thead>
                 <tbody id="consolManTbody"></tbody>
               </table>
             </div>
             <div class="empty-state" id="consolManEmpty">
               <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-              <div>No hay cuotas asignadas para mañana en el alcance/filtro seleccionado.</div>
+              <div>No hay rutas cargadas para mañana en el alcance/filtro seleccionado.</div>
             </div>
           </section>
         </div>
