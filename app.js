@@ -7024,19 +7024,13 @@ function renderDespacho() {
   }
   document.getElementById('despachoSub').textContent = sede + ' — Bodega / Zona Común de Despacho · ' +
     (enModoHistorial ? fmtDateRangeLong(state.despachoHistDesde, state.despachoHistHasta) : fmtDateLong(state.despachoFecha));
-  /* Orden cronológico: PLANNER mantiene intacto el orden operativo de cola (llegada primero, luego hora
-     programada — ver requerimiento previo, protegido explícitamente por "Unificación y Estandarización
-     Módulo de Programación": "Planner mantiene intacta su lógica de orden"). BODEGA usa exclusivamente HORA
-     DE CITACIÓN (sin priorizar llegada) — "tabla unificada ordenada por hora de citación para flujo en
-     puerta", el mismo criterio que ya usa Consolidado para Planner. */
-  var routes = routesForDespacho().slice().sort(role === 'BODEGA'
-    ? function (a, b) { return a.hora.localeCompare(b.hora); }
-    : function (a, b) {
-      var aArr = !!a.llegada, bArr = !!b.llegada;
-      if (aArr && bArr) return a.llegada.localeCompare(b.llegada);
-      if (aArr !== bArr) return aArr ? -1 : 1;
-      return a.hora.localeCompare(b.hora);
-    });
+  /* Orden cronológico ESTRICTO por franja/hora pactada (hora de citación), fijo para todos los roles —
+     nunca se reordena por hora de llegada real ni por estado (ver requerimiento "Corrección en la Lógica
+     de Ordenamiento de la Tabla": la posición de cada mensajero no debe moverse sin importar cuándo
+     marque llegada). Antes PLANNER usaba un criterio distinto (llegada primero, luego hora programada) que
+     hacía que una fila "saltara" de posición en cuanto se registraba su llegada -- unificado con el mismo
+     criterio que ya usaba BODEGA (hora de citación, sin priorizar llegada). */
+  var routes = routesForDespacho().slice().sort(function (a, b) { return a.hora.localeCompare(b.hora); });
   if (showAliadoMensajeroFilter) {
     state.despachoFiltroMensajero = refreshMensajeroFilterOptions('despachoFiltroMensajero', routes, state.despachoFiltroMensajero, 'Todos los mensajeros');
     if (state.despachoFiltroMensajero) routes = routes.filter(function (r) { return r.mensajeroId === state.despachoFiltroMensajero; });
