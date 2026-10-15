@@ -1568,6 +1568,12 @@ const state = {
      Encadenado con Bodega/Aliado de cada vista: solo lista mensajeros con registros en el alcance ya
      acotado por esos filtros. */
   consolFiltroMensajero: '',
+  /* Filtro local de Bodega de la pestaña "Avance y Carga T+1" (ver requerimiento "Zona ciega nocturna") --
+     independiente de consolFiltroBodega (pestañas Día/Mes): esta pestaña agrega SIEMPRE sobre TOMORROW_STR,
+     nunca sobre consolidadoFecha/consolHistDesde-Hasta. '' = "Todas las bodegas". Aliado/Estado de carga de
+     esta misma pestaña se leen directo del <select> en cada render (mismo criterio ya establecido por
+     consolFiltroAliado, ver routesForConsolidadoDate) -- no necesitan su propio campo de state. */
+  consolManFiltroBodega: '',
   /* Filtro local de Bodega de Alertas Activas — a diferencia de consolFiltroBodega (que nunca lee el Header),
      este SÍ sigue en vivo a "Bodega actual" del Header para PLANNER (ver navigate/toggleSedeDropdown click
      handler): arranca sincronizado a state.activeSede al entrar al módulo o al cambiar de bodega en el
@@ -5876,6 +5882,14 @@ function navigate(viewId) {
     document.querySelectorAll('#consolModoSegment button').forEach(function (b) { b.classList.toggle('active', b.dataset.modo === 'dia'); });
     document.querySelectorAll('#consolHistModoSegment button').forEach(function (b) { b.classList.toggle('active', b.dataset.tipo === 'dia'); });
     toggleHistModoVisibility('consol', false);
+    /* Ver requerimiento "Zona ciega nocturna — Avance y Carga T+1": SIEMPRE arranca cerrada en cada entrada al
+       módulo (igual que el resto de pestañas de arriba) -- sin residuos de la bodega/aliado/estado de carga
+       que el Planner haya dejado filtrados en una visita anterior. */
+    state.consolManFiltroBodega = '';
+    document.getElementById('consolManBodega').value = '';
+    document.getElementById('consolManAliado').value = '';
+    document.getElementById('consolManEstado').value = '';
+    refreshConsolManBodegaOptions(); refreshConsolManAliadoOptions();
   }
   /* Programación (Despacho, PLANNER y AUDITOR aquí -- ver requerimiento "Vista de Historial en Módulo
      'Programación' para Rol Auditor"): el filtro local de Bodega arranca sincronizado a la bodega activa del
@@ -6154,6 +6168,16 @@ function refreshConsolBodegaOptions() {
   sel.innerHTML = '<option value="">' + t('consolidado.bodegaTodas') + '</option>' + sedes.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('');
   sel.value = sedes.indexOf(current) !== -1 ? current : '';
 }
+/* Puebla el selector local de Bodega de "Avance y Carga T+1" (ver requerimiento "Zona ciega nocturna") --
+   mismo criterio que refreshConsolBodegaOptions (sedes activas del país actual del Header). */
+function refreshConsolManBodegaOptions() {
+  var sel = document.getElementById('consolManBodega');
+  if (!sel) return;
+  var current = sel.value;
+  var sedes = activeWarehouseIds(currentCountryCode());
+  sel.innerHTML = '<option value="">Todas las bodegas</option>' + sedes.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('');
+  sel.value = sedes.indexOf(current) !== -1 ? current : '';
+}
 /* Puebla el selector local de Bodega de Programación/Despacho (exclusivo de PLANNER — BODEGA no lo ve, ver
    renderDespacho) con las sedes activas del país actual — mismo criterio y mismo momento de refresco que
    refreshConsolBodegaOptions (solo al entrar a la vista y al cambiar la bodega activa del Header). */
@@ -6400,6 +6424,14 @@ function selectModuleInfoTip(viewId, elId) {
   if (texto) el.textContent = texto;
 }
 function renderConsolidado() {
+  /* Ver requerimiento "Zona ciega nocturna — Avance y Carga T+1": pestaña independiente, con su propio cuerpo
+     y filtros (ver consolCuerpoManana/consolFiltrosDiaMes en index.html) -- nunca comparte estado ni vuelve a
+     tocar routesForConsolidadoDate/consolidadoFecha (que siguen siendo EXCLUSIVOS de Día/Mes). */
+  var enModoManana = state.consolModo === 'manana';
+  document.getElementById('consolCuerpoDiaMes').hidden = enModoManana;
+  document.getElementById('consolCuerpoManana').hidden = !enModoManana;
+  document.getElementById('consolFiltrosDiaMes').style.display = enModoManana ? 'none' : 'contents';
+  if (enModoManana) { renderConsolidadoManana(); return; }
   /* "Operación del Día" fuerza TODAY_STR sin importar lo que haya en el <input> de fecha (oculto en este
      modo); "Historial" respeta el Rango de Fechas que el usuario eligió ahí (ver requerimiento "Registro
      Creado y Consulta/Auditoría de Días Pasados"). */
@@ -6466,6 +6498,77 @@ function renderConsolidado() {
   }
   document.getElementById('consolTableTitle').textContent = enModoHistorial ? 'Registro de Salidas y Despachos' : t('consolidado.tableTitle', 'Programación consolidada');
   renderConsolTable(tableRoutes);
+}
+/* ---------------- Render: Consolidado — "Avance y Carga T+1" (zona ciega nocturna, PLANNER) ----------------
+   Ver requerimiento "Zona ciega nocturna": visibilidad en tiempo real de lo que los aliados van cargando para
+   mañana desde Programar Flota, cruzado contra Cuotas -- sin esperar al corte de medianoche. Cobertura total
+   por defecto; los selectores Bodega/Aliado/Estado de carga (ver consolCuerpoManana en index.html) acotan el
+   alcance igual que el resto de filtros de la plataforma. */
+/* actuales/requerido genérico (en vez de leer .cuota/.cantidad directo) porque los 2 shapes que consume este
+   helper nombran el campo distinto: cuotasProgresoPorAliadoManana devuelve {cuota}, cuotasComplianceRecordsManana
+   devuelve {cantidad} -- un único punto de traducción evita que una de las 2 llamadas quede comparando contra
+   undefined (ver bug detectado en verificación: la matriz mostraba "Pendiente" en filas ya 100% cubiertas). */
+function cuotasEstadoManana(actuales, requerido) {
+  if (actuales <= 0) return 'vacio';
+  return actuales >= requerido ? 'ok' : 'pendiente';
+}
+/* El filtro "Estado de carga" del Header de esta pestaña solo distingue 2 opciones operativas (Cubierto /
+   Pendiente por cargar) -- "Pendiente" agrupa TANTO "a medias" como "sin iniciar" (ambos son, desde la óptica
+   del Planner, "todavía te falta cargar algo"); el semáforo de 3 colores del chip sigue distinguiéndolos
+   visualmente, solo el filtro los trata como un mismo balde. */
+function cuotasEstadoMananaMatchFiltro(estado, qEstado) {
+  if (!qEstado) return true;
+  return qEstado === 'cubierto' ? estado === 'ok' : estado !== 'ok';
+}
+function consolManChipHtml(p) {
+  var estado = cuotasEstadoManana(p.actuales, p.cuota);
+  var etiqueta = estado === 'ok' ? 'Completo' : estado === 'pendiente' ? 'A medias' : 'Sin iniciar';
+  return '<div class="cuotas-resumen-chip ' + estado + '">' +
+    '<span>' + escapeHtml(p.aliado) + ': ' + p.actuales + '/' + p.cuota + ' recursos (' + etiqueta + ')</span>' +
+    '</div>';
+}
+function consolManRowHtml(rec) {
+  var estado = cuotasEstadoManana(rec.actuales, rec.cantidad);
+  var badge = estado === 'ok' ? '<span class="badge badge-dispatched"><i></i>Cubierto</span>'
+    : estado === 'pendiente' ? '<span class="badge badge-pending"><i></i>Pendiente por Programar (' + (rec.cantidad - rec.actuales) + ')</span>'
+    : '<span class="badge badge-pending"><i></i>Sin iniciar</span>';
+  var vehiculoLabel = cuotasVehiculoLabel(rec.vehiculo, countryForSede(rec.sede));
+  return '<tr><td>' + rec.sede + '</td><td>' + escapeHtml(rec.aliado) + '</td><td>' + escapeHtml(vehiculoLabel) + '</td><td>' + fmtTime12(rec.franja) + '</td><td>' + rec.cantidad + '</td><td>' + rec.actuales + '</td><td>' + badge + '</td></tr>';
+}
+function refreshConsolManAliadoOptions() {
+  var sel = document.getElementById('consolManAliado');
+  var current = sel.value;
+  var sedeSel = state.consolManFiltroBodega;
+  var list = sedeSel ? aliadosForSede(sedeSel) : (currentCountryCode() ? aliadosForCountry(currentCountryCode()) : ALIADOS_ALL);
+  sel.innerHTML = '<option value="">Todos los aliados</option>' + list.map(function (a) { return '<option value="' + a + '">' + a + '</option>'; }).join('');
+  sel.value = list.indexOf(current) !== -1 ? current : '';
+}
+function renderConsolidadoManana() {
+  var sedeSel = document.getElementById('consolManBodega');
+  if (sedeSel.value !== state.consolManFiltroBodega) sedeSel.value = state.consolManFiltroBodega;
+  var qAliado = document.getElementById('consolManAliado').value;
+  var qEstado = document.getElementById('consolManEstado').value;
+
+  var progreso = cuotasProgresoPorAliadoManana(state.consolManFiltroBodega);
+  if (qAliado) progreso = progreso.filter(function (p) { return p.aliado === qAliado; });
+  if (qEstado) progreso = progreso.filter(function (p) { return cuotasEstadoMananaMatchFiltro(cuotasEstadoManana(p.actuales, p.cuota), qEstado); });
+  document.getElementById('consolManComplianceChips').innerHTML = progreso.map(consolManChipHtml).join('');
+  document.getElementById('consolManComplianceEmpty').classList.toggle('show', progreso.length === 0);
+
+  var records = cuotasComplianceRecordsManana(state.consolManFiltroBodega, qAliado);
+  if (qEstado) records = records.filter(function (r) { return cuotasEstadoMananaMatchFiltro(cuotasEstadoManana(r.actuales, r.cantidad), qEstado); });
+  document.getElementById('consolManTbody').innerHTML = records.map(consolManRowHtml).join('');
+  document.getElementById('consolManCount').textContent = records.length;
+  document.getElementById('consolManEmpty').classList.toggle('show', records.length === 0);
+}
+function limpiarFiltroConsolMan() {
+  state.consolManFiltroBodega = '';
+  document.getElementById('consolManBodega').value = '';
+  refreshConsolManAliadoOptions();
+  document.getElementById('consolManAliado').value = '';
+  document.getElementById('consolManEstado').value = '';
+  renderConsolidadoManana();
+  toast('ok', 'Filtro restablecido', 'Bodega, Aliado y Estado de carga volvieron a "Todos".');
 }
 /* ---------------- KPIs México — Ciudad de México #1 (métricas de nivel de servicio, sin cifras financieras) ----------------
    Sustituye el set de tarjetas KPI de Colombia (Consolidado y Programación) cuando el contexto activo es México
@@ -15528,6 +15631,43 @@ function cuotasProgresoPorSede(aliado, fecha) {
   });
   return Object.keys(porSede).sort().map(function (s) { return porSede[s]; });
 }
+/* Ver requerimiento "Zona ciega nocturna — Avance y Carga T+1" (pestaña de Consolidado, PLANNER): equivalente
+   de cuotasProgresoPorSede, pero agregado por ALIADO (en vez de por sede) y a través de TODAS las bodegas del
+   alcance -- es el motor del Panel de Avance de Cuotas de esa pestaña (semáforo cubierto/parcial/sin iniciar
+   por aliado). SIEMPRE sobre TOMORROW_STR y la matriz EN VIVO (state.cuotasMatriz, nunca la instantánea
+   congelada de HOY) -- mismo criterio que ya usa Programar Flota para su propio "Mañana" (ver
+   cuotasProgresoPorSede/calculadorFechaEfectiva). sedeFiltro acota a una bodega puntual (vacío = todas). */
+function cuotasProgresoPorAliadoManana(sedeFiltro) {
+  var dia = diaSemanaKey(TOMORROW_STR);
+  if (!dia) return [];
+  var porAliado = {};
+  state.cuotasMatriz.forEach(function (c) {
+    if (c.dia !== dia || c.cantidad <= 0) return;
+    if (!cuotasActivoPais(countryForSede(c.sede))) return;
+    if (sedeFiltro && c.sede !== sedeFiltro) return;
+    if (!porAliado[c.aliado]) porAliado[c.aliado] = { aliado: c.aliado, cuota: 0, actuales: 0 };
+    porAliado[c.aliado].cuota += c.cantidad;
+    porAliado[c.aliado].actuales += turnosProgramadosCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo);
+  });
+  return Object.keys(porAliado).sort().map(function (a) { return porAliado[a]; });
+}
+/* Matriz detallada de la misma pestaña (sede+aliado+vehículo+franja, con cuota asignada vs. ya cargado) --
+   mismo shape de fila que cuotasComplianceRecords (ver cuotasComplianceRowHtml, reutilizada tal cual), pero
+   para TOMORROW_STR/matriz en vivo y sin acotar a un único par sede+aliado: sedeFiltro/aliadoFiltro (ambos
+   opcionales) acotan el universo, igual que el resto de filtros de Consolidado. */
+function cuotasComplianceRecordsManana(sedeFiltro, aliadoFiltro) {
+  var dia = diaSemanaKey(TOMORROW_STR);
+  if (!dia) return [];
+  return state.cuotasMatriz.filter(function (c) {
+    if (c.dia !== dia || c.cantidad <= 0) return false;
+    if (!cuotasActivoPais(countryForSede(c.sede))) return false;
+    if (sedeFiltro && c.sede !== sedeFiltro) return false;
+    if (aliadoFiltro && c.aliado !== aliadoFiltro) return false;
+    return true;
+  }).map(function (c) {
+    return { sede: c.sede, aliado: c.aliado, vehiculo: c.vehiculo, franja: c.franja, cantidad: c.cantidad, actuales: turnosProgramadosCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo) };
+  }).sort(function (a, b) { return a.sede.localeCompare(b.sede) || a.aliado.localeCompare(b.aliado) || a.franja.localeCompare(b.franja); });
+}
 /* Widget de avance de cuotas al tope de Programar Flota -- oculto por completo si Cuotas no está activo
    para ninguna de las bodegas de este aliado en la fecha activa (Hoy/Mañana). Cada bodega con déficit
    ofrece un atajo directo a "Nuevo Turno" con Pendiente/Por Confirmar ya marcado para esa sede (ver
@@ -17124,6 +17264,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (!enHist) state.consolidadoFecha = TODAY_STR;
       else if (!state.consolHistDesde) { var r = historialRangoPreset('ayer'); state.consolHistDesde = r.desde; state.consolHistHasta = r.hasta; state.consolHistDia = r.desde; }
       toggleHistModoVisibility('consol', enHist);
+      if (state.consolModo === 'manana') { refreshConsolManBodegaOptions(); refreshConsolManAliadoOptions(); }
       renderConsolidado();
     });
   });
@@ -17135,6 +17276,14 @@ document.addEventListener('DOMContentLoaded', function () {
     renderConsolidado();
   });
   document.getElementById('consolFiltroAliado').addEventListener('change', renderConsolidado);
+  document.getElementById('consolManBodega').addEventListener('change', function (e) {
+    state.consolManFiltroBodega = e.target.value;
+    refreshConsolManAliadoOptions();
+    renderConsolidadoManana();
+  });
+  document.getElementById('consolManAliado').addEventListener('change', renderConsolidadoManana);
+  document.getElementById('consolManEstado').addEventListener('change', renderConsolidadoManana);
+  document.getElementById('btnLimpiarConsolManFiltro').addEventListener('click', limpiarFiltroConsolMan);
   document.getElementById('consolFiltroMensajero').addEventListener('change', function (e) {
     state.consolFiltroMensajero = e.target.value;
     renderConsolidado();

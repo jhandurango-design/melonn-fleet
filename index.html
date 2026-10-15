@@ -485,101 +485,178 @@
             <div class="segmented" id="consolModoSegment">
               <button type="button" data-modo="dia" class="active">Operación del Día</button>
               <button type="button" data-modo="mes">Historial del Mes</button>
+              <button type="button" data-modo="manana">Avance y Carga T+1</button>
             </div>
-            <!-- Ver requerimiento "Prompt Consolidador Maestro...", Bloque 0: el toggle Día/Rango de fechas
-                 (y su campo activo) vuelve al extremo IZQUIERDO de la fila de filtros -- primero el filtro
-                 temporal, luego Bodega/Aliado/Mensajero. -->
-            <div class="segmented" id="consolHistModoSegment" hidden>
-              <button type="button" data-tipo="dia" class="active">Día</button>
-              <button type="button" data-tipo="rango">Rango de fechas</button>
-            </div>
-            <div class="field" id="consolHistDiaField" style="min-width:150px;" hidden>
-              <label for="consolHistDia">Fecha</label>
-              <input type="date" id="consolHistDia">
-            </div>
-            <div class="field" id="consolHistDesdeField" style="min-width:150px;" hidden>
-              <label for="consolHistDesde">Desde</label>
-              <input type="date" id="consolHistDesde">
-            </div>
-            <div class="field" id="consolHistHastaField" style="min-width:150px;" hidden>
-              <label for="consolHistHasta">Hasta</label>
-              <input type="date" id="consolHistHasta">
-            </div>
-            <!-- Ver requerimiento "Corrección de Alineación en Filtros y Estandarización de Modales Custom",
-                 Parte 1: min-width reducido de 220px a 160px (Bodega/Aliado/Mensajero) para que "Operación del
-                 Día" quepa en una sola fila junto con "Limpiar Filtro" -- los campos Desde/Hasta siguen
-                 reservando su espacio aun ocultos (ver [hidden] en styles.css, evita reflow al cambiar de
-                 pestaña), así que su ancho también cuenta en el total de esta fila. -->
-            <div class="field" id="consolBodegaField" style="min-width:140px;">
-              <label for="consolFiltroBodega" data-i18n="consolidado.bodega">Bodega</label>
-              <select id="consolFiltroBodega"></select>
-            </div>
-            <div class="field" style="min-width:140px;">
-              <label for="consolFiltroAliado">Aliado</label>
-              <select id="consolFiltroAliado"></select>
-            </div>
-            <div class="field" style="min-width:140px;">
-              <label for="consolFiltroMensajero">Mensajero</label>
-              <select id="consolFiltroMensajero"></select>
-            </div>
-            <!-- Ver requerimiento "Restructuración Integral...", Parte 3: reubicado al final de la fila
-                 (después de Desde/Hasta) para quedar siempre al extremo derecho, tanto en "Operación del Día"
-                 (donde Desde/Hasta están ocultos, así que queda justo después de Mensajero) como en "Historial
-                 del Mes" -- mismo patrón ya usado en Despacho/Seguimiento (ver requerimiento "Mejoras de UI,
-                 Auditoría de Trazabilidad y Control de Acceso..."). -->
-            <div class="field filter-bar-clear">
-              <label>&nbsp;</label>
-              <button type="button" class="btn btn-ghost" id="btnLimpiarConsolidadoFiltro">Limpiar Filtro</button>
+            <!-- Ver requerimiento "Zona ciega nocturna — Avance y Carga T+1": todo este grupo (toggle
+                 Día/Rango, fechas, Bodega/Aliado/Mensajero, Limpiar Filtro) es EXCLUSIVO de las pestañas
+                 "Operación del Día"/"Historial del Mes" -- se oculta como bloque único cuando se entra a
+                 "Avance y Carga T+1" (que trae su propia fila de filtros independiente, ver consolCuerpoManana
+                 más abajo). display:contents preserva el layout flex de .page-head-actions tal cual estaba. -->
+            <div id="consolFiltrosDiaMes" style="display:contents;">
+              <!-- Ver requerimiento "Prompt Consolidador Maestro...", Bloque 0: el toggle Día/Rango de fechas
+                   (y su campo activo) vuelve al extremo IZQUIERDO de la fila de filtros -- primero el filtro
+                   temporal, luego Bodega/Aliado/Mensajero. -->
+              <div class="segmented" id="consolHistModoSegment" hidden>
+                <button type="button" data-tipo="dia" class="active">Día</button>
+                <button type="button" data-tipo="rango">Rango de fechas</button>
+              </div>
+              <div class="field" id="consolHistDiaField" style="min-width:150px;" hidden>
+                <label for="consolHistDia">Fecha</label>
+                <input type="date" id="consolHistDia">
+              </div>
+              <div class="field" id="consolHistDesdeField" style="min-width:150px;" hidden>
+                <label for="consolHistDesde">Desde</label>
+                <input type="date" id="consolHistDesde">
+              </div>
+              <div class="field" id="consolHistHastaField" style="min-width:150px;" hidden>
+                <label for="consolHistHasta">Hasta</label>
+                <input type="date" id="consolHistHasta">
+              </div>
+              <!-- Ver requerimiento "Corrección de Alineación en Filtros y Estandarización de Modales Custom",
+                   Parte 1: min-width reducido de 220px a 160px (Bodega/Aliado/Mensajero) para que "Operación del
+                   Día" quepa en una sola fila junto con "Limpiar Filtro" -- los campos Desde/Hasta siguen
+                   reservando su espacio aun ocultos (ver [hidden] en styles.css, evita reflow al cambiar de
+                   pestaña), así que su ancho también cuenta en el total de esta fila. -->
+              <div class="field" id="consolBodegaField" style="min-width:140px;">
+                <label for="consolFiltroBodega" data-i18n="consolidado.bodega">Bodega</label>
+                <select id="consolFiltroBodega"></select>
+              </div>
+              <div class="field" style="min-width:140px;">
+                <label for="consolFiltroAliado">Aliado</label>
+                <select id="consolFiltroAliado"></select>
+              </div>
+              <div class="field" style="min-width:140px;">
+                <label for="consolFiltroMensajero">Mensajero</label>
+                <select id="consolFiltroMensajero"></select>
+              </div>
+              <!-- Ver requerimiento "Restructuración Integral...", Parte 3: reubicado al final de la fila
+                   (después de Desde/Hasta) para quedar siempre al extremo derecho, tanto en "Operación del Día"
+                   (donde Desde/Hasta están ocultos, así que queda justo después de Mensajero) como en "Historial
+                   del Mes" -- mismo patrón ya usado en Despacho/Seguimiento (ver requerimiento "Mejoras de UI,
+                   Auditoría de Trazabilidad y Control de Acceso..."). -->
+              <div class="field filter-bar-clear">
+                <label>&nbsp;</label>
+                <button type="button" class="btn btn-ghost" id="btnLimpiarConsolidadoFiltro">Limpiar Filtro</button>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Ver requerimiento "Corrección Crítica de Bugs, Eliminación de Modal Incorrecto, Banners y Control
-             de Observaciones", punto 2: el aviso "💡 Para modificar..." se retiró POR COMPLETO de esta vista
-             (Planner ya tiene Exonerar/Revertir Estado directos aquí mismo) -- este contenedor ahora SOLO se
-             usa en "Historial del Mes" para el aviso de "Solo Consulta" (ver renderConsolidado/
-             soloConsultaBannerHtml), oculto en "Operación del Día". -->
-        <div class="cutoff-banner" id="consolSolicitudesBanner" hidden></div>
+        <div id="consolCuerpoDiaMes">
+          <!-- Ver requerimiento "Corrección Crítica de Bugs, Eliminación de Modal Incorrecto, Banners y Control
+               de Observaciones", punto 2: el aviso "💡 Para modificar..." se retiró POR COMPLETO de esta vista
+               (Planner ya tiene Exonerar/Revertir Estado directos aquí mismo) -- este contenedor ahora SOLO se
+               usa en "Historial del Mes" para el aviso de "Solo Consulta" (ver renderConsolidado/
+               soloConsultaBannerHtml), oculto en "Operación del Día". -->
+          <div class="cutoff-banner" id="consolSolicitudesBanner" hidden></div>
 
-        <section class="metrics" id="consolMetrics"></section>
+          <section class="metrics" id="consolMetrics"></section>
 
-        <section class="table-card">
-          <div class="kpi-active-filter-bar" id="consolKpiActiveBar">
-            <span class="kpi-active-filter-bar-text">Filtro activo: <strong class="kpi-active-filter-bar-value"></strong></span>
-            <button type="button" class="btn btn-ghost btn-limpiar-filtro-kpi" id="consolKpiClear" data-i18n="consolidado.clearFilter">Limpiar Filtro</button>
-          </div>
-          <div class="table-head">
-            <div>
-              <h2 id="consolTableTitle" data-i18n="consolidado.tableTitle">Programación consolidada</h2>
-              <div class="count"><span id="consolCount">0</span> <span id="consolCountLabel" data-i18n="consolidado.countDefault">rutas en la fecha seleccionada</span></div>
+          <section class="table-card">
+            <div class="kpi-active-filter-bar" id="consolKpiActiveBar">
+              <span class="kpi-active-filter-bar-text">Filtro activo: <strong class="kpi-active-filter-bar-value"></strong></span>
+              <button type="button" class="btn btn-ghost btn-limpiar-filtro-kpi" id="consolKpiClear" data-i18n="consolidado.clearFilter">Limpiar Filtro</button>
             </div>
-          </div>
-          <div class="table-scroll">
-            <table id="consolTable">
-              <thead>
-                <tr>
-                  <th data-i18n="table.aliado">Aliado</th><th data-i18n="table.mensajero">Mensajero</th><th data-i18n="table.vehiculo">Vehículo</th><th data-i18n="table.horaProgramada">Hora programada</th><th data-i18n="table.estado">Estado</th><th></th>
-                </tr>
-              </thead>
-              <tbody id="consolTbody"></tbody>
-            </table>
-          </div>
-          <div class="empty-state" id="consolEmpty">
-            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-            <div data-i18n="consolidado.empty">No hay rutas programadas para la fecha seleccionada.</div>
-          </div>
-        </section>
+            <div class="table-head">
+              <div>
+                <h2 id="consolTableTitle" data-i18n="consolidado.tableTitle">Programación consolidada</h2>
+                <div class="count"><span id="consolCount">0</span> <span id="consolCountLabel" data-i18n="consolidado.countDefault">rutas en la fecha seleccionada</span></div>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table id="consolTable">
+                <thead>
+                  <tr>
+                    <th data-i18n="table.aliado">Aliado</th><th data-i18n="table.mensajero">Mensajero</th><th data-i18n="table.vehiculo">Vehículo</th><th data-i18n="table.horaProgramada">Hora programada</th><th data-i18n="table.estado">Estado</th><th></th>
+                  </tr>
+                </thead>
+                <tbody id="consolTbody"></tbody>
+              </table>
+            </div>
+            <div class="empty-state" id="consolEmpty">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <div data-i18n="consolidado.empty">No hay rutas programadas para la fecha seleccionada.</div>
+            </div>
+          </section>
 
-        <!-- Ver requerimiento "Mejoras de Exportación y Textos en Consolidado...", punto 3: mismo componente
-             visual .cumplimiento-export-fab que ya usan Cumplimiento y Calidad / Auditoría, visible en ambas
-             pestañas (Operación del Día e Historial del Mes). El informe se arma SIEMPRE a partir de los
-             Filtros Principales Superiores (Bodega, Aliado, Mensajero, Rango de Fechas/día activo) -- ver
-             state.consolExportCache en renderConsolidado(), nunca del sub-filtro de tarjeta KPI. -->
-        <div class="cumplimiento-export-fab" id="consolExportBar">
-          <button class="btn btn-primary" id="btnDescargarConsolidado">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
-            Exportar Programación
-          </button>
+          <!-- Ver requerimiento "Mejoras de Exportación y Textos en Consolidado...", punto 3: mismo componente
+               visual .cumplimiento-export-fab que ya usan Cumplimiento y Calidad / Auditoría, visible en ambas
+               pestañas (Operación del Día e Historial del Mes). El informe se arma SIEMPRE a partir de los
+               Filtros Principales Superiores (Bodega, Aliado, Mensajero, Rango de Fechas/día activo) -- ver
+               state.consolExportCache en renderConsolidado(), nunca del sub-filtro de tarjeta KPI. -->
+          <div class="cumplimiento-export-fab" id="consolExportBar">
+            <button class="btn btn-primary" id="btnDescargarConsolidado">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+              Exportar Programación
+            </button>
+          </div>
+        </div>
+
+        <!-- Ver requerimiento "Zona ciega nocturna — Avance y Carga T+1": pestaña INDEPENDIENTE de "Operación
+             del Día" (T) -- nunca toca despachos ni ejecución del día en curso, solo lectura de la carga que
+             los aliados van guardando para MAÑANA (T+1) desde Programar Flota, cruzada en vivo contra la
+             matriz de Cuotas vigente (misma fuente que ya usa el Aliado en su propio "Avance de Cuotas" de
+             Programar Flota -- ver renderProgCuotasResumen -- pero agregada por TODOS los aliados/bodegas a la
+             vez, no solo el aliado en sesión). Cobertura total por defecto ("Todas las bodegas"/"Todos los
+             aliados"), con los mismos selectores Bodega/Aliado ya usados en el resto de Consolidado. -->
+        <div id="consolCuerpoManana" hidden>
+          <div class="cutoff-banner" id="consolManBanner">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>
+            <span id="consolManBannerTexto">Avance en vivo de la carga que los aliados están guardando para mañana — no afecta la operación de hoy.</span>
+          </div>
+
+          <section class="panel">
+            <p class="panel-title">Avance de Cuotas por Aliado — Mañana</p>
+            <div class="cuotas-resumen-chips" id="consolManComplianceChips"></div>
+            <div class="empty-state" id="consolManComplianceEmpty">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <div>Sin cuotas activas para mañana en el alcance seleccionado.</div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <p class="panel-title">Filtrar</p>
+            <div class="filter-bar">
+              <div class="field" style="min-width:160px;">
+                <label for="consolManBodega">Bodega</label>
+                <select id="consolManBodega"></select>
+              </div>
+              <div class="field" style="min-width:160px;">
+                <label for="consolManAliado">Aliado</label>
+                <select id="consolManAliado"></select>
+              </div>
+              <div class="field" style="min-width:160px;">
+                <label for="consolManEstado">Estado de carga</label>
+                <select id="consolManEstado">
+                  <option value="">Todos</option>
+                  <option value="cubierto">Cubierto</option>
+                  <option value="pendiente">Pendiente por cargar</option>
+                </select>
+              </div>
+              <button type="button" class="btn btn-ghost filter-bar-clear" id="btnLimpiarConsolManFiltro">Limpiar Filtro</button>
+            </div>
+          </section>
+
+          <section class="table-card">
+            <div class="table-head">
+              <div>
+                <h2>Matriz de Programación T+1</h2>
+                <div class="count"><span id="consolManCount">0</span> combinaciones sede/aliado/vehículo/franja</div>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table id="consolManTable">
+                <thead>
+                  <tr><th>Bodega</th><th>Aliado</th><th>Vehículo</th><th>Franja</th><th>Cuota asignada</th><th>Cargado</th><th>Estado</th></tr>
+                </thead>
+                <tbody id="consolManTbody"></tbody>
+              </table>
+            </div>
+            <div class="empty-state" id="consolManEmpty">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <div>No hay cuotas asignadas para mañana en el alcance/filtro seleccionado.</div>
+            </div>
+          </section>
         </div>
       </section>
 
