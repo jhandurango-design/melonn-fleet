@@ -130,3 +130,37 @@ create trigger trg_app_turnos_updated_at before update on public.app_turnos
   for each row execute function public.set_updated_at();
 create trigger trg_app_solicitudes_generales_updated_at before update on public.app_solicitudes_generales
   for each row execute function public.set_updated_at();
+
+-- ============================================================================
+-- MIGRACIÓN INCREMENTAL (2026-10-15) -- NO vuelvas a correr el bloque de arriba completo: los 4 "drop table
+-- ... cascade" de la línea 26-29 ya tienen datos reales de producción (usuarios, mensajeros, turnos,
+-- solicitudes) y los borrarían sin forma de recuperarlos. Para aplicar esta migración, copia y ejecuta
+-- SOLO lo que sigue desde esta línea en adelante -- usa "create table if not exists" (nunca drop) a
+-- propósito, así que también es seguro volver a correr únicamente este bloque más de una vez por error.
+--
+-- Ver requerimiento "Auditoría de Discrepancia en Cuotas y Visibilidad de Datos": state.cuotasMatriz (y sus
+-- 6 campos hermanos -- franjas, franjasMX, matrizProxima, fechaProxima, bannerCO, observaciones) vivían
+-- EXCLUSIVAMENTE en localStorage, nunca sincronizados entre navegadores/usuarios -- de ahí que Jhan y Yair
+-- (2 sesiones/dispositivos distintos) vieran 2 configuraciones de Cuotas completamente distintas. Una única
+-- fila 'global' en esta tabla (mismo patrón {id,data} que el resto) centraliza los 7 campos.
+-- ============================================================================
+create table if not exists public.app_cuotas_config (
+  id text primary key,
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+grant select, insert, update on public.app_cuotas_config to anon;
+
+alter table public.app_cuotas_config enable row level security;
+
+drop policy if exists "anon_select_app_cuotas_config" on public.app_cuotas_config;
+drop policy if exists "anon_insert_app_cuotas_config" on public.app_cuotas_config;
+drop policy if exists "anon_update_app_cuotas_config" on public.app_cuotas_config;
+create policy "anon_select_app_cuotas_config" on public.app_cuotas_config for select to anon using (true);
+create policy "anon_insert_app_cuotas_config" on public.app_cuotas_config for insert to anon with check (true);
+create policy "anon_update_app_cuotas_config" on public.app_cuotas_config for update to anon using (true) with check (true);
+
+drop trigger if exists trg_app_cuotas_config_updated_at on public.app_cuotas_config;
+create trigger trg_app_cuotas_config_updated_at before update on public.app_cuotas_config
+  for each row execute function public.set_updated_at();

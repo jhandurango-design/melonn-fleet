@@ -466,6 +466,27 @@ function scDeleteRows(table, ids) {
     return { ok: false, error: e };
   });
 }
+/* FIX "Discrepancia de Cuotas T+1 / Cuotas vacías para otros Planner": state.cuotasMatriz (y sus 6 campos
+   hermanos -- franjas, franjasMX, matrizProxima, fechaProxima, bannerCO, observaciones) vivían EXCLUSIVAMENTE
+   en localStorage (ver loadPersistedCuotasMatriz y las demás loadPersistedCuotasXxx) -- nunca se sincronizaban
+   vía Supabase como sí hacen users/mensajeros/turnos/solicitudesGenerales. Dos síntomas reales reportados:
+   1) el total de "Avance y Carga T+1" en la sesión de Jhan no coincidía con lo "realmente configurado" porque
+   cada navegador tenía su PROPIA copia local, nunca la misma fuente compartida; 2) Yair (otro Planner, otro
+   navegador/dispositivo) veía cuotas en 0 porque su localStorage jamás había recibido la configuración que
+   Admin guardó en OTRA sesión -- cae al CUOTAS_SEED de fábrica (todo en 0, ver verificación de esta sesión).
+   Una sola fila 'global' en app_cuotas_config (mismo patrón {id,data} que el resto) bundlea los 7 campos. */
+function scPushCuotasConfig() {
+  scPushRows('app_cuotas_config', [{
+    id: 'global',
+    matriz: state.cuotasMatriz,
+    franjas: state.cuotasFranjas,
+    franjasMX: state.cuotasFranjasMX,
+    matrizProxima: state.cuotasMatrizProxima,
+    fechaProxima: state.cuotasFechaProxima,
+    bannerCO: state.cuotasBannerCO,
+    observaciones: state.cuotasObservaciones
+  }]);
+}
 /* Empuja el snapshot COMPLETO de las 3 tablas -- se llama en los puntos clave (login, logout, autoguardado
    periódico), nunca en cada mutación individual (ver nota de arriba).
    Ver requerimiento "Fallo crítico de arquitectura: contraseña revertida a la genérica tras redeploy":
@@ -494,9 +515,19 @@ function scPushAll() {
    revertida a la genérica tras redeploy" junto a scPushAll(): expuesta a nivel de módulo para que
    scPushAll() pueda esperarla antes de empujar nada, sin cambiar la firma pública de scPullAll(). */
 var scPullEnVuelo = null;
+/* Ver scPushCuotasConfig: la primera vez que esta pestaña recibe la configuración REAL de Cuotas desde
+   Supabase, también se re-congela cuotasMatrizVigenteHoy a partir de ese dato recién llegado -- antes de este
+   fix, esa instantánea se tomaba en DOMContentLoaded (síncrono, forzosamente ANTES de que cualquier pull
+   pudiera resolver) a partir de localStorage/CUOTAS_SEED, dejando el control de cupos de "Hoy" (checkCuotaExceso)
+   atascado con ese dato local/semilla durante toda la sesión aunque el pull luego trajera la cuota real. Solo
+   UNA vez por sesión (flag de abajo): re-congelarla en cada pull posterior violaría la regla de negocio
+   explícita de cuotasMatrizVigenteHoy (una edición de Admin a mitad de día rige desde MAÑANA, nunca retroactiva
+   sobre HOY) -- aquí no es una edición de Admin, es simplemente la app enterándose por primera vez del dato
+   real que ya existía. */
+var cuotasVigenteHoySincronizadaReal = false;
 function scPullAll() {
-  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales')]).then(function (res) {
-    var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3];
+  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config')]).then(function (res) {
+    var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4];
     var changed = false;
     if (users && users.length) {
       state.users = deduplicarUsuariosPorEmail(users);
@@ -527,6 +558,31 @@ function scPullAll() {
     if (mensajeros && mensajeros.length) { state.mensajeros = mensajeros.map(function (row) { return row.value; }); changed = true; }
     if (turnos && turnos.length) { state.turnos = deduplicarTurnosPorAsignacion(turnos); changed = true; }
     if (solicitudesGenerales && solicitudesGenerales.length) { state.solicitudesGenerales = solicitudesGenerales.map(function (row) { return row.value; }); changed = true; }
+    if (cuotasConfig && cuotasConfig.length) {
+      var cfg = cuotasConfig[0].value;
+      if (cfg.matriz) state.cuotasMatriz = cfg.matriz;
+      if (cfg.franjas) state.cuotasFranjas = cfg.franjas;
+      if (cfg.franjasMX) state.cuotasFranjasMX = cfg.franjasMX;
+      if (cfg.matrizProxima) state.cuotasMatrizProxima = cfg.matrizProxima;
+      if (cfg.fechaProxima !== undefined) state.cuotasFechaProxima = cfg.fechaProxima;
+      if (cfg.bannerCO !== undefined) state.cuotasBannerCO = cfg.bannerCO;
+      if (cfg.observaciones) state.cuotasObservaciones = cfg.observaciones;
+      try {
+        localStorage.setItem(CUOTAS_STORAGE_KEY, JSON.stringify(state.cuotasMatriz));
+        localStorage.setItem(CUOTAS_FRANJAS_STORAGE_KEY, JSON.stringify(state.cuotasFranjas));
+        localStorage.setItem(CUOTAS_FRANJAS_MX_STORAGE_KEY, JSON.stringify(state.cuotasFranjasMX));
+        localStorage.setItem(CUOTAS_MATRIZ_PROXIMA_STORAGE_KEY, JSON.stringify(state.cuotasMatrizProxima));
+        if (state.cuotasFechaProxima) localStorage.setItem(CUOTAS_FECHA_PROXIMA_STORAGE_KEY, state.cuotasFechaProxima); else localStorage.removeItem(CUOTAS_FECHA_PROXIMA_STORAGE_KEY);
+        localStorage.setItem(CUOTAS_BANNER_CO_STORAGE_KEY, state.cuotasBannerCO);
+        localStorage.setItem(CUOTAS_OBSERVACIONES_STORAGE_KEY, JSON.stringify(state.cuotasObservaciones));
+      } catch (e) {}
+      if (!cuotasVigenteHoySincronizadaReal) {
+        state.cuotasMatrizVigenteHoy = state.cuotasMatriz.map(function (c) { return Object.assign({}, c); });
+        cuotasVigenteHoySincronizadaReal = true;
+      }
+      cuotasAutoSwapVigencia();
+      changed = true;
+    }
     if (changed && state.user) syncAndRender(true);
     return changed;
   });
@@ -13709,6 +13765,7 @@ function syncVehiculosDesdeTipologias() {
 var CUOTAS_STORAGE_KEY = 'melonnFleet.cuotasMatriz';
 function persistCuotasMatriz() {
   try { localStorage.setItem(CUOTAS_STORAGE_KEY, JSON.stringify(state.cuotasMatriz)); } catch (e) {}
+  scPushCuotasConfig();
 }
 function loadPersistedCuotasMatriz() {
   try {
@@ -13724,6 +13781,7 @@ function loadPersistedCuotasMatriz() {
 var CUOTAS_FRANJAS_STORAGE_KEY = 'melonnFleet.cuotasFranjas';
 function persistCuotasFranjas() {
   try { localStorage.setItem(CUOTAS_FRANJAS_STORAGE_KEY, JSON.stringify(state.cuotasFranjas)); } catch (e) {}
+  scPushCuotasConfig();
 }
 function loadPersistedCuotasFranjas() {
   try {
@@ -13739,6 +13797,7 @@ var CUOTAS_FRANJA_MX_DEFAULT = ['12:30'];
 var CUOTAS_FRANJAS_MX_STORAGE_KEY = 'melonnFleet.cuotasFranjasMX';
 function persistCuotasFranjasMX() {
   try { localStorage.setItem(CUOTAS_FRANJAS_MX_STORAGE_KEY, JSON.stringify(state.cuotasFranjasMX)); } catch (e) {}
+  scPushCuotasConfig();
 }
 function loadPersistedCuotasFranjasMX() {
   try {
@@ -13754,6 +13813,7 @@ function loadPersistedCuotasFranjasMX() {
 var CUOTAS_MATRIZ_PROXIMA_STORAGE_KEY = 'melonnFleet.cuotasMatrizProxima';
 function persistCuotasMatrizProxima() {
   try { localStorage.setItem(CUOTAS_MATRIZ_PROXIMA_STORAGE_KEY, JSON.stringify(state.cuotasMatrizProxima)); } catch (e) {}
+  scPushCuotasConfig();
 }
 function loadPersistedCuotasMatrizProxima() {
   try {
@@ -13768,6 +13828,7 @@ function persistCuotasFechaProxima() {
     if (state.cuotasFechaProxima) localStorage.setItem(CUOTAS_FECHA_PROXIMA_STORAGE_KEY, state.cuotasFechaProxima);
     else localStorage.removeItem(CUOTAS_FECHA_PROXIMA_STORAGE_KEY);
   } catch (e) {}
+  scPushCuotasConfig();
 }
 function loadPersistedCuotasFechaProxima() {
   try { return localStorage.getItem(CUOTAS_FECHA_PROXIMA_STORAGE_KEY) || null; } catch (e) { return null; }
@@ -13777,6 +13838,7 @@ function loadPersistedCuotasFechaProxima() {
 var CUOTAS_BANNER_CO_STORAGE_KEY = 'melonnFleet.cuotasBannerCO';
 function persistCuotasBannerCO() {
   try { localStorage.setItem(CUOTAS_BANNER_CO_STORAGE_KEY, state.cuotasBannerCO); } catch (e) {}
+  scPushCuotasConfig();
 }
 function loadPersistedCuotasBannerCO(defaultValue) {
   try { var raw = localStorage.getItem(CUOTAS_BANNER_CO_STORAGE_KEY); return raw || defaultValue; } catch (e) { return defaultValue; }
@@ -13808,6 +13870,7 @@ function cuotasAutoSwapVigencia() {
 var CUOTAS_OBSERVACIONES_STORAGE_KEY = 'melonnFleet.cuotasObservaciones';
 function persistCuotasObservaciones() {
   try { localStorage.setItem(CUOTAS_OBSERVACIONES_STORAGE_KEY, JSON.stringify(state.cuotasObservaciones)); } catch (e) {}
+  scPushCuotasConfig();
 }
 function loadPersistedCuotasObservaciones() {
   try {
