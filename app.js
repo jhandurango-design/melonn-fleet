@@ -16888,25 +16888,44 @@ document.addEventListener('DOMContentLoaded', function () {
     var password = passwordField.value;
     var lock = loginLockStatus(email);
     if (lock) { mostrarBloqueoLogin(email, lock.lockedUntil); return; }
-    var emailConocido = state.users.some(function (u) { return u.email.toLowerCase() === email; });
     document.getElementById('loginSubmitBtn').disabled = true;
     document.getElementById('loginError').textContent = '';
-    /* FIX "mustChangePassword vuelve a pedirse tras borrar caché": un correo ya conocido localmente antes
-       solo esperaba el pull si era desconocido -- pero en un navegador recién limpiado, state.users ARRANCA
-       como el roster semilla hardcodeado (ver loadPersistedUsers/USERS), que incluye TODOS los correos reales
-       con la clave genérica y mustChangePassword:true de fábrica. Si el usuario ya tecleaba su clave real
-       (ya cambiada en una sesión anterior) más rápido de lo que tardaba en resolver el scPullAll() disparado
-       al cargar (ver DOMContentLoaded), emailConocido daba true de inmediato (el correo SÍ está en la semilla)
-       y resolverCredenciales() validaba contra ese registro todavía desactualizado -- la clave real no
-       calzaba contra la genérica de la semilla ("incorrecta"), o si por costumbre tecleaba la genérica, sí
-       calzaba y relanzaba el gate de cambio obligatorio ya resuelto antes. Esperar SIEMPRE el pull en vuelo
-       (scPullEnVuelo, el mismo que ya usa scPushAll -- ver ese fix) antes de resolver credenciales cierra esa
-       ventana de carrera; si ya resolvió, el then() corre casi instantáneo y no se nota. Un correo
-       desconocido sigue forzando un pull fresco aparte (puede ser un usuario recién creado que esta pestaña
-       ni siquiera alcanzó a traer en el primer pull). */
-    var espera = emailConocido ? (scPullEnVuelo || Promise.resolve()) : scPullAll();
-    espera.then(function () {
+    /* FIX "Contraseña recién cambiada en otra sesión se revierte sola tras un login fallido en una pestaña
+       vieja": la versión anterior de este fix (ver "mustChangePassword vuelve a pedirse tras borrar caché")
+       solo esperaba scPullEnVuelo -- la promesa del ÚLTIMO pull, que si la pestaña lleva abierta un rato ya
+       resolvió hace tiempo con datos que para entonces pueden estar desactualizados (p. ej. el password se
+       cambió desde OTRO navegador/sesión después de esa resolución). Un intento de login contra ese
+       state.users ya viejo fallaba ("incorrecta") -- y ESE fallo, vía registrarIntentoFallido ->
+       mirrorIntentosFallidosAUsuario, empuja a Supabase el objeto de usuario COMPLETO tal cual está en esta
+       pestaña (solo para persistir failedLoginCount/lockedUntil) -- incluyendo su password VIEJO, revirtiendo
+       en la nube el cambio real más reciente sin que nadie lo pidiera. Forzar SIEMPRE un scPullAll() fresco
+       (no solo esperar el último, posiblemente viejo) antes de resolver CUALQUIER intento -- éxito o fallo --
+       garantiza que state.users (y por lo tanto cualquier push posterior de ese mismo registro) refleje la
+       verdad actual de Supabase en el momento de decidir, cerrando esta ventana de carrera de raíz. */
+    scPullAll().then(function () {
       document.getElementById('loginSubmitBtn').disabled = false;
+      /* FIX "El bloqueo por intentos fallidos se puede saltar recargando la página / borrando caché":
+         loginLockStatus() SOLO consultaba state.loginAttempts -- un objeto puramente en memoria, nunca
+         persistido (ni en localStorage ni en Supabase), que arranca vacío en cada carga de página. El
+         bloqueo SÍ vive persistido y sincronizado de verdad en u.failedLoginCount/u.lockedUntil (dentro del
+         mismo JSONB de app_users, ver mirrorIntentosFallidosAUsuario) -- pero nada volvía a consultar ESE
+         dato antes de decidir si dejar pasar el intento, así que recargar la pestaña (o borrar todo el
+         almacenamiento local) bastaba para que loginLockStatus() viera "sin bloqueo" de nuevo, sin importar
+         cuántos intentos fallidos reales tuviera la cuenta en la nube. Ahora que arriba se garantiza un pull
+         fresco en CADA intento, se resincroniza aquí el registro local desde el dato YA PERSISTIDO del
+         usuario real (si existe y su bloqueo sigue vigente) antes de resolver -- así el bloqueo real
+         sobrevive a cualquier recarga/limpieza de caché, porque su única fuente de verdad pasa a ser
+         Supabase, no este navegador. No requiere columnas nuevas: failedLoginCount/lockedUntil ya viven (y
+         ya se sincronizan) dentro de la misma columna `data` JSONB que el resto del registro de usuario. */
+      var uPersistido = state.users.find(function (u) { return u.email.toLowerCase() === email; });
+      if (uPersistido && uPersistido.lockedUntil) {
+        var localRec = state.loginAttempts[email];
+        if (!localRec || uPersistido.lockedUntil > (localRec.lockedUntil || 0)) {
+          state.loginAttempts[email] = { count: uPersistido.failedLoginCount || 0, lockedUntil: uPersistido.lockedUntil };
+        }
+      }
+      var lockPostPull = loginLockStatus(email);
+      if (lockPostPull) { mostrarBloqueoLogin(email, lockPostPull.lockedUntil); return; }
       resolverCredenciales(email, password);
     });
   }
