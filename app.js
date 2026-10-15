@@ -12772,6 +12772,26 @@ function alertarVentanaRetorno(mensajeroId, conflicto) {
   toast('warn', 'Ventana de retorno no cumplida',
     getMensajero(mensajeroId).nombre + ' ya está programado a las ' + fmtTime12(conflicto.hora) + '. Por tiempo de operación y retorno (4 hrs mínimas), solo puede volver a programarse a partir de las ' + fmtTime12(fmtTimeHM(horaPermitidaDT)) + '.');
 }
+/* Ver requerimiento "Validación de Exclusividad de Mensajeros por Fecha": un mismo mensajero (identificado por
+   cédula -- el dato real de la persona, no mensajeroId, que es un registro independiente POR ALIADO, ver
+   findOrCreateMensajero) no puede quedar programado el mismo día por 2 aliados distintos. Se busca entre TODOS
+   los turnos de esa fecha (cualquier sede) un mensajero con la misma cédula cuyo registro pertenezca a un
+   aliado DIFERENTE al que está programando ahora -- ignorando turnos ya 'cancelled' (computeEstado), ya que
+   una cancelación de verdad libera al mensajero de inmediato para que cualquier otro aliado lo programe ese
+   mismo día (ver punto 2 del requerimiento). Sin cédula (turno "Pendiente / Por Confirmar") no hay identidad
+   real que cruzar, así que no aplica. */
+function mensajeroProgramadoPorOtroAliado(cedula, fecha, aliadoActual) {
+  if (!cedula) return null;
+  for (var i = 0; i < state.turnos.length; i++) {
+    var r = state.turnos[i];
+    if (r.fecha !== fecha) continue;
+    var m = getMensajero(r.mensajeroId);
+    if (!m || m.cedula !== cedula || m.aliado === aliadoActual) continue;
+    if (computeEstado(r).code === 'cancelled') continue;
+    return { route: r, mensajero: m };
+  }
+  return null;
+}
 /* Ver requerimiento "Selector de Hora propio con botón Aceptar": reemplaza el picker nativo de
    <input type="time"> (ver #turnoHora en index.html, ahora type="text" readonly) por un desplegable propio
    con 2 columnas (hora 00-23 / minutos en pasos de 15) y un botón "Aceptar" explícito al pie -- la selección
@@ -12894,6 +12914,18 @@ function submitTurno(e) {
      con una fecha pasada (routesInScope/rowHtmlProg solo exponen Hoy y Mañana), pero se valida también aquí
      como segunda barrera explícita, igual que el resto de la plataforma. */
   if (fecha < TODAY_STR) { toast('warn', 'No disponible', 'Los registros de fechas pasadas son de solo lectura.'); return; }
+  /* Ver requerimiento "Validación de Exclusividad de Mensajeros por Fecha": se valida ANTES de resolver/crear
+     el mensajero (que es un registro propio de ESTE aliado, ver findOrCreateMensajero) para no dejar pasar
+     ningún modo (alta directa, alta con solicitud, confirmar pendiente o editar) sin cruzar primero por
+     cédula contra TODOS los aliados. Sin cédula (turno "Pendiente / Por Confirmar") no hay identidad real que
+     cruzar todavía, así que no aplica. */
+  if (!pendiente) {
+    var conflictoOtroAliado = mensajeroProgramadoPorOtroAliado(cedula, fecha, state.user.aliado);
+    if (conflictoOtroAliado) {
+      toast('warn', 'Mensajero ya programado', 'El mensajero ' + conflictoOtroAliado.mensajero.nombre + ' ya se encuentra programado para esta fecha con el proveedor ' + conflictoOtroAliado.mensajero.aliado + '.');
+      return;
+    }
+  }
   var payload = { sede: sede, vehiculo: vehiculo, hora: hora, nombre: nombre, telefono: telefono, cedula: cedula, placa: placa, correo: correo, pendiente: pendiente, fecha: fecha };
   var ws = progEditWindowState();
   var directo = ws === 'open' || ws === 'alert' || ws === 'closed_extended_active';
