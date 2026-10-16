@@ -2650,7 +2650,14 @@ function computeEstado(route) {
      apruebe o rechace desde "Aprobaciones de Cuotas y Festivos" (Solicitudes y Cambios). Se evalúa ANTES que
      pendienteAsignacion a propósito: un turno "Pendiente / Por Confirmar" que ADEMÁS excede cupo o cae en
      festivo debe mostrar la alerta de aprobación (más urgente para Planner) y no quedar enmascarado. */
-  if (route.pendienteAprobacionPlanner) return { code: 'pendiente_aprobacion_planner', label: estadoLabel('pendiente_aprobacion_planner') };
+  /* Ver requerimiento "Solicitud y Mensajes para Tipología No Habilitada": mismo código FSM que cualquier
+     otra causal de cuota (festivo/domingo/cupo) -- todo lo demás (filtros, alertas, badges, Alertas
+     Activas) sigue tratándolo exactamente igual -- solo cambia el LABEL visible para distinguir la causal
+     a simple vista, igual que ya exige el negocio para este caso puntual. */
+  if (route.pendienteAprobacionPlanner) {
+    var labelPap = route.pendienteAprobacionMotivo === 'tipologia' ? 'Pendiente Autorización de Tipología' : estadoLabel('pendiente_aprobacion_planner');
+    return { code: 'pendiente_aprobacion_planner', label: labelPap };
+  }
   if (route.pendienteAsignacion) {
     /* Ver requerimiento "Ciclo de Vida y Auto-Resolución de Alertas (Pendiente por Confirmar)" (reporte de
        Easyway/Cabify): antes este código se devolvía SIEMPRE, sin importar cuánto tiempo pasara desde la hora
@@ -2868,11 +2875,50 @@ function checkCuotaExceso(sede, aliado, vehiculo, hora, fecha) {
   if (!cuotasActivoPais(countryForSede(sede)) || esFlotaPropia(aliado)) return { excedida: false };
   var dia = diaSemanaKey(fecha);
   var franja = franjaForHora(hora, countryForSede(sede));
-  if (!dia || !franja) return { excedida: false };
+  if (!dia || !franja) return { excedida: false, dia: dia, franja: franja, cantidad: 0, actuales: 0 };
   var cantidad = fecha === TODAY_STR ? cuotaAsignadaVigenteHoy(sede, aliado, dia, franja, vehiculo) : cuotaAsignada(sede, aliado, dia, franja, vehiculo);
-  if (cantidad <= 0) return { excedida: false };
+  if (cantidad <= 0) return { excedida: false, dia: dia, franja: franja, cantidad: 0, actuales: turnosProgramadosCount(sede, aliado, fecha, franja, vehiculo) };
   var actuales = turnosProgramadosCount(sede, aliado, fecha, franja, vehiculo);
   return { excedida: actuales >= cantidad, cantidad: cantidad, actuales: actuales, dia: dia, franja: franja };
+}
+/* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria" (reporte DRN/Bogotá): la cuota
+   CONTRATADA real de un Aliado en una sede es el TOTAL de recursos pactados ese día, sumado a través de
+   TODAS sus franjas/tipologías -- no un silo rígido por franja puntual. cuotaGlobalAsignada/
+   turnosProgramadosGlobalCount/checkCuotaGlobalExceso son el equivalente "agregado por sede+aliado+día" de
+   cuotaAsignada/turnosProgramadosCount/checkCuotaExceso (mismos criterios de exclusión de cancelados/
+   congelamiento-vigente-hoy), usado como el ÚNICO límite que de verdad bloquea (ver evaluarAprobacionCuota
+   más abajo) -- un exceso puntual de UNA franja ya no basta por sí solo para exigir aprobación de Planner
+   mientras el total contratado siga teniendo espacio. */
+function cuotaGlobalAsignada(sede, aliado, fecha) {
+  var dia = diaSemanaKey(fecha);
+  if (!dia) return 0;
+  var fuente = fecha === TODAY_STR ? state.cuotasMatrizVigenteHoy : state.cuotasMatriz;
+  return fuente.filter(function (c) { return c.sede === sede && c.aliado === aliado && c.dia === dia; })
+    .reduce(function (sum, c) { return sum + c.cantidad; }, 0);
+}
+function turnosProgramadosGlobalCount(sede, aliado, fecha) {
+  return state.turnos.filter(function (r) {
+    if (r.sede !== sede || r.fecha !== fecha) return false;
+    if (getMensajero(r.mensajeroId).aliado !== aliado) return false;
+    if (r.solicitud && r.solicitud.tipo === 'cancelacion' && r.solicitud.estado === 'aceptada' && r.solicitud.origen === 'aliado') return false;
+    return true;
+  }).length;
+}
+function checkCuotaGlobalExceso(sede, aliado, fecha) {
+  if (!cuotasActivoPais(countryForSede(sede)) || esFlotaPropia(aliado)) return { excedida: false };
+  var cantidad = cuotaGlobalAsignada(sede, aliado, fecha);
+  if (cantidad <= 0) return { excedida: false };
+  var actuales = turnosProgramadosGlobalCount(sede, aliado, fecha);
+  return { excedida: actuales >= cantidad, cantidad: cantidad, actuales: actuales };
+}
+/* Ver requerimiento "Solicitud y Mensajes para Tipología No Habilitada (Regla de Seguro)": distinto de
+   "Descalce de Franja" (la tipología SÍ opera en esa sede, solo que este slot/franja puntual no tiene cupo
+   configurado) -- aquí la tipología NO tiene NINGUNA fila en la matriz de cuotas de este aliado para esta
+   sede, en NINGÚN día/franja. No depende de cantidad>0 de una franja puntual sino de si existe algún
+   registro siquiera (una fila con cantidad=0 ya refleja que Admin "conoce" esa tipología para este aliado+
+   sede, solo que hoy no tiene cupo asignado -- no es lo mismo que nunca haberla configurado). */
+function tipologiaHabilitada(sede, aliado, vehiculo) {
+  return state.cuotasMatriz.some(function (c) { return c.sede === sede && c.aliado === aliado && c.vehiculo === vehiculo; });
 }
 /* Único punto de control de "requiere aprobación de Planner" (ver submitTurno) — dos causales bajo el mismo
    interruptor por país (cuotasActivoPais): 1) la fecha es festivo en el país de la bodega, 2) el cupo
@@ -2883,8 +2929,8 @@ function checkCuotaExceso(sede, aliado, vehiculo, hora, fecha) {
    "Pendiente de Aprobación" (ver evaluarAprobacionCuota/submitTurno). Centraliza el label/frase de cada
    causal para que las 3 rutas de aprobar/rechazar/mostrar (aprobarCuotaPlanner, rechazarCuotaPlanner,
    unifiedFromCuota, submitTurno/cargarFlotaHabitual) nunca queden desincronizadas entre sí. */
-function cuotaCausalLabel(motivo) { return motivo === 'festivo' ? 'Día Festivo' : motivo === 'domingo' ? 'Recurso Adicional (Domingo)' : 'Cupo Excedido'; }
-function cuotaCausalFrase(motivo) { return motivo === 'festivo' ? 'día festivo' : motivo === 'domingo' ? 'domingo, sin cuota operativa asignada' : 'cupo excedido'; }
+function cuotaCausalLabel(motivo) { return motivo === 'festivo' ? 'Día Festivo' : motivo === 'domingo' ? 'Recurso Adicional (Domingo)' : motivo === 'tipologia' ? 'Excepción de Tipología' : 'Cupo Excedido'; }
+function cuotaCausalFrase(motivo) { return motivo === 'festivo' ? 'día festivo' : motivo === 'domingo' ? 'domingo, sin cuota operativa asignada' : motivo === 'tipologia' ? 'tipología no habilitada' : 'cupo excedido'; }
 function evaluarAprobacionCuota(sede, aliado, vehiculo, hora, fecha) {
   var country = countryForSede(sede);
   if (!cuotasActivoPais(country) || esFlotaPropia(aliado)) return { requiere: false };
@@ -2905,12 +2951,32 @@ function evaluarAprobacionCuota(sede, aliado, vehiculo, hora, fecha) {
       detalle: 'La fecha ' + fmtDateLong(fecha) + ' es domingo; no tiene cuota operativa configurada (la matriz de Cuotas solo cubre Lunes a Sábado), así que este turno se registra como Recurso Adicional, pendiente de aprobación de Planner.'
     };
   }
-  var cuota = checkCuotaExceso(sede, aliado, vehiculo, hora, fecha);
-  if (cuota.excedida) {
+  /* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria" (DRN/Bogotá): el límite que de
+     verdad bloquea (exige aprobación de Planner) es el total CONTRATADO global de la sede+aliado+día
+     (checkCuotaGlobalExceso) -- nunca una franja puntual por sí sola. Mientras el global tenga espacio, un
+     exceso de franja (o una franja/tipología totalmente fuera de la matriz, como cantidadFranja=0) se permite
+     igual como turno confirmado, pero queda marcado con 'descalceFranja' para que Aliado/Planner vean que ese
+     recurso está cubriendo la cuota desde un slot distinto al pactado en la matriz base. */
+  var global = checkCuotaGlobalExceso(sede, aliado, fecha);
+  if (global.excedida) {
     return {
       requiere: true, motivo: 'cupo',
-      detalle: 'Cupo asignado (' + cuota.cantidad + ') ya cubierto para ' + vehiculo + ' · ' + fmtTime12(hora) + ' (' + cuota.dia + '); este turno supera la cuota y requiere aprobación de Planner/Admin.',
-      cantidad: cuota.cantidad, actuales: cuota.actuales
+      detalle: 'Cupo GLOBAL contratado (' + global.cantidad + ') de ' + aliado + ' en ' + sede + ' ya está cubierto; este turno supera la cuota total y requiere aprobación de Planner/Admin.',
+      cantidad: global.cantidad, actuales: global.actuales
+    };
+  }
+  var cuota = checkCuotaExceso(sede, aliado, vehiculo, hora, fecha);
+  if (cuota.excedida || cuota.cantidad <= 0) {
+    var dia = cuota.dia || diaSemanaKey(fecha);
+    return {
+      requiere: false,
+      descalceFranja: {
+        dia: dia, franja: cuota.franja, vehiculo: vehiculo, hora: hora,
+        cantidadFranja: cuota.cantidad, actualesFranja: cuota.actuales,
+        detalle: 'Cuota global cubierta, pero existen recursos programados fuera de las franjas base asignadas (' +
+          (cuota.cantidad > 0 ? 'cupo de ' + fmtTime12(hora) + ' (' + cuota.franja + ') ya cubierto' : fmtTime12(hora) + ' no tiene cupo base asignado') +
+          ' para ' + vehiculo + ').'
+      }
     };
   }
   return { requiere: false };
@@ -6739,8 +6805,13 @@ function cuotasEstadoMananaMatchFiltro(estado, qEstado) {
 }
 function consolManChipHtml(p) {
   var estado = cuotasEstadoManana(p.actuales, p.cuota);
-  var etiqueta = estado === 'ok' ? 'Completo' : estado === 'pendiente' ? 'A medias' : 'Sin iniciar';
-  return '<div class="cuotas-resumen-chip ' + estado + '">' +
+  /* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria": cuota global ya "Completo"
+     pero con recursos fuera de franja base -- mismo tono ámbar que usa Programar Flota (ALIADO), para que
+     Planner vea la misma señal sin tener que entrar al detalle de cada turno. */
+  var descalce = estado === 'ok' && p.descalce;
+  var etiqueta = descalce ? 'Descalce de Franja' : estado === 'ok' ? 'Completo' : estado === 'pendiente' ? 'A medias' : 'Sin iniciar';
+  var tipDescalce = descalce ? ' data-tip="Cuota global cubierta, pero existen recursos programados fuera de las franjas base asignadas."' : '';
+  return '<div class="cuotas-resumen-chip ' + (descalce ? 'descalce' : estado) + '"' + tipDescalce + '>' +
     '<span>' + escapeHtml(p.aliado) + ': ' + p.actuales + '/' + p.cuota + ' recursos (' + etiqueta + ')</span>' +
     '</div>';
 }
@@ -13068,13 +13139,34 @@ function submitTurno(e) {
   var turnoAfectado = null;
   var solGeneralCreada = null;
 
+  /* Ver requerimiento "Solicitud y Mensajes para Tipología No Habilitada (Regla de Seguro)": distinto de
+     Cupo Excedido/Festivo/Domingo -- aquí la tipología elegida no tiene NINGUNA fila en la matriz de cuotas
+     de este aliado para esta sede (ver tipologiaHabilitada), así que ni siquiera aplica evaluarAprobacionCuota
+     todavía: se interrumpe el alta con un modal de confirmación explícito (nunca aplica a un turno
+     "Pendiente / Por Confirmar", que todavía no tiene vehículo real definitivo del todo -- de hecho si
+     tiene, ver payload.pendiente). Confirmado, se reintenta la misma llamada con el flag puesto para no
+     volver a preguntar -- la segunda pasada construye el 'aprobacion' de tipología más abajo. */
+  if (modo === 'create' && !pendiente && !state._tipologiaExcepcionConfirmada) {
+    var ctTipo = countryForSede(sede);
+    if (cuotasActivoPais(ctTipo) && !esFlotaPropia(state.user.aliado) && !tipologiaHabilitada(sede, state.user.aliado, vehiculo)) {
+      openConfirmModal({
+        title: 'Tipología no habilitada', confirmText: 'Sí, enviar solicitud', danger: false,
+        message: 'Atención: La tipología ' + cuotasVehiculoLabel(vehiculo, ctTipo) + ' no se encuentra habilitada en tus cuotas para la sede ' + sede + '. ¿Deseas enviar una Solicitud de Autorización de Tipología al Planner para este recurso?',
+        onConfirm: function () { state._tipologiaExcepcionConfirmada = true; submitTurno(e); state._tipologiaExcepcionConfirmada = false; }
+      });
+      return;
+    }
+  }
   /* Módulo Cuotas de Flota (si está activo para el país de la bodega, ver Configuración/Admin en Cuotas de
      Flota): un alta nueva que exceda la cuota asignada, o que caiga en un día festivo del país, SÍ se crea
      de inmediato (trazabilidad completa) pero congelada en el estado "Pendiente de Aprobación por Planner"
      (ver evaluarAprobacionCuota/computeEstado) hasta que Planner/Admin la apruebe o rechace desde
      "Aprobaciones de Cuotas y Festivos" en Solicitudes y Cambios (ver aprobarCuotaPlanner/rechazarCuotaPlanner). */
   if (modo === 'create') {
-    var aprobacion = evaluarAprobacionCuota(sede, state.user.aliado, vehiculo, hora, fecha);
+    var tipologiaNoHabilitadaCreate = !pendiente && cuotasActivoPais(countryForSede(sede)) && !esFlotaPropia(state.user.aliado) && !tipologiaHabilitada(sede, state.user.aliado, vehiculo);
+    var aprobacion = tipologiaNoHabilitadaCreate
+      ? { requiere: true, motivo: 'tipologia', detalle: 'Solicitud de Excepción de Tipología: ' + state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(vehiculo, countryForSede(sede)) + ' en ' + sede + '.' }
+      : evaluarAprobacionCuota(sede, state.user.aliado, vehiculo, hora, fecha);
     if (aprobacion.requiere) {
       var turnoPendienteAprobacion = {
         id: nextTurnoId(), sede: sede, fecha: fecha, mensajeroId: mensajeroIdCreate, vehiculo: vehiculo, hora: hora,
@@ -13086,7 +13178,7 @@ function submitTurno(e) {
       registrarCreacionTurno(turnoPendienteAprobacion, state.user.nombre);
       registrarHistorialCambio(turnoPendienteAprobacion, {
         tipo: 'aprobacion_cuota', accion: 'solicitado',
-        motivo: (aprobacion.motivo === 'festivo' ? 'Programación en día festivo' : aprobacion.motivo === 'domingo' ? 'Programación como Recurso Adicional (domingo)' : 'Cupo excedido') + ': ' + aprobacion.detalle,
+        motivo: (aprobacion.motivo === 'festivo' ? 'Programación en día festivo' : aprobacion.motivo === 'domingo' ? 'Programación como Recurso Adicional (domingo)' : aprobacion.motivo === 'tipologia' ? 'Excepción de Tipología' : 'Cupo excedido') + ': ' + aprobacion.detalle,
         horaAnterior: null, horaPropuesta: null, por: state.user.nombre
       });
       toast('warn', cuotaCausalLabel(aprobacion.motivo) + ' — requiere aprobación',
@@ -13125,6 +13217,14 @@ function submitTurno(e) {
       var nuevoTurnoDirecto = { id: nextTurnoId(), sede: sede, fecha: fecha, mensajeroId: mensajeroIdCreate, vehiculo: vehiculo, hora: hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: pendiente };
       state.turnos.push(nuevoTurnoDirecto);
       registrarCreacionTurno(nuevoTurnoDirecto, state.user.nombre);
+      if (aprobacion && aprobacion.descalceFranja) {
+        nuevoTurnoDirecto.descalceFranjaAlerta = aprobacion.descalceFranja;
+        registrarHistorialCambio(nuevoTurnoDirecto, {
+          tipo: 'aprobacion_cuota', accion: 'descalce_franja',
+          motivo: 'Descalce de Franja: ' + aprobacion.descalceFranja.detalle,
+          horaAnterior: null, horaPropuesta: null, por: state.user.nombre
+        });
+      }
       toast('ok', pendiente ? 'Turno pendiente creado' : 'Turno creado', 'Se agregó a la Programación de Flota de ' + (state.progDay === 'tomorrow' ? 'mañana' : 'hoy') + '.');
       turnoAfectado = nuevoTurnoDirecto;
     } else {
@@ -13357,7 +13457,13 @@ function cargarFlotaHabitual() {
     if (!entry.cedula || yaProgramados[entry.cedula]) return;
     yaProgramados[entry.cedula] = true;
     var payload = { sede: entry.sede, vehiculo: entry.vehiculo, hora: entry.hora, nombre: entry.nombre, telefono: entry.telefono, cedula: entry.cedula, placa: entry.placa, correo: entry.correo, pendiente: false, fecha: fecha };
-    var aprobacion = evaluarAprobacionCuota(entry.sede, state.user.aliado, entry.vehiculo, entry.hora, fecha);
+    /* Ver requerimiento "Solicitud y Mensajes para Tipología No Habilitada": carga masiva, sin modal
+       interactivo por fila (igual que festivo/domingo/cupo en esta misma función) -- se registra
+       directamente como Excepción de Tipología pendiente de aprobación. */
+    var tipologiaNoHabilitadaFlota = cuotasActivoPais(countryForSede(entry.sede)) && !esFlotaPropia(state.user.aliado) && !tipologiaHabilitada(entry.sede, state.user.aliado, entry.vehiculo);
+    var aprobacion = tipologiaNoHabilitadaFlota
+      ? { requiere: true, motivo: 'tipologia', detalle: 'Solicitud de Excepción de Tipología: ' + state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(entry.vehiculo, countryForSede(entry.sede)) + ' en ' + entry.sede + '.' }
+      : evaluarAprobacionCuota(entry.sede, state.user.aliado, entry.vehiculo, entry.hora, fecha);
     if (aprobacion.requiere) {
       var mensajeroIdPend = resolverMensajero(payload);
       var turnoPendienteAprobacion = {
@@ -13370,7 +13476,7 @@ function cargarFlotaHabitual() {
       registrarCreacionTurno(turnoPendienteAprobacion, state.user.nombre);
       registrarHistorialCambio(turnoPendienteAprobacion, {
         tipo: 'aprobacion_cuota', accion: 'solicitado',
-        motivo: (aprobacion.motivo === 'festivo' ? 'Programación en día festivo' : aprobacion.motivo === 'domingo' ? 'Programación como Recurso Adicional (domingo)' : 'Cupo excedido') + ': ' + aprobacion.detalle + ' (carga rápida de Flota Habitual).',
+        motivo: (aprobacion.motivo === 'festivo' ? 'Programación en día festivo' : aprobacion.motivo === 'domingo' ? 'Programación como Recurso Adicional (domingo)' : aprobacion.motivo === 'tipologia' ? 'Excepción de Tipología' : 'Cupo excedido') + ': ' + aprobacion.detalle + ' (carga rápida de Flota Habitual).',
         horaAnterior: null, horaPropuesta: null, por: state.user.nombre
       });
       turnosNuevos.push(turnoPendienteAprobacion);
@@ -13384,6 +13490,14 @@ function cargarFlotaHabitual() {
       var nuevoTurno = { id: nextTurnoId(), sede: entry.sede, fecha: fecha, mensajeroId: mensajeroId, vehiculo: entry.vehiculo, hora: entry.hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: false };
       state.turnos.push(nuevoTurno);
       registrarCreacionTurno(nuevoTurno, state.user.nombre);
+      if (aprobacion.descalceFranja) {
+        nuevoTurno.descalceFranjaAlerta = aprobacion.descalceFranja;
+        registrarHistorialCambio(nuevoTurno, {
+          tipo: 'aprobacion_cuota', accion: 'descalce_franja',
+          motivo: 'Descalce de Franja: ' + aprobacion.descalceFranja.detalle + ' (carga rápida de Flota Habitual).',
+          horaAnterior: null, horaPropuesta: null, por: state.user.nombre
+        });
+      }
       turnosNuevos.push(nuevoTurno);
       creados++;
     } else {
@@ -13487,35 +13601,97 @@ function recalcularPromocionCupo(sede, aliado, vehiculo, hora, fecha) {
   if (!cuotasActivoPais(countryForSede(sede)) || esFlotaPropia(aliado)) return;
   var dia = diaSemanaKey(fecha);
   var franja = franjaForHora(hora, countryForSede(sede));
-  if (!dia || !franja) return;
-  var cantidad = cuotaAsignada(sede, aliado, dia, franja, vehiculo);
-  if (cantidad <= 0) return;
-  var pendientes = state.turnos.filter(function (r) {
-    return r.sede === sede && r.fecha === fecha && r.vehiculo === vehiculo && r.pendienteAprobacionPlanner &&
-      r.pendienteAprobacionMotivo === 'cupo' && franjaForHora(r.hora, countryForSede(sede)) === franja &&
+  var tocados = [];
+  if (dia && franja) {
+    var cantidad = cuotaAsignada(sede, aliado, dia, franja, vehiculo);
+    if (cantidad > 0) {
+      var pendientes = state.turnos.filter(function (r) {
+        return r.sede === sede && r.fecha === fecha && r.vehiculo === vehiculo && r.pendienteAprobacionPlanner &&
+          r.pendienteAprobacionMotivo === 'cupo' && franjaForHora(r.hora, countryForSede(sede)) === franja &&
+          getMensajero(r.mensajeroId).aliado === aliado;
+      }).sort(function (a, b) { return (a.pendienteAprobacionSolicitadoEn || '').localeCompare(b.pendienteAprobacionSolicitadoEn || ''); });
+      if (pendientes.length) {
+        var actuales = turnosProgramadosCount(sede, aliado, fecha, franja, vehiculo);
+        var confirmadosActuales = actuales - pendientes.length;
+        var huecosLibres = Math.min(cantidad - confirmadosActuales, pendientes.length);
+        if (huecosLibres > 0) {
+          var promovidos = pendientes.slice(0, huecosLibres);
+          promovidos.forEach(function (t) {
+            t.pendienteAprobacionPlanner = false;
+            t.cuotaAprobacion = {
+              estado: 'aprobada_automatica', causal: t.pendienteAprobacionMotivo,
+              motivo: 'Promovido automáticamente a turno confirmado: se liberó una plaza dentro de la cuota de ' + sede + '.',
+              resueltoPor: 'Sistema', resueltoPorRol: 'SISTEMA', resueltoEn: fmtClock(state.now), resueltoFecha: TODAY_STR
+            };
+            registrarHistorialCambio(t, {
+              tipo: 'aprobacion_cuota', accion: 'promovido_automatico',
+              motivo: 'Se liberó una plaza dentro de la cuota de ' + sede + ' — este turno pasó de "Adicional / Pendiente de Aprobación" a confirmado automáticamente, sin intervención de Planner.',
+              horaAnterior: null, horaPropuesta: null, por: 'Sistema'
+            });
+          });
+          toast('ok', 'Cupo liberado', promovidos.length + ' turno' + (promovidos.length === 1 ? '' : 's') + ' "Pendiente de Aprobación" ' + (promovidos.length === 1 ? 'fue promovido' : 'fueron promovidos') + ' a confirmado automáticamente al liberarse una plaza de la cuota de ' + sede + '.');
+          tocados = tocados.concat(promovidos);
+        }
+      }
+    }
+  }
+  /* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria": el bloqueo real ahora es el
+     total GLOBAL (checkCuotaGlobalExceso), así que la promoción también debe serlo -- un pendiente 'cupo'
+     en CUALQUIER franja de este mismo sede+aliado+fecha puede quedar liberado por una plaza que se liberó
+     en una franja DISTINTA a la suya (ej. se libera un cupo en 08:30 y el pendiente estaba en 10:30). */
+  var globalCfg = checkCuotaGlobalExceso(sede, aliado, fecha);
+  if (globalCfg.cantidad > 0) {
+    var pendientesGlobal = state.turnos.filter(function (r) {
+      return r.sede === sede && r.fecha === fecha && r.pendienteAprobacionPlanner && r.pendienteAprobacionMotivo === 'cupo' &&
+        tocados.indexOf(r) === -1 && getMensajero(r.mensajeroId).aliado === aliado;
+    }).sort(function (a, b) { return (a.pendienteAprobacionSolicitadoEn || '').localeCompare(b.pendienteAprobacionSolicitadoEn || ''); });
+    if (pendientesGlobal.length) {
+      var actualesGlobalAhora = turnosProgramadosGlobalCount(sede, aliado, fecha);
+      var confirmadosGlobalAhora = actualesGlobalAhora - pendientesGlobal.length;
+      var huecosGlobales = Math.min(globalCfg.cantidad - confirmadosGlobalAhora, pendientesGlobal.length);
+      if (huecosGlobales > 0) {
+        var promovidosGlobal = pendientesGlobal.slice(0, huecosGlobales);
+        promovidosGlobal.forEach(function (t) {
+          t.pendienteAprobacionPlanner = false;
+          t.cuotaAprobacion = {
+            estado: 'aprobada_automatica', causal: t.pendienteAprobacionMotivo,
+            motivo: 'Promovido automáticamente a turno confirmado: se liberó una plaza dentro de la cuota GLOBAL contratada de ' + sede + '.',
+            resueltoPor: 'Sistema', resueltoPorRol: 'SISTEMA', resueltoEn: fmtClock(state.now), resueltoFecha: TODAY_STR
+          };
+          registrarHistorialCambio(t, {
+            tipo: 'aprobacion_cuota', accion: 'promovido_automatico',
+            motivo: 'Se liberó una plaza dentro de la cuota GLOBAL contratada de ' + sede + ' — este turno pasó de "Adicional / Pendiente de Aprobación" a confirmado automáticamente, sin intervención de Planner.',
+            horaAnterior: null, horaPropuesta: null, por: 'Sistema'
+          });
+        });
+        toast('ok', 'Cupo liberado', promovidosGlobal.length + ' turno' + (promovidosGlobal.length === 1 ? '' : 's') + ' "Pendiente de Aprobación" ' + (promovidosGlobal.length === 1 ? 'fue promovido' : 'fueron promovidos') + ' a confirmado automáticamente al liberarse una plaza dentro de la cuota global contratada de ' + sede + '.');
+        tocados = tocados.concat(promovidosGlobal);
+      }
+    }
+  }
+  /* Ver requerimiento "Refinamiento de Cuotas...", punto B (Reconciliación Dinámica): liberar una plaza en
+     una franja BASE (la que se acaba de eliminar/desasignar/mover) puede dejar un recurso que ya vivía en
+     OTRA franja -- marcado 'descalceFranjaAlerta' por estar fuera de su slot pactado -- siendo ahora el que
+     de verdad cubre la cuota CONTRATADA global (nunca dejó de contarse para ella, ver
+     checkCuotaGlobalExceso), en vez de un excedente puro. Se relabela su alerta a "Reubicación fuera de
+     franja base" (misma alerta, visible, pero ya no se lee como un exceso real) -- no cambia su
+     mensajeroId/hora/vehiculo, solo su metadato informativo. Se toma el descalce MÁS ANTIGUO sin relabelar
+     todavía de ese mismo sede+aliado+fecha (cualquier franja), sin importar si hubo o no promoción arriba. */
+  var descalceCandidato = state.turnos.filter(function (r) {
+    return r.sede === sede && r.fecha === fecha && r.descalceFranjaAlerta && !r.descalceFranjaAlerta.reubicacion &&
       getMensajero(r.mensajeroId).aliado === aliado;
-  }).sort(function (a, b) { return (a.pendienteAprobacionSolicitadoEn || '').localeCompare(b.pendienteAprobacionSolicitadoEn || ''); });
-  if (!pendientes.length) return;
-  var actuales = turnosProgramadosCount(sede, aliado, fecha, franja, vehiculo);
-  var confirmadosActuales = actuales - pendientes.length;
-  var huecosLibres = Math.min(cantidad - confirmadosActuales, pendientes.length);
-  if (huecosLibres <= 0) return;
-  var promovidos = pendientes.slice(0, huecosLibres);
-  promovidos.forEach(function (t) {
-    t.pendienteAprobacionPlanner = false;
-    t.cuotaAprobacion = {
-      estado: 'aprobada_automatica', causal: t.pendienteAprobacionMotivo,
-      motivo: 'Promovido automáticamente a turno confirmado: se liberó una plaza dentro de la cuota de ' + sede + '.',
-      resueltoPor: 'Sistema', resueltoPorRol: 'SISTEMA', resueltoEn: fmtClock(state.now), resueltoFecha: TODAY_STR
-    };
-    registrarHistorialCambio(t, {
-      tipo: 'aprobacion_cuota', accion: 'promovido_automatico',
-      motivo: 'Se liberó una plaza dentro de la cuota de ' + sede + ' — este turno pasó de "Adicional / Pendiente de Aprobación" a confirmado automáticamente, sin intervención de Planner.',
+  }).sort(function (a, b) { return a.id < b.id ? -1 : 1; })[0];
+  if (descalceCandidato) {
+    descalceCandidato.descalceFranjaAlerta.reubicacion = true;
+    descalceCandidato.descalceFranjaAlerta.detalle = 'Reubicación fuera de franja base: se liberó un cupo en otra franja (' + fmtTime12(hora) + ') y este recurso ahora cubre la cuota contratada de ' + sede + ', aunque sigue fuera de su franja asignada.';
+    registrarHistorialCambio(descalceCandidato, {
+      tipo: 'aprobacion_cuota', accion: 'reubicacion_franja',
+      motivo: 'Reubicación fuera de franja base: se liberó un cupo en ' + fmtTime12(hora) + ' y este recurso pasó a cubrir la cuota contratada de ' + sede + '.',
       horaAnterior: null, horaPropuesta: null, por: 'Sistema'
     });
-  });
-  toast('ok', 'Cupo liberado', promovidos.length + ' turno' + (promovidos.length === 1 ? '' : 's') + ' "Pendiente de Aprobación" ' + (promovidos.length === 1 ? 'fue promovido' : 'fueron promovidos') + ' a confirmado automáticamente al liberarse una plaza de la cuota de ' + sede + '.');
-  scPushRows('app_turnos', promovidos);
+    tocados.push(descalceCandidato);
+  }
+  if (tocados.length) scPushRows('app_turnos', tocados);
 }
 /* Ver requerimiento "Limpieza al Limpiar o Eliminar Flota" (reporte de Easyway/Cabify, acumulación masiva de
    solicitudes pendientes en el Planner): si el mensajero/turno que se está eliminando o desasignando tiene
@@ -16199,10 +16375,22 @@ function cuotasProgresoPorSede(aliado, fecha) {
   matriz.forEach(function (c) {
     if (c.aliado !== aliado || c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
-    if (!porSede[c.sede]) porSede[c.sede] = { sede: c.sede, cuota: 0, actuales: 0, pendientes: 0 };
+    if (!porSede[c.sede]) porSede[c.sede] = { sede: c.sede, cuota: 0, actuales: 0, pendientes: 0, franjas: [] };
+    var actualesFranja = turnosProgramadosCount(c.sede, aliado, fecha, c.franja, c.vehiculo);
     porSede[c.sede].cuota += c.cantidad;
-    porSede[c.sede].actuales += turnosProgramadosCount(c.sede, aliado, fecha, c.franja, c.vehiculo);
+    porSede[c.sede].actuales += actualesFranja;
     porSede[c.sede].pendientes += turnosPendientesAprobacionCount(c.sede, aliado, fecha, c.franja, c.vehiculo);
+    porSede[c.sede].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranja });
+  });
+  /* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria" (DRN/Bogotá): 'descalce' marca
+     que, dentro de esta sede+aliado+fecha, existe al menos un recurso realmente programado fuera de su
+     franja/tipología base (ver descalceFranjaAlerta en evaluarAprobacionCuota/submitTurno) -- aunque la cuota
+     GLOBAL ya esté cubierta, el desglose por franja de abajo puede no coincidir con la matriz pactada. */
+  Object.keys(porSede).forEach(function (s) {
+    porSede[s].franjas.sort(function (a, b) { return a.franja < b.franja ? -1 : 1; });
+    porSede[s].descalce = state.turnos.some(function (r) {
+      return r.sede === s && r.fecha === fecha && r.descalceFranjaAlerta && getMensajero(r.mensajeroId).aliado === aliado;
+    });
   });
   return Object.keys(porSede).sort().map(function (s) { return porSede[s]; });
 }
@@ -16216,13 +16404,23 @@ function cuotasProgresoPorAliadoManana(sedeFiltro) {
   var dia = diaSemanaKey(TOMORROW_STR);
   if (!dia) return [];
   var porAliado = {};
+  var sedesPorAliado = {};
   state.cuotasMatriz.forEach(function (c) {
     if (c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (sedeFiltro && c.sede !== sedeFiltro) return;
-    if (!porAliado[c.aliado]) porAliado[c.aliado] = { aliado: c.aliado, cuota: 0, actuales: 0 };
+    if (!porAliado[c.aliado]) { porAliado[c.aliado] = { aliado: c.aliado, cuota: 0, actuales: 0 }; sedesPorAliado[c.aliado] = {}; }
     porAliado[c.aliado].cuota += c.cantidad;
     porAliado[c.aliado].actuales += turnosProgramadosCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo);
+    sedesPorAliado[c.aliado][c.sede] = true;
+  });
+  /* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria": mismo criterio de descalce de
+     cuotasProgresoPorSede, agregado aquí por aliado a través de todas sus bodegas con cuota activa. */
+  Object.keys(porAliado).forEach(function (a) {
+    var sedesDeEsteAliado = Object.keys(sedesPorAliado[a]);
+    porAliado[a].descalce = state.turnos.some(function (r) {
+      return r.fecha === TOMORROW_STR && r.descalceFranjaAlerta && sedesDeEsteAliado.indexOf(r.sede) !== -1 && getMensajero(r.mensajeroId).aliado === a;
+    });
   });
   return Object.keys(porAliado).sort().map(function (a) { return porAliado[a]; });
 }
@@ -16248,8 +16446,21 @@ function renderProgCuotasResumen() {
       var notaPendientes = p.pendientes > 0
         ? (' <span class="courier-sub">(' + p.pendientes + ' pendiente' + (p.pendientes === 1 ? '' : 's') + ' de aprobación por Planner)</span>')
         : '';
-      return '<div class="cuotas-resumen-chip ' + (cubierto ? 'ok' : 'pendiente') + '">' +
-        '<span>' + p.sede + ': ' + p.actuales + '/' + p.cuota + ' recursos' + notaPendientes + '</span>' +
+      /* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria": cuota global cubierta pero
+         con al menos un recurso fuera de su franja base -- badge ámbar en vez de verde, con el mismo total
+         pero la etiqueta "(Descalce de Franja)" y un tooltip explicativo (ver descalceFranjaAlerta). */
+      var descalce = cubierto && p.descalce;
+      var claseChip = descalce ? 'descalce' : (cubierto ? 'ok' : 'pendiente');
+      var tipDescalce = descalce ? ' data-tip="Cuota global cubierta, pero existen recursos programados fuera de las franjas base asignadas."' : '';
+      var etiqueta = p.actuales + '/' + p.cuota + ' recursos' + (descalce ? ' (Descalce de Franja)' : '');
+      var desglose = '<details class="cuotas-resumen-desglose"><summary>Ver desglose por franja</summary><ul>' +
+        p.franjas.map(function (f) {
+          var fCubierto = f.actuales >= f.cuota;
+          return '<li' + (fCubierto ? '' : ' class="descalce-franja-item"') + '>' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(p.sede))) + ': ' + f.actuales + '/' + f.cuota + '</li>';
+        }).join('') + '</ul></details>';
+      return '<div class="cuotas-resumen-chip ' + claseChip + '"' + tipDescalce + '>' +
+        '<span>' + p.sede + ': ' + etiqueta + notaPendientes + '</span>' +
+        desglose +
         (cubierto ? '' : ('<button type="button" class="btn-link" data-act="completar-cuota-pendiente" data-sede="' + p.sede + '">Faltan ' + faltan + ' — Completar con Pendiente/Por Confirmar</button>')) +
         '</div>';
     }).join('') + '</div>';

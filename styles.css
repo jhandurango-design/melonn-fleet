@@ -233,7 +233,16 @@ a{color:inherit;}
 /* Ver requerimiento "Zona ciega nocturna — Avance y Carga T+1": 3er estado del semáforo (0 cargado todavía,
    rojo) además de "ok" (cubierto, verde) y "pendiente" (a medias, ámbar) -- ambos ya existentes arriba. */
 .cuotas-resumen-chip.vacio{border-color:#C0304833;background:#C0304814;}
+/* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria" (DRN/Bogotá): cuota GLOBAL
+   cubierta pero con recursos fuera de su franja base -- tono ámbar/naranja distinto de "pendiente" (que
+   significa "todavía incompleta"), ya que aquí la cuota SÍ está cubierta, solo mal distribuida por franja. */
+.cuotas-resumen-chip.descalce{border-color:#D9770633;background:#D9770614;}
 .cuotas-resumen-chip .btn-link{border:none;background:none;color:var(--lilac-deep);font-weight:700;font-size:11.5px;cursor:pointer;padding:0;text-decoration:underline;}
+.cuotas-resumen-desglose{width:100%;font-size:11.5px;font-weight:500;color:var(--text-secondary);}
+.cuotas-resumen-desglose summary{cursor:pointer;color:var(--lilac-deep);font-weight:700;list-style:none;}
+.cuotas-resumen-desglose summary::-webkit-details-marker{display:none;}
+.cuotas-resumen-desglose ul{margin:6px 0 0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:4px 14px;}
+.cuotas-resumen-desglose li.descalce-franja-item{color:#B45309;font-weight:700;}
 /* Ver requerimiento "Selector de Hora propio con botón Aceptar" -- reemplaza el <input type="time"> nativo
    (su desplegable lo pinta el navegador/SO, imposible de personalizar) en el modal "Nuevo Turno". */
 .timepicker{position:relative;}
