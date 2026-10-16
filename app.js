@@ -355,7 +355,7 @@ var supabaseClient = (typeof window !== 'undefined' && window.supabase)
    diseño (viaja al cliente igual que en cualquier integración de reCAPTCHA) -- la Secret Key correspondiente
    NUNCA vive aquí; está como secreto del lado del servidor en el Edge Function verify-recaptcha (ver
    supabase/functions/verify-recaptcha/index.ts), al que este archivo solo le manda el token ya generado. */
-var RECAPTCHA_SITE_KEY = '6Ld3K-gtAAAAACjatg9g66wLc-1eAPT0Zzdv4Zg6';
+var RECAPTCHA_SITE_KEY = '6LcT5fltAAAAAC0K49IYef6XtkdA2HseZBS_3gO4';
 /* Obtiene un token de reCAPTCHA v3 (acción puntual, ej. 'login') y lo manda a verificar al Edge Function --
    nunca a la inversa (el navegador JAMÁS ve la Secret Key ni llama directo a la API de Google con ella).
    Diseño "fail-open": si el script de Google no cargó (bloqueado por una extensión/red corporativa, offline,
