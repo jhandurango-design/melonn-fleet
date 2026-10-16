@@ -1854,6 +1854,12 @@ const state = {
      Ya no se invoca desde ningún botón (ver requerimiento "Incorporación de Tabla de Ranking Comparativo y
      Detalle Multinivel por Indicador"), se conserva por si se necesita reactivar ese patrón. */
   cumplimientoPosicionamientoExpandidos: {},
+  /* Ver requerimiento "Persistencia del Desglose por Franja (Avance de Cuotas)": qué chips de "Ver desglose
+     por franja" quedan abiertos, tanto en Programar Flota (ALIADO) como en Avance y Carga T+1 (PLANNER) --
+     mismo patrón que cumplimientoBodegaExpandidas, clave única por chip (ver toggleCuotasDesglose). Sin
+     esto, cada re-render (gravityTick) reconstruye el innerHTML desde cero y un <details> nativo perdía su
+     estado abierto a cada tick. */
+  cuotasDesgloseExpandidos: {},
   /* Ver requerimiento "Desarrollo de Código con Evaluación Prudente de Impacto...", punto 2: "Ver Detalle"
      in-situ (inline accordion) de la Tabla 1 (Ranking Comparativo de Aliados/Bodegas) y la Tabla 2 (Ranking
      Global de Mensajeros Críticos) -- reemplaza la 3ra tabla fija "Detalle de Turnos y Novedades" (ver
@@ -6811,8 +6817,16 @@ function consolManChipHtml(p) {
   var descalce = estado === 'ok' && p.descalce;
   var etiqueta = descalce ? 'Descalce de Franja' : estado === 'ok' ? 'Completo' : estado === 'pendiente' ? 'A medias' : 'Sin iniciar';
   var tipDescalce = descalce ? ' data-tip="Cuota global cubierta, pero existen recursos programados fuera de las franjas base asignadas."' : '';
+  /* Ver requerimiento "Persistencia del Desglose por Franja": disponible también aquí (Planner), con clave
+     propia 'planner:sede|aliado' para no chocar con la de Programar Flota (ALIADO) ni entre bodegas/aliados
+     distintos de esta misma pestaña. Solo se arma cuando p.franjas viene poblado (ver
+     cuotasProgresoPorAliadoManana/cuotasProgresoPorBodegaYAliadoManana -- requiere una sede puntual). */
+  var desglose = (p.franjas && p.franjas.length)
+    ? cuotasDesgloseHtml('planner:' + (p.sede || '') + '|' + p.aliado, p.sede, p.franjas)
+    : '';
   return '<div class="cuotas-resumen-chip ' + (descalce ? 'descalce' : estado) + '"' + tipDescalce + '>' +
     '<span>' + escapeHtml(p.aliado) + ': ' + p.actuales + '/' + p.cuota + ' recursos (' + etiqueta + ')</span>' +
+    desglose +
     '</div>';
 }
 /* Ver requerimiento "Ajustes finales de estructura... Avance y Carga T+1", punto 3: la tabla de detalle lista
@@ -6853,12 +6867,37 @@ function renderConsolidadoManana() {
 
   /* "Estado de carga" (Cubierto/Pendiente) es un atributo de CUMPLIMIENTO DE CUOTA por aliado (agregado), no
      de una ruta puntual -- sigue acotando únicamente el Panel de Avance de Cuotas; la tabla de detalle de
-     abajo (un turno real por fila) se acota solo por Bodega/Aliado. */
-  var progreso = cuotasProgresoPorAliadoManana(state.consolManFiltroBodega);
-  if (qAliado) progreso = progreso.filter(function (p) { return p.aliado === qAliado; });
-  if (qEstado) progreso = progreso.filter(function (p) { return cuotasEstadoMananaMatchFiltro(cuotasEstadoManana(p.actuales, p.cuota), qEstado); });
-  document.getElementById('consolManComplianceChips').innerHTML = progreso.map(consolManChipHtml).join('');
-  document.getElementById('consolManComplianceEmpty').classList.toggle('show', progreso.length === 0);
+     abajo (un turno real por fila) se acota solo por Bodega/Aliado.
+     Ver requerimiento "Agrupación Dinámica en Avance y Carga T+1 (Bodega → Aliado)": con "Todas las
+     bodegas" (sin filtro puntual), el panel se agrupa primero por Bodega ("📍 Sede") y, dentro de cada una,
+     un chip por aliado -- mismo criterio visual que ya usa el resto de Consolidado/Programación. Con una
+     bodega puntual ya elegida, un único grupo implícito no aporta nada -- se mantiene la lista plana de
+     chips por aliado de siempre. */
+  var chipsEl = document.getElementById('consolManComplianceChips');
+  var huboResultados;
+  if (!state.consolManFiltroBodega) {
+    var grupos = cuotasProgresoPorBodegaYAliadoManana();
+    var html = '';
+    grupos.forEach(function (g) {
+      var aliados = g.aliados;
+      if (qAliado) aliados = aliados.filter(function (p) { return p.aliado === qAliado; });
+      if (qEstado) aliados = aliados.filter(function (p) { return cuotasEstadoMananaMatchFiltro(cuotasEstadoManana(p.actuales, p.cuota), qEstado); });
+      if (!aliados.length) return;
+      html += '<div class="consol-man-grupo-bodega"><p class="consol-man-grupo-titulo">📍 ' + g.sede + '</p>' +
+        '<div class="cuotas-resumen-chips">' + aliados.map(consolManChipHtml).join('') + '</div></div>';
+    });
+    chipsEl.className = 'consol-man-chips-agrupadas';
+    chipsEl.innerHTML = html;
+    huboResultados = !!html;
+  } else {
+    var progreso = cuotasProgresoPorAliadoManana(state.consolManFiltroBodega);
+    if (qAliado) progreso = progreso.filter(function (p) { return p.aliado === qAliado; });
+    if (qEstado) progreso = progreso.filter(function (p) { return cuotasEstadoMananaMatchFiltro(cuotasEstadoManana(p.actuales, p.cuota), qEstado); });
+    chipsEl.className = 'cuotas-resumen-chips';
+    chipsEl.innerHTML = progreso.map(consolManChipHtml).join('');
+    huboResultados = progreso.length > 0;
+  }
+  document.getElementById('consolManComplianceEmpty').classList.toggle('show', !huboResultados);
 
   var routes = routesForConsolidadoManana(state.consolManFiltroBodega, qAliado);
   document.getElementById('consolManTbody').innerHTML = routes.map(consolManDetalleRowHtml).join('');
@@ -11431,6 +11470,22 @@ function toggleBodegaDetalle(sede) {
 function togglePosicionamientoGrupo(nombreGrupo) {
   state.cumplimientoPosicionamientoExpandidos[nombreGrupo] = !state.cumplimientoPosicionamientoExpandidos[nombreGrupo];
   renderCumplimiento();
+}
+/* Ver requerimiento "Persistencia del Desglose por Franja": re-renderiza únicamente los paneles de Avance
+   de Cuotas que estén presentes en el DOM ahora mismo (Programar Flota del Aliado y/o Avance y Carga T+1
+   del Planner) -- ambos pueden usar la misma clave de state.cuotasDesgloseExpandidos sin pisarse entre
+   sí porque cada uno arma su propia clave con un prefijo distinto. */
+function refreshCuotasDesgloseViews() {
+  if (document.getElementById('progCuotasResumen')) renderProgCuotasResumen();
+  if (document.getElementById('consolManComplianceChips')) renderConsolidadoManana();
+}
+function toggleCuotasDesglose(key) {
+  state.cuotasDesgloseExpandidos[key] = !state.cuotasDesgloseExpandidos[key];
+  refreshCuotasDesgloseViews();
+}
+function cerrarCuotasDesglose(key) {
+  state.cuotasDesgloseExpandidos[key] = false;
+  refreshCuotasDesgloseViews();
 }
 /* Micro-filtro Todos/Solo A Tiempo/Solo Tardíos de la "Tabla General de Despachos" -- ver
    renderCumplimientoBodegaTab. */
@@ -16409,26 +16464,80 @@ function cuotasProgresoPorAliadoManana(sedeFiltro) {
     if (c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (sedeFiltro && c.sede !== sedeFiltro) return;
-    if (!porAliado[c.aliado]) { porAliado[c.aliado] = { aliado: c.aliado, cuota: 0, actuales: 0 }; sedesPorAliado[c.aliado] = {}; }
+    if (!porAliado[c.aliado]) { porAliado[c.aliado] = { aliado: c.aliado, sede: sedeFiltro || null, cuota: 0, actuales: 0, franjas: [] }; sedesPorAliado[c.aliado] = {}; }
+    var actualesFranjaMan = turnosProgramadosCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo);
     porAliado[c.aliado].cuota += c.cantidad;
-    porAliado[c.aliado].actuales += turnosProgramadosCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo);
+    porAliado[c.aliado].actuales += actualesFranjaMan;
+    /* Solo se arma el desglose por franja cuando hay UNA sede puntual filtrada -- con "Todas las bodegas"
+       se usa cuotasProgresoPorBodegaYAliadoManana (agrupado), que ya trae su propio desglose por sede. */
+    if (sedeFiltro) porAliado[c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaMan });
     sedesPorAliado[c.aliado][c.sede] = true;
   });
   /* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria": mismo criterio de descalce de
      cuotasProgresoPorSede, agregado aquí por aliado a través de todas sus bodegas con cuota activa. */
   Object.keys(porAliado).forEach(function (a) {
     var sedesDeEsteAliado = Object.keys(sedesPorAliado[a]);
+    porAliado[a].franjas.sort(function (x, y) { return x.franja < y.franja ? -1 : 1; });
     porAliado[a].descalce = state.turnos.some(function (r) {
       return r.fecha === TOMORROW_STR && r.descalceFranjaAlerta && sedesDeEsteAliado.indexOf(r.sede) !== -1 && getMensajero(r.mensajeroId).aliado === a;
     });
   });
   return Object.keys(porAliado).sort().map(function (a) { return porAliado[a]; });
 }
+/* Ver requerimiento "Agrupación Dinámica en Avance y Carga T+1 (Bodega → Aliado)": variante agrupada por
+   sede de cuotasProgresoPorAliadoManana, usada cuando el filtro de Bodega está en "Todas las bodegas" --
+   mismo criterio de agrupamiento "📍 Bodega" que ya usa el resto de Consolidado/Programación, para que el
+   Planner pueda distinguir de un vistazo en qué bodega puntual está el descalce/déficit de cada aliado, en
+   vez de un único total ciego a través de todas sus sedes. */
+function cuotasProgresoPorBodegaYAliadoManana() {
+  var dia = diaSemanaKey(TOMORROW_STR);
+  if (!dia) return [];
+  var porSede = {};
+  state.cuotasMatriz.forEach(function (c) {
+    if (c.dia !== dia || c.cantidad <= 0) return;
+    if (!cuotasActivoPais(countryForSede(c.sede))) return;
+    if (!porSede[c.sede]) porSede[c.sede] = {};
+    if (!porSede[c.sede][c.aliado]) porSede[c.sede][c.aliado] = { aliado: c.aliado, sede: c.sede, cuota: 0, actuales: 0, franjas: [] };
+    var actualesFranjaBA = turnosProgramadosCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo);
+    porSede[c.sede][c.aliado].cuota += c.cantidad;
+    porSede[c.sede][c.aliado].actuales += actualesFranjaBA;
+    porSede[c.sede][c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaBA });
+  });
+  return Object.keys(porSede).sort().map(function (sede) {
+    var aliados = Object.keys(porSede[sede]).sort().map(function (a) {
+      var rec = porSede[sede][a];
+      rec.franjas.sort(function (x, y) { return x.franja < y.franja ? -1 : 1; });
+      rec.descalce = state.turnos.some(function (r) {
+        return r.sede === sede && r.fecha === TOMORROW_STR && r.descalceFranjaAlerta && getMensajero(r.mensajeroId).aliado === a;
+      });
+      return rec;
+    });
+    return { sede: sede, aliados: aliados };
+  });
+}
 /* Widget de avance de cuotas al tope de Programar Flota -- oculto por completo si Cuotas no está activo
    para ninguna de las bodegas de este aliado en la fecha activa (Hoy/Mañana). Cada bodega con déficit
    ofrece un atajo directo a "Nuevo Turno" con Pendiente/Por Confirmar ya marcado para esa sede (ver
    requerimiento "Manejo de Cuotas Incompletas": el recurso faltante se completa así, no hay forma de
    "auto-generarlo" sin que el Aliado aporte sus propios datos). */
+/* Ver requerimiento "Persistencia del Desglose por Franja (control onClick + botón de cierre)": sustituye
+   el <details> nativo (perdía su estado abierto en cada re-render de gravityTick) por un botón+panel
+   propios, cuyo abierto/cerrado vive en state.cuotasDesgloseExpandidos (ver toggleCuotasDesglose/
+   cerrarCuotasDesglose) -- key única por chip, para que Programar Flota (ALIADO, 1 chip por sede) y Avance
+   y Carga T+1 (PLANNER, 1 chip por sede+aliado) nunca choquen entre sí aunque compartan el mismo state. */
+function cuotasDesgloseHtml(key, sede, franjas) {
+  var abierto = !!state.cuotasDesgloseExpandidos[key];
+  var boton = '<button type="button" class="btn-link" data-act="toggle-cuotas-desglose" data-key="' + key + '">' +
+    (abierto ? 'Ocultar desglose por franja' : 'Ver desglose por franja') + '</button>';
+  if (!abierto) return '<div class="cuotas-resumen-desglose-wrap">' + boton + '</div>';
+  var panel = '<div class="cuotas-resumen-desglose">' +
+    '<button type="button" class="cuotas-desglose-cerrar" data-act="cerrar-cuotas-desglose" data-key="' + key + '" data-tip="Cerrar desglose">✕</button>' +
+    '<ul>' + franjas.map(function (f) {
+      var fCubierto = f.actuales >= f.cuota;
+      return '<li' + (fCubierto ? '' : ' class="descalce-franja-item"') + '>' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(sede))) + ': ' + f.actuales + '/' + f.cuota + '</li>';
+    }).join('') + '</ul></div>';
+  return '<div class="cuotas-resumen-desglose-wrap">' + boton + panel + '</div>';
+}
 function renderProgCuotasResumen() {
   var el = document.getElementById('progCuotasResumen');
   var fecha = state.progDay === 'tomorrow' ? TOMORROW_STR : TODAY_STR;
@@ -16453,11 +16562,7 @@ function renderProgCuotasResumen() {
       var claseChip = descalce ? 'descalce' : (cubierto ? 'ok' : 'pendiente');
       var tipDescalce = descalce ? ' data-tip="Cuota global cubierta, pero existen recursos programados fuera de las franjas base asignadas."' : '';
       var etiqueta = p.actuales + '/' + p.cuota + ' recursos' + (descalce ? ' (Descalce de Franja)' : '');
-      var desglose = '<details class="cuotas-resumen-desglose"><summary>Ver desglose por franja</summary><ul>' +
-        p.franjas.map(function (f) {
-          var fCubierto = f.actuales >= f.cuota;
-          return '<li' + (fCubierto ? '' : ' class="descalce-franja-item"') + '>' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(p.sede))) + ': ' + f.actuales + '/' + f.cuota + '</li>';
-        }).join('') + '</ul></details>';
+      var desglose = cuotasDesgloseHtml('aliado:' + p.sede, p.sede, p.franjas);
       return '<div class="cuotas-resumen-chip ' + claseChip + '"' + tipDescalce + '>' +
         '<span>' + p.sede + ': ' + etiqueta + notaPendientes + '</span>' +
         desglose +
@@ -19551,6 +19656,8 @@ document.addEventListener('DOMContentLoaded', function () {
     if (act !== 'toggle-row-menu') closeRowMenu();
     if (act === 'ver-detalle-bodega') toggleBodegaDetalle(id);
     else if (act === 'toggle-posicionamiento-grupo') togglePosicionamientoGrupo(id);
+    else if (act === 'toggle-cuotas-desglose') toggleCuotasDesglose(btn.dataset.key);
+    else if (act === 'cerrar-cuotas-desglose') cerrarCuotasDesglose(btn.dataset.key);
     else if (act === 'toggle-acordeon-grupo') toggleAcordeonGrupo(id, btn.dataset.expandido === '1');
     else if (act === 'toggle-detalle-cumplimiento-grupo') toggleCumplimientoAliadoRankingDetalle(id);
     else if (act === 'toggle-detalle-cumplimiento-mensajero') toggleCumplimientoAliadoFlatDetalle(id);
