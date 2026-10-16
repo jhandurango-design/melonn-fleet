@@ -70,8 +70,12 @@ a{color:inherit;}
 *::-webkit-scrollbar-thumb:hover{background-color:#c2cdd1;}
 
 /* ---------------- Login ---------------- */
+/* Ver requerimiento "Aumentar separación/espaciado lateral": column-gap de 24px a 56px -- los bloques
+   laterales (justify-self:end/start, pegados al borde de su columna más cercano al panel) se alejan del
+   panel central hacia los extremos de la pantalla de forma simétrica (el mismo gap aplica a ambos lados de
+   la columna 'auto' del centro). */
 .login-screen{
-  min-height:100vh;display:grid;grid-template-columns:1fr auto 1fr;align-items:start;align-content:center;column-gap:24px;
+  min-height:100vh;display:grid;grid-template-columns:1fr auto 1fr;align-items:start;align-content:center;column-gap:56px;
   position:relative;overflow:hidden;padding:64px 24px 84px;
   background:linear-gradient(160deg,var(--header) 0%, var(--header-alt) 65%, #1B1140 100%);
 }
@@ -136,21 +140,20 @@ a{color:inherit;}
 }
 .login-info-banner h3{margin:0 0 8px;font-size:14px;font-weight:700;color:#fff;}
 .login-info-banner p{margin:0;font-size:12.5px;line-height:1.5;color:rgba(255,255,255,0.78);}
-/* Ver requerimiento "Ajuste de posición y escala de Aliados": align-self:center (no start) centra el
-   bloque verticalmente respecto a la fila del grid -- cuya altura la marca .login-panel-col (la tarjeta
-   blanca de Iniciar Sesión), asi que queda centrado respecto a ella, no pegado abajo cerca del footer.
-   width:340px (no solo max-width) para igualar el ancho EXACTO de la caja de .login-info-banner (340px
-   incluido su padding) y que ambas columnas queden simetricas.
+/* Ver requerimiento "Alineación vertical simétrica": align-self:start + margin-top:110px -- EXACTAMENTE la
+   misma pareja de valores que ya usa .login-info-banner -- para que ambos bloques laterales compartan la
+   misma línea superior en vez de que uno quede centrado contra el panel (mas abajo que el otro, que sigue
+   anclado arriba). width:340px (no solo max-width) para igualar el ancho EXACTO de la caja de
+   .login-info-banner (340px incluido su padding) y que ambas columnas queden simetricas.
    grid-row:1 explicito (igual que se agregó arriba en .login-panel-col/.login-info-banner) -- SIN esto, el
    algoritmo de auto-placement de CSS Grid manda esta tarjeta sola a una 2a fila: al venir en el HTML DESPUÉS
    de .login-panel-col (columna 2) pero apuntar a una columna MENOR (columna 1), la spec obliga a incrementar
    la fila del cursor de auto-placement cuando la columna pedida es menor a la anterior -- .login-info-banner
    quedaba arrastrada a esa misma 2a fila de paso (columna 3, no menor que 1, así que no vuelve a incrementar).
-   Resultado: .login-panel-col solo en la fila 1 y los 2 banners juntos en una fila 2 mucho más abajo,
-   por eso "align-self:center" centraba cada banner dentro de esa 2a fila (no contra el panel) en vez de
-   centrarlos contra la tarjeta blanca como pide este requerimiento. */
+   Sin este grid-row:1 explícito, .login-panel-col quedaría solo en la fila 1 y los 2 banners juntos en una
+   fila 2 mucho más abajo, descuadrando cualquier alineación que se les ponga. */
 .login-partners-banner{
-  position:relative;z-index:10;grid-column:1;grid-row:1;justify-self:end;align-self:center;
+  position:relative;z-index:10;grid-column:1;grid-row:1;justify-self:end;align-self:start;margin-top:110px;
   width:340px;max-width:340px;
 }
 /* white-space:nowrap -- el texto (nodo de texto suelto, no un <span>) podia seguir partiendose en 2 líneas
