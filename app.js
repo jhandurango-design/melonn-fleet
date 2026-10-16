@@ -2818,6 +2818,19 @@ function turnosProgramadosCount(sede, aliado, fecha, franja, vehiculo) {
     return true;
   }).length;
 }
+/* Ver requerimiento "Descalce de Cuotas / Avance" (reporte de Fabian Meneses/Cabify, Medellín): subconjunto de
+   turnosProgramadosCount que SÍ ya ocupa la plaza (cuenta para "actuales") pero AÚN no es operativo en firme
+   -- sigue "Pendiente de Aprobación por Planner" (cupo excedido, día festivo o domingo como Recurso Adicional,
+   ver evaluarAprobacionCuota). Antes el chip de "Avance de Cuotas" solo mostraba un total combinado
+   (confirmados + pendientes indistinguibles), dando la impresión de una cuota ya cubierta aunque parte de
+   ella todavía pudiera ser rechazada por Planner. */
+function turnosPendientesAprobacionCount(sede, aliado, fecha, franja, vehiculo) {
+  return state.turnos.filter(function (r) {
+    if (r.sede !== sede || r.fecha !== fecha || r.vehiculo !== vehiculo || !r.pendienteAprobacionPlanner) return false;
+    if (franjaForHora(r.hora, countryForSede(sede)) !== franja) return false;
+    return getMensajero(r.mensajeroId).aliado === aliado;
+  }).length;
+}
 /* Interruptor del módulo de Cuotas, independiente por país (ver Configuración/Cuotas de Flota — Admin
    controla Colombia y México por separado; ej. CO con cuotas activas mientras MX opera libre). */
 function cuotasActivoPais(country) { return country === 'MX' ? !!state.configSettings.cuotasActivoMX : !!state.configSettings.cuotasActivoCO; }
@@ -12756,6 +12769,13 @@ function openTurnoModal(mode, routeId) {
     document.getElementById('turnoPlaca').value = m2.placa;
     document.getElementById('turnoCorreo').value = m2.correo || '';
   }
+  /* Ver requerimiento "Corrección de Feedback Visual al Crear Mensajero" (reporte de Fabian Meneses/Cabify):
+     reseteo defensivo del botón "Guardar turno" -- si una apertura anterior del modal quedó con el botón
+     deshabilitado/en espera (p. ej. el Aliado cerró el modal manualmente mientras un intento previo seguía
+     esperando la confirmación de Supabase), la siguiente apertura no debe heredar ese estado. */
+  var turnoSubmitBtnReset = document.getElementById('turnoSubmitBtn');
+  turnoSubmitBtnReset.disabled = false;
+  turnoSubmitBtnReset.textContent = 'Guardar turno';
   openModal('modalTurno');
 }
 function openRechazarSolicitudModal(routeId) {
@@ -13039,6 +13059,14 @@ function submitTurno(e) {
       /* Ver nota "Supabase" más abajo (cierre de la función): mismo criterio -- se espera la confirmación
          del push antes de cerrar el modal. Ver FIX "mensajero fantasma" más arriba: el mensajero nuevo (si lo
          hay) se empuja aquí también, con el mismo rollback si algo falla. */
+      /* Ver requerimiento "Corrección de Feedback Visual al Crear Mensajero" (reporte de Fabian Meneses/
+         Cabify): mientras esta confirmación está en vuelo (puede tardar varios segundos, sobre todo cuando
+         también se está dando de alta un mensajero nuevo), el botón queda deshabilitado con un indicio
+         visual de espera en vez de clicable (evita doble envío) o sin ningún indicio de que la acción sigue
+         en curso -- se reactiva en los 2 desenlaces posibles (éxito o fallo). */
+      var turnoSubmitBtnCuota = document.getElementById('turnoSubmitBtn');
+      turnoSubmitBtnCuota.disabled = true;
+      turnoSubmitBtnCuota.textContent = 'Guardando…';
       var pushesCuotaPendiente = [scPushRows('app_turnos', [turnoPendienteAprobacion])];
       if (mensajeroNuevoCreado) pushesCuotaPendiente.push(scPushRows('app_mensajeros', [mensajeroNuevoCreado]));
       Promise.all(pushesCuotaPendiente).then(function (results) {
@@ -13046,9 +13074,11 @@ function submitTurno(e) {
           state.turnos = state.turnos.filter(function (r) { return r.id !== turnoPendienteAprobacion.id; });
           if (mensajeroNuevoCreado) state.mensajeros = state.mensajeros.filter(function (m) { return m.id !== mensajeroNuevoCreado.id; });
           toast('warn', 'No se pudo confirmar en la nube', 'El turno no se guardó — revisa tu conexión e inténtalo de nuevo.');
+          turnoSubmitBtnCuota.disabled = false; turnoSubmitBtnCuota.textContent = 'Guardar turno';
           syncAndRender(true);
           return;
         }
+        turnoSubmitBtnCuota.disabled = false; turnoSubmitBtnCuota.textContent = 'Guardar turno';
         closeModal(); syncAndRender(true);
       });
       return;
@@ -13138,6 +13168,13 @@ function submitTurno(e) {
   if (solGeneralCreada) pushesSubmitTurno.push(scPushRows('app_solicitudes_generales', [solGeneralCreada]));
   if (mensajeroNuevoCreado) pushesSubmitTurno.push(scPushRows('app_mensajeros', [mensajeroNuevoCreado]));
   if (pushesSubmitTurno.length) {
+    /* Ver requerimiento "Corrección de Feedback Visual al Crear Mensajero" (reporte de Fabian Meneses/
+       Cabify): mismo criterio que la rama de Cuotas más arriba -- el botón queda deshabilitado con un
+       indicio visual de espera mientras esta confirmación está en vuelo, en vez de clicable (doble envío) o
+       sin ningún indicio de que la acción sigue en curso. */
+    var turnoSubmitBtnFinal = document.getElementById('turnoSubmitBtn');
+    turnoSubmitBtnFinal.disabled = true;
+    turnoSubmitBtnFinal.textContent = 'Guardando…';
     Promise.all(pushesSubmitTurno).then(function (results) {
       if (results.some(function (r) { return r && r.ok === false; })) {
         /* Deshace SOLO lo que esta llamada acaba de crear -- turnoAfectado solo se revierte si es un alta
@@ -13147,9 +13184,11 @@ function submitTurno(e) {
         if (mensajeroNuevoCreado) state.mensajeros = state.mensajeros.filter(function (m) { return m.id !== mensajeroNuevoCreado.id; });
         if (solGeneralCreada) state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return s.id !== solGeneralCreada.id; });
         toast('warn', 'No se pudo confirmar en la nube', 'El cambio no se guardó — revisa tu conexión e inténtalo de nuevo.');
+        turnoSubmitBtnFinal.disabled = false; turnoSubmitBtnFinal.textContent = 'Guardar turno';
         syncAndRender(true);
         return;
       }
+      turnoSubmitBtnFinal.disabled = false; turnoSubmitBtnFinal.textContent = 'Guardar turno';
       closeModal(); syncAndRender(true);
     });
   } else {
@@ -13384,8 +13423,20 @@ function eliminarTurnoPendiente(routeId) {
     onConfirm: function () {
       state.turnos = state.turnos.filter(function (r) { return r.id !== routeId; });
       toast('ok', 'Turno eliminado', route.id + ' fue eliminado de la Programación de Flota.');
-      scDeleteRows('app_turnos', [routeId]);
       syncAndRender(true);
+      /* Ver requerimiento "Fallo de Persistencia al Eliminar Turno" (reporte de Fabian Meneses/Cabify,
+         Álvaro en Medellín): esta eliminación quedaba SOLO en memoria si el borrado en Supabase fallaba --
+         sin verificar el resultado, el Aliado veía "Turno eliminado" y la fila desaparecía de su pantalla,
+         pero la fila seguía intacta en la nube y volvía a aparecer en el próximo pull (otra pestaña, otro
+         dispositivo, o el siguiente login). Se verifica el resultado y, si falla, se restaura la fila en
+         memoria con un aviso explícito -- igual criterio que registrarLlegadaBodega/registrarSalida. */
+      scDeleteRows('app_turnos', [routeId]).then(function (res) {
+        if (res && res.ok === false) {
+          state.turnos.push(route);
+          toast('warn', 'No se pudo eliminar en la nube', route.id + ' no se pudo borrar en Supabase — se restauró en tu Programación de Flota. Revisa tu conexión e inténtalo de nuevo.');
+          syncAndRender(true);
+        }
+      });
     }
   });
 }
@@ -13398,7 +13449,12 @@ function desasignarMensajero(routeId) {
   var directo = ws === 'open' || ws === 'alert' || ws === 'closed_extended_active';
   if (directo) {
     var evalCuota = turnoEsExcedenteDeCuota(route);
+    /* Ver requerimiento "Fallo de Persistencia al Eliminar Turno" (reporte de Fabian Meneses/Cabify): mismo
+       criterio que eliminarTurnoPendiente más arriba -- ambas ramas de aquí abajo (deja la plaza "Pendiente"
+       o la borra por completo) quedaban SOLO en memoria si el push/borrado en Supabase fallaba, sin ningún
+       aviso ni reversión. Se guarda el estado anterior ANTES de mutar para poder restaurarlo si falla. */
     if (evalCuota === false) {
+      var mensajeroIdAnteriorDes = route.mensajeroId;
       route.mensajeroId = crearMensajeroPendiente({ sede: route.sede, vehiculo: route.vehiculo });
       route.pendienteAsignacion = true;
       registrarHistorialCambio(route, {
@@ -13407,14 +13463,27 @@ function desasignarMensajero(routeId) {
         horaAnterior: null, horaPropuesta: null, por: state.user.nombre
       });
       toast('ok', 'Mensajero eliminado', route.id + ' quedó "Pendiente / Por Confirmar" — la plaza sigue disponible dentro de tu cuota.');
-      scPushRows('app_turnos', [route]);
+      scPushRows('app_turnos', [route]).then(function (res) {
+        if (res && res.ok === false) {
+          route.mensajeroId = mensajeroIdAnteriorDes;
+          route.pendienteAsignacion = false;
+          toast('warn', 'No se pudo confirmar en la nube', route.id + ' no se pudo actualizar en Supabase — se restauró el mensajero asignado. Revisa tu conexión e inténtalo de nuevo.');
+          syncAndRender(true);
+        }
+      });
     } else {
       var motivoEliminacion = evalCuota === true
         ? 'turno excedente por encima de la cuota asignada'
         : 'Programación Libre — sin cuotas activas para esta bodega';
       state.turnos = state.turnos.filter(function (r) { return r.id !== routeId; });
       toast('ok', 'Mensajero eliminado', route.id + ' fue eliminado por completo (' + motivoEliminacion + '), sin dejar plaza vacante.');
-      scDeleteRows('app_turnos', [routeId]);
+      scDeleteRows('app_turnos', [routeId]).then(function (res) {
+        if (res && res.ok === false) {
+          state.turnos.push(route);
+          toast('warn', 'No se pudo eliminar en la nube', route.id + ' no se pudo borrar en Supabase — se restauró en tu Programación de Flota. Revisa tu conexión e inténtalo de nuevo.');
+          syncAndRender(true);
+        }
+      });
     }
   } else {
     var solDesasignar = {
@@ -15964,9 +16033,10 @@ function cuotasProgresoPorSede(aliado, fecha) {
   matriz.forEach(function (c) {
     if (c.aliado !== aliado || c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
-    if (!porSede[c.sede]) porSede[c.sede] = { sede: c.sede, cuota: 0, actuales: 0 };
+    if (!porSede[c.sede]) porSede[c.sede] = { sede: c.sede, cuota: 0, actuales: 0, pendientes: 0 };
     porSede[c.sede].cuota += c.cantidad;
     porSede[c.sede].actuales += turnosProgramadosCount(c.sede, aliado, fecha, c.franja, c.vehiculo);
+    porSede[c.sede].pendientes += turnosPendientesAprobacionCount(c.sede, aliado, fecha, c.franja, c.vehiculo);
   });
   return Object.keys(porSede).sort().map(function (s) { return porSede[s]; });
 }
@@ -16005,8 +16075,15 @@ function renderProgCuotasResumen() {
     '<div class="cuotas-resumen-chips">' + progreso.map(function (p) {
       var cubierto = p.actuales >= p.cuota;
       var faltan = p.cuota - p.actuales;
+      /* Ver requerimiento "Descalce de Cuotas / Avance": el total "actuales" ya incluía turnos todavía
+         "Pendiente de Aprobación por Planner" (cupo excedido/festivo/domingo) mezclados sin distinción con
+         los confirmados -- se desglosan aquí para que el Aliado sepa cuántos de esos recursos ya cuentan en
+         firme y cuántos todavía podrían ser rechazados. */
+      var notaPendientes = p.pendientes > 0
+        ? (' <span class="courier-sub">(' + p.pendientes + ' pendiente' + (p.pendientes === 1 ? '' : 's') + ' de aprobación por Planner)</span>')
+        : '';
       return '<div class="cuotas-resumen-chip ' + (cubierto ? 'ok' : 'pendiente') + '">' +
-        '<span>' + p.sede + ': ' + p.actuales + '/' + p.cuota + ' recursos</span>' +
+        '<span>' + p.sede + ': ' + p.actuales + '/' + p.cuota + ' recursos' + notaPendientes + '</span>' +
         (cubierto ? '' : ('<button type="button" class="btn-link" data-act="completar-cuota-pendiente" data-sede="' + p.sede + '">Faltan ' + faltan + ' — Completar con Pendiente/Por Confirmar</button>')) +
         '</div>';
     }).join('') + '</div>';
