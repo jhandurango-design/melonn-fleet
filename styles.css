@@ -188,6 +188,7 @@ a{color:inherit;}
 .hamburger:focus,.hamburger:focus-visible{outline:none;box-shadow:none;}
 .hamburger svg{width:24px !important;height:24px !important;color:#FFFFFF !important;flex-shrink:0;pointer-events:none;}
 .brand{display:inline-flex;align-items:center;gap:8px;font-weight:800;font-size:16px !important;letter-spacing:-0.02em;height:15px;margin-left:0px !important;margin-right:24px;margin-bottom:-2px;cursor:pointer;}
+.brand-logo{height:26px;width:auto;flex-shrink:0;object-fit:contain;}
 
 .topbar-right{display:flex;align-items:center;gap:14px;flex-shrink:0;position:relative;}
 
