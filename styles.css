@@ -171,6 +171,15 @@ a{color:inherit;}
   display:flex;align-items:center;justify-content:center;
 }
 .partner-logo-card img{width:auto;height:auto;max-height:38px;max-width:100%;object-fit:contain;}
+/* Ver requerimiento "Integración completa de tarjetas (DRN y Cabify)": estos 2 assets ya son su propio
+   badge cuadrado con fondo solido (negro/morado) de borde a borde, a diferencia de Rapiboy/Cordiandina/
+   Easyway (logo suelto sobre fondo transparente, donde SÍ hace falta el padding blanco de
+   .partner-logo-card para que se lea bien) -- con el mismo padding/fondo blanco de la tarjeta genérica
+   quedaban con un marco blanco alrededor ("efecto recortado y pegado"). Mismo tamaño de tarjeta (62px,
+   altura efectiva de las demás: max-height 38px + padding 12px×2) pero sin padding, con la imagen llenando
+   el 100% y heredando el radio de la tarjeta -- el resto (Rapiboy/Cordiandina/Easyway) sigue igual. */
+.partner-logo-card.partner-logo-card-filled{width:62px;height:62px;padding:0;overflow:hidden;}
+.partner-logo-card.partner-logo-card-filled img{width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;border-radius:inherit;}
 .login-form .field-required-msg{display:none;font-size:12px !important;color:#e53e3e;font-style:italic;margin-top:4px;}
 .login-form .field.error label{color:#e53e3e;}
 .login-form .field.error input{border:1px solid #e53e3e;}
