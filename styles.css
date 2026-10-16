@@ -887,6 +887,7 @@ button.row-menu-toggle:hover{background:#E3E1FB;color:#635BFF;}
 .cuotas-cascada-label{background:var(--bg-card-soft);font-weight:600;font-size:11px;letter-spacing:.02em;color:var(--text-secondary);padding:7px 16px;border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;margin:0;}
 .cuotas-cascada-bloque .table-scroll table{border:1px solid var(--border);border-top:none;}
 .badge-propio{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap;background:var(--lilac-soft);color:#5B21B6;}
+.badge-sobrecupo{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap;background:var(--warn-soft);color:#946200;}
 
 .empty-state{padding:48px 20px;text-align:center;color:var(--text-secondary);display:none;}
 .empty-state.show{display:block;}

@@ -257,6 +257,17 @@ function aliadoOptionsByCountryHtml() {
 function esFlotaPropia(aliado) { return FLOTA_PROPIA_ALIADOS.indexOf(aliado) !== -1; }
 function aliadoLabelHtml(aliado) { return esFlotaPropia(aliado) ? (aliado + ' <span class="badge-propio">[Propio - Melonn]</span>') : aliado; }
 function vehiculosForCountry(country) { return VEHICULOS_BY_COUNTRY[country] || VEHICULOS_BY_COUNTRY.CO; }
+/* Ver requerimiento "Eliminación de Tipologías 'Adicional' en Nuevo Turno": las categorías "Adicional X" son
+   de facturación/cuota (TIPOLOGIA_ADICIONAL_PREFIJO), no tipologías operativas reales que un Aliado deba
+   declarar a mano -- el motor (checkCuotaExceso/checkCuotaGlobalExceso/tipologiaHabilitada) ya decide solo si
+   un turno con tipología BASE queda Programado, Pendiente por Planner (cupo excedido) o Pendiente Autorización
+   de Tipología. Elegir "Adicional X" a mano en el dropdown nunca calzaba con ninguna fila de la matriz de
+   Cuotas (que solo usa tipologías base), así que quedaba atrapado en "Pendiente Autorización de Tipología" sin
+   importar el cupo real. Único consumidor: el modal "Nuevo turno" (openTurnoModal) y "Solicitar Nuevo Turno"
+   (openNuevaSolicitudModal) -- Nueva Ruta/Calculador/Gestión de Vehículos siguen viendo el catálogo completo. */
+function vehiculosBaseForCountry(country) {
+  return vehiculosForCountry(country).filter(function (v) { return v.indexOf(TIPOLOGIA_ADICIONAL_PREFIJO) !== 0; });
+}
 /* Ver requerimiento "Reestructuración y Migración de Flota Propia México al Módulo Bodega", punto 1: Flota
    Propia nunca es un Aliado/Proveedor SELECCIONABLE (no se le envían solicitudes, no se le liquida, no
    recibe avisos) -- se excluye aquí, en la fuente, para que TODOS los selectores/listados de "Aliado" de la
@@ -6825,7 +6836,7 @@ function consolManChipHtml(p) {
     ? cuotasDesgloseHtml('planner:' + (p.sede || '') + '|' + p.aliado, p.sede, p.franjas)
     : '';
   return '<div class="cuotas-resumen-chip ' + (descalce ? 'descalce' : estado) + '"' + tipDescalce + '>' +
-    '<span>' + escapeHtml(p.aliado) + ': ' + p.actuales + '/' + p.cuota + ' recursos (' + etiqueta + ')</span>' +
+    '<span>' + escapeHtml(p.aliado) + ': ' + p.actuales + '/' + p.cuota + ' recursos (' + etiqueta + ')' + cuotasSobrecupoBadgeHtml(p.actuales, p.cuota) + '</span>' +
     desglose +
     '</div>';
 }
@@ -12427,7 +12438,7 @@ function openNuevaSolicitudModal(presetRouteId, presetTipo) {
      Aliado -- siempre se repuebla (no "si está vacío") por si cambió de sesión/país entre aperturas. */
   var myCountryNt = countryForAliado(state.user.aliado);
   document.getElementById('nsNtBodega').innerHTML = activeWarehouseIds(myCountryNt).map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('');
-  document.getElementById('nsNtVehiculo').innerHTML = vehiculosForCountry(myCountryNt).map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
+  document.getElementById('nsNtVehiculo').innerHTML = vehiculosBaseForCountry(myCountryNt).map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
   document.getElementById('nsNtHora').value = '';
   document.getElementById('nsNtPendiente').checked = true;
   document.getElementById('nsNtNombre').value = '';
@@ -12876,11 +12887,17 @@ function openTurnoModal(mode, routeId) {
   /* El Aliado solo programa dentro de su propio país (sus mensajeros y bodegas de destino son de ese país). */
   var myCountry = countryForAliado(state.user.aliado);
   var sedesAliado = activeWarehouseIds(myCountry);
-  var vehiculosAliado = vehiculosForCountry(myCountry);
+  var vehiculosAliado = vehiculosBaseForCountry(myCountry);
   var sedeSel = document.getElementById('turnoSede');
   sedeSel.innerHTML = sedesAliado.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('');
   var vehSel = document.getElementById('turnoVehiculo');
   vehSel.innerHTML = vehiculosAliado.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
+  /* Si un turno existente quedó con una tipología "Adicional X" de antes de este requerimiento, se conserva
+     como opción extra solo en su propia edición/confirmación -- nunca se le fuerza un cambio de tipología en
+     silencio por haber dejado de ofrecerse en el catálogo de creación. */
+  if (route && vehiculosAliado.indexOf(route.vehiculo) === -1) {
+    vehSel.insertAdjacentHTML('beforeend', '<option value="' + route.vehiculo + '">' + route.vehiculo + '</option>');
+  }
 
   var pendienteField = document.getElementById('turnoPendienteField');
   var pendienteCb = document.getElementById('turnoPendiente');
@@ -16525,6 +16542,19 @@ function cuotasProgresoPorBodegaYAliadoManana() {
    propios, cuyo abierto/cerrado vive en state.cuotasDesgloseExpandidos (ver toggleCuotasDesglose/
    cerrarCuotasDesglose) -- key única por chip, para que Programar Flota (ALIADO, 1 chip por sede) y Avance
    y Carga T+1 (PLANNER, 1 chip por sede+aliado) nunca choquen entre sí aunque compartan el mismo state. */
+/* Ver requerimiento "Discriminación Clara de Adicionales y Sobrecupos en Avance de Cuotas": actuales nunca
+   queda topado en cuota (turnosProgramadosCount cuenta TODO lo programado en el bucket, dentro o fuera de
+   cupo) -- cuando supera la cuota, ese excedente ya fue aprobado por Planner (checkCuotaExceso/evaluarAprobacionCuota)
+   y es exactamente lo que antes se mostraba mezclado sin distinción dentro del mismo total. Como el excedente
+   solo existe una vez la cuota base está 100% llena, "Base" siempre coincide con cuota -- no hace falta un
+   Math.min aparte. */
+function cuotasSobrecupoBadgeHtml(actuales, cuota) {
+  var adicionales = Math.max(0, actuales - cuota);
+  if (!adicionales) return '';
+  return ' <span class="badge-sobrecupo" data-tip="' + cuota + ' dentro de la cuota base + ' + adicionales +
+    ' adicional' + (adicionales === 1 ? '' : 'es') + ' aprobado' + (adicionales === 1 ? '' : 's') + ' por Planner.">+' +
+    adicionales + ' Adicional' + (adicionales === 1 ? '' : 'es') + '</span>';
+}
 function cuotasDesgloseHtml(key, sede, franjas) {
   var abierto = !!state.cuotasDesgloseExpandidos[key];
   var boton = '<button type="button" class="btn-link" data-act="toggle-cuotas-desglose" data-key="' + key + '">' +
@@ -16534,7 +16564,7 @@ function cuotasDesgloseHtml(key, sede, franjas) {
     '<button type="button" class="cuotas-desglose-cerrar" data-act="cerrar-cuotas-desglose" data-key="' + key + '" data-tip="Cerrar desglose">✕</button>' +
     '<ul>' + franjas.map(function (f) {
       var fCubierto = f.actuales >= f.cuota;
-      return '<li' + (fCubierto ? '' : ' class="descalce-franja-item"') + '>' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(sede))) + ': ' + f.actuales + '/' + f.cuota + '</li>';
+      return '<li' + (fCubierto ? '' : ' class="descalce-franja-item"') + '>' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(sede))) + ': ' + f.actuales + '/' + f.cuota + cuotasSobrecupoBadgeHtml(f.actuales, f.cuota) + '</li>';
     }).join('') + '</ul></div>';
   return '<div class="cuotas-resumen-desglose-wrap">' + boton + panel + '</div>';
 }
@@ -16564,7 +16594,7 @@ function renderProgCuotasResumen() {
       var etiqueta = p.actuales + '/' + p.cuota + ' recursos' + (descalce ? ' (Descalce de Franja)' : '');
       var desglose = cuotasDesgloseHtml('aliado:' + p.sede, p.sede, p.franjas);
       return '<div class="cuotas-resumen-chip ' + claseChip + '"' + tipDescalce + '>' +
-        '<span>' + p.sede + ': ' + etiqueta + notaPendientes + '</span>' +
+        '<span>' + p.sede + ': ' + etiqueta + cuotasSobrecupoBadgeHtml(p.actuales, p.cuota) + notaPendientes + '</span>' +
         desglose +
         (cubierto ? '' : ('<button type="button" class="btn-link" data-act="completar-cuota-pendiente" data-sede="' + p.sede + '">Faltan ' + faltan + ' — Completar con Pendiente/Por Confirmar</button>')) +
         '</div>';
