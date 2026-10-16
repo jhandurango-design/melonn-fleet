@@ -154,31 +154,23 @@ a{color:inherit;}
   width:340px;max-width:340px;
 }
 .login-partners-banner h3{
-  margin:0 0 24px;font-size:14px;font-weight:700;color:#fff;display:flex;align-items:center;gap:8px;
-  text-shadow:0 1px 4px rgba(0,0,0,0.45);
+  margin:0 0 24px;font-size:14px;font-weight:700;color:#fff;display:flex;align-items:center;justify-content:center;
+  gap:8px;text-align:center;text-shadow:0 1px 4px rgba(0,0,0,0.45);
 }
 .flag-co{width:20px;height:13.3px;border-radius:2px;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,0.4);}
-.login-partners-grid{display:grid;grid-template-columns:repeat(2,1fr);align-items:center;justify-items:center;gap:20px;}
-/* Colores e identidad de marca reales de cada proveedor (sin filtro monocromatico) -- cada asset ya viene
-   con su fondo propio (blanco/morado/negro/azul claro segun el logo) recortado a transparente.
-   Ver requerimiento "Contraste y proporción de los logos":
-   1) CONTRASTE -- Cordiandina/DRN/Easyway tienen trazos oscuros (texto negro, detalles en tinta oscura) que
-      se perdían contra el fondo azul marino del login. En vez de forzarlos a blanco (eso ya se probó y
-      perdían su identidad de marca, ver commits anteriores), se les pone un resplandor blanco detrás --
-      3 drop-shadow apilados con offset 0 y blur creciente actúan como un halo que sigue el alpha real del
-      logo (no un rectángulo), dándole a cualquier trazo oscuro un borde claro que lo separa del fondo sin
-      tocar su color.
-   2) PROPORCIÓN -- Cabify/Easyway son wordmarks anchos y densos (mucho trazo por área) que antes dominaban
-      visualmente; Rapiboy/DRN/Cordiandina son insignias mas verticales/con mucho espacio en blanco interno
-      que se veían diminutas con el mismo tope de alto. Esta regla base (160/64) es para estas últimas;
-      .login-partner-compact (Cabify/Easyway, ver index.html) la topa mas abajo (120/45) -- object-fit:contain
-      hace que cada una escale al máximo dentro de su propia caja sin deformarse, logrando un peso visual
-      equivalente entre todas pese a sus proporciones tan distintas. */
-.login-partners-grid img{
-  max-width:160px;max-height:64px;width:auto;height:auto;object-fit:contain;
-  filter:drop-shadow(0 0 2px #ffffffb3) drop-shadow(0 0 5px #ffffff66) drop-shadow(0 2px 6px rgba(0,0,0,0.35));
+/* Ver requerimiento "Tarjetas blancas individuales para los logos de Aliados": reemplaza el halo de
+   drop-shadow (commit anterior) por una cápsula blanca real detrás de cada logo -- resuelve el contraste de
+   raíz (cualquier trazo oscuro de Cordiandina/DRN/Easyway queda sobre blanco, igual que en su propio sitio
+   de marca) y de paso ya no hace falta distinguir "compact" vs tamaño base por proveedor (ver
+   .login-partner-compact, retirada) -- con cada logo en su propia tarjeta a tamaño de contenido, flex-wrap
+   ya centra y empareja el conjunto sin forzar columnas de grid de ancho igual. */
+.login-partners-grid{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:16px;margin:0 auto;}
+.partner-logo-card{
+  background:#ffffff;border-radius:12px;padding:12px 16px;
+  box-shadow:0 2px 8px rgba(0,0,0,0.12);
+  display:flex;align-items:center;justify-content:center;
 }
-.login-partners-grid img.login-partner-compact{max-width:120px;max-height:45px;}
+.partner-logo-card img{width:auto;height:auto;max-height:38px;max-width:100%;object-fit:contain;}
 .login-form .field-required-msg{display:none;font-size:12px !important;color:#e53e3e;font-style:italic;margin-top:4px;}
 .login-form .field.error label{color:#e53e3e;}
 .login-form .field.error input{border:1px solid #e53e3e;}
