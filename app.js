@@ -13275,11 +13275,31 @@ function cargarFlotaHabitual() {
     toast('warn', 'Flota Recurrente no disponible', 'Aún no has guardado tu flota recurrente. Programa los turnos de hoy y haz clic en "Guardar como Flota Recurrente".');
     return;
   }
+  /* Ver requerimiento "Idempotencia / Control de Duplicados en Solicitudes al Planner": defensa complementaria
+     al chequeo de yaProgramados de abajo -- deshabilitar el botón mientras la carga está en curso evita que
+     un clic repetido (antes de que termine de procesar/empujar la pasada anterior) alcance a disparar una
+     segunda ejecución completa de esta función. Se reactiva en TODOS los desenlaces (nada que cargar, éxito o
+     fallo del push). */
+  var btnCargarFlota = document.getElementById('btnCargarFlotaHabitual');
+  btnCargarFlota.disabled = true;
   var fecha = TOMORROW_STR;
   var yaProgramados = {};
   routesInScope('tomorrow').forEach(function (r) {
     var m = getMensajero(r.mensajeroId);
     if (m && m.cedula) yaProgramados[m.cedula] = true;
+  });
+  /* Ver requerimiento "Idempotencia / Control de Duplicados en Solicitudes al Planner" (reporte de Easyway/
+     Cabify, acumulación masiva de solicitudes pendientes): la rama "fuera de ventana" de abajo (ver
+     solFlotaHabitual) NO crea ningún turno, solo una fila en state.solicitudesGenerales -- así que
+     yaProgramados (que solo mira turnos reales, arriba) nunca detectaba que esa cédula YA tenía una solicitud
+     en curso, y cada clic repetido de "Cargar Flota Recurrente" generaba una solicitud duplicada más para el
+     mismo mensajero/fecha, sin límite. Se suman aquí también las cédulas con una Solicitud General propia
+     todavía 'pendiente' (nuevo_turno/cupo_adicional) para esta misma fecha. */
+  state.solicitudesGenerales.forEach(function (s) {
+    if (s.estado !== 'pendiente' || s.aliado !== state.user.aliado) return;
+    if ((s.tipo === 'nuevo_turno' || s.tipo === 'cupo_adicional') && s.detalle && s.detalle.fecha === fecha && s.detalle.cedula) {
+      yaProgramados[s.detalle.cedula] = true;
+    }
   });
   var creados = 0, pendientesAprobacion = 0, solicitudes = 0;
   /* Ver nota "Supabase" junto a submitTurno(): esta carga masiva tampoco empujaba nunca a app_turnos --
@@ -13346,6 +13366,7 @@ function cargarFlotaHabitual() {
   });
   if (!creados) {
     toast('warn', 'Flota Recurrente', 'Todos los mensajeros de tu flota recurrente ya estaban programados para mañana.');
+    btnCargarFlota.disabled = false;
     return;
   }
   var msg = 'Se cargaron ' + creados + ' turno' + (creados === 1 ? '' : 's') + ' de la flota recurrente correctamente.';
@@ -13371,12 +13392,15 @@ function cargarFlotaHabitual() {
         state.mensajeros = state.mensajeros.filter(function (m) { return idsMensajerosNuevos.indexOf(m.id) === -1; });
         state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return idsSolicitudesNuevas.indexOf(s.id) === -1; });
         toast('warn', 'No se pudo confirmar en la nube', 'La carga de Flota Recurrente no se guardó — revisa tu conexión e inténtalo de nuevo.');
+        btnCargarFlota.disabled = false;
         syncAndRender(true);
         return;
       }
+      btnCargarFlota.disabled = false;
       syncAndRender(true);
     });
   } else {
+    btnCargarFlota.disabled = false;
     syncAndRender(true);
   }
 }
@@ -13458,6 +13482,32 @@ function recalcularPromocionCupo(sede, aliado, vehiculo, hora, fecha) {
   toast('ok', 'Cupo liberado', promovidos.length + ' turno' + (promovidos.length === 1 ? '' : 's') + ' "Pendiente de Aprobación" ' + (promovidos.length === 1 ? 'fue promovido' : 'fueron promovidos') + ' a confirmado automáticamente al liberarse una plaza de la cuota de ' + sede + '.');
   scPushRows('app_turnos', promovidos);
 }
+/* Ver requerimiento "Limpieza al Limpiar o Eliminar Flota" (reporte de Easyway/Cabify, acumulación masiva de
+   solicitudes pendientes en el Planner): si el mensajero/turno que se está eliminando o desasignando tiene
+   una Solicitud General propia todavía 'pendiente' (nuevo_turno/cupo_adicional, ver cargarFlotaHabitual --
+   la rama "fuera de ventana" no deja turno, solo esta solicitud) para la MISMA cédula+sede+fecha+hora, queda
+   huérfana apuntando a un recurso que el propio Aliado ya decidió no usar -- se cancela aquí mismo (mismo
+   estado 'cancelada_emisor' que cancelarSolicitudPropia) en vez de dejarla basura en la bandeja de Planner. */
+function cancelarSolicitudesHuerfanasFlota(mensajeroId, sede, fecha, hora) {
+  var m = getMensajero(mensajeroId);
+  if (!m || !m.cedula) return;
+  var huerfanas = state.solicitudesGenerales.filter(function (s) {
+    if (s.estado !== 'pendiente' || s.aliado !== state.user.aliado) return false;
+    if (s.tipo !== 'nuevo_turno' && s.tipo !== 'cupo_adicional') return false;
+    var d = s.detalle;
+    return d && d.cedula === m.cedula && d.sede === sede && d.fecha === fecha && d.hora === hora;
+  });
+  if (!huerfanas.length) return;
+  huerfanas.forEach(function (s) {
+    s.estado = 'cancelada_emisor';
+    s.motivoCancelacion = 'Cancelada automáticamente: el mensajero/turno correspondiente fue eliminado de la Programación de Flota.';
+    s.canceladoEn = fmtClock(state.now);
+    s.canceladoFecha = TODAY_STR;
+    s.canceladoPor = state.user.nombre;
+    s.canceladoPorRol = state.user.role;
+  });
+  scPushRows('app_solicitudes_generales', huerfanas);
+}
 /* Ver requerimiento "Corrección de Flujo: Acciones de Programar Flota según Pestaña (Mañana vs. Hoy) para
    Turnos Pendientes": a diferencia de desasignarMensajero() (quita un mensajero YA asignado), esta acción es
    para un cupo que NUNCA llegó a tener mensajero real -- el Aliado simplemente cancela el cupo en fase de
@@ -13523,6 +13573,7 @@ function desasignarMensajero(routeId) {
          turnosProgramadosCount), el Adicional de este mismo bucket puede haber quedado fuera de cupo por
          OTRA razón mientras tanto -- se recalcula igual, de forma defensiva (no-op si no corresponde). */
       recalcularPromocionCupo(route.sede, state.user.aliado, route.vehiculo, route.hora, route.fecha);
+      cancelarSolicitudesHuerfanasFlota(mensajeroIdAnteriorDes, route.sede, route.fecha, route.hora);
       scPushRows('app_turnos', [route]).then(function (res) {
         if (res && res.ok === false) {
           route.mensajeroId = mensajeroIdAnteriorDes;
@@ -13541,6 +13592,7 @@ function desasignarMensajero(routeId) {
          sale del conteo por completo -- si quedaba un Adicional pendiente en este mismo bucket, esta es
          justo la plaza que lo saca de cupo excedido. */
       recalcularPromocionCupo(route.sede, state.user.aliado, route.vehiculo, route.hora, route.fecha);
+      cancelarSolicitudesHuerfanasFlota(route.mensajeroId, route.sede, route.fecha, route.hora);
       scDeleteRows('app_turnos', [routeId]).then(function (res) {
         if (res && res.ok === false) {
           state.turnos.push(route);
