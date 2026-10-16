@@ -257,9 +257,9 @@ a{color:inherit;}
 .timepicker-col button.selected{background:var(--lilac-deep);color:#fff;}
 .timepicker-foot{display:flex;justify-content:flex-end;gap:8px;padding:8px;border-top:1px solid var(--border);}
 .timepicker-foot .btn{padding:7px 14px;font-size:12px;}
-.sede-dropdown-menu{position:fixed;background:#ffffff;color:#1e1e1e;border-radius:8px;box-shadow:var(--shadow-lg);padding:6px;min-width:230px;z-index:1001;border:1px solid var(--border);}
+.sede-dropdown-menu{position:fixed;background:var(--bg-card);color:var(--text-primary);border-radius:8px;box-shadow:var(--shadow-lg);padding:6px;min-width:230px;z-index:1001;border:1px solid var(--border);}
 .sede-dropdown-header{display:flex;align-items:center;gap:6px;font-size:10.5px !important;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.04em;padding:8px 10px 4px;}
-.sede-dropdown-menu button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:none;background:none;border-radius:7px;color:#1e1e1e;font-size:12.5px !important;font-weight:500;cursor:pointer;text-align:left;}
+.sede-dropdown-menu button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:none;background:none;border-radius:7px;color:var(--text-primary);font-size:12.5px !important;font-weight:500;cursor:pointer;text-align:left;}
 .sede-dropdown-menu button:not(.disabled):hover{background:var(--muted-soft);}
 .sede-dropdown-menu button.selected{background:#E8F1FE;color:#1450B8;font-weight:700;}
 .sede-dropdown-menu button .check{color:#1450B8;font-weight:800;}
@@ -267,7 +267,7 @@ a{color:inherit;}
 
 /* ---------------- Body: sidebar + main ---------------- */
 .body{display:flex;flex:1;min-height:0;}
-.sidebar{width:222px;flex-shrink:0;background-color:#f6f7f9;border-right:1px solid var(--border);padding:16px 12px;position:sticky;top:56px;align-self:flex-start;height:calc(100vh - 56px);overflow-y:auto;display:flex;flex-direction:column;transition:margin-left .18s ease;}
+.sidebar{width:222px;flex-shrink:0;background-color:var(--bg-card-soft);border-right:1px solid var(--border);padding:16px 12px;position:sticky;top:56px;align-self:flex-start;height:calc(100vh - 56px);overflow-y:auto;display:flex;flex-direction:column;transition:margin-left .18s ease;}
 .sidebar.collapsed{margin-left:-222px;}
 .nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:var(--text-secondary);font-size:13px;font-weight:500;cursor:pointer;position:relative;margin-bottom:2px;border-right:4px solid transparent;transition:background .12s ease,color .12s ease;}
 .nav-item svg{flex-shrink:0;opacity:.85;}
@@ -418,7 +418,7 @@ main{flex:1;min-width:0;padding:26px 30px 60px;overflow-x:hidden;}
    completo a su apariencia original .btn.btn-ghost (sin clase/alto/padding custom) en TODAS las barras
    principales. .btn-limpiar-filtro-kpi (punto 2, botón compacto ligado a tarjetas KPI) SÍ se conserva --
    ese patrón show/hide-al-filtrar es exactamente el que se pide extender a Cumplimiento y Calidad. */
-.btn.btn-limpiar-filtro-kpi{background:#fff;border:1px solid #CBD5E1;color:#334155;border-radius:6px;height:30px;padding:4px 12px;font-size:11.5px;}
+.btn.btn-limpiar-filtro-kpi{background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);border-radius:6px;height:30px;padding:4px 12px;font-size:11.5px;}
 .btn.btn-limpiar-filtro-kpi:hover{background:#F8FAFC;border-color:#94A3B8;}
 .btn-danger{background:var(--danger-soft);color:var(--danger);}
 .btn-danger:hover{background:var(--danger);color:#fff;}
@@ -453,6 +453,9 @@ main{flex:1;min-width:0;padding:26px 30px 60px;overflow-x:hidden;}
    turnoBloqueado) no ocultaba visualmente el banner. */
 .cutoff-banner[hidden]{display:none;}
 :root[data-theme="dark"] .cutoff-banner{background:#2B2050;color:#D8B4FE;border-color:#4C3A80;}
+/* Ver mismo requerimiento "Auditoría de Modo Oscuro" que .badge-disabled más abajo: sin esta variante por
+   @media, este override nunca se aplicaba (ningún código JS fija data-theme="dark"). */
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .cutoff-banner{background:#2B2050;color:#D8B4FE;border-color:#4C3A80;}}
 .cutoff-banner strong{font-weight:700;}
 .cutoff-banner.danger{background:var(--danger-soft);color:var(--danger);border-color:#F3B9BC;}
 
@@ -620,7 +623,7 @@ main{flex:1;min-width:0;padding:26px 30px 60px;overflow-x:hidden;}
    nativo). 2 estilos clasificados automáticamente por longitud de texto en JS, no por clase a mano. */
 .app-tooltip{position:fixed;z-index:1200;pointer-events:none;}
 .app-tooltip-pill{background:#1E293B;color:#fff;padding:5px 10px;border-radius:6px;font-size:11px;font-weight:600;white-space:nowrap;box-shadow:0 4px 10px rgba(0,0,0,.22);}
-.app-tooltip-popover{background:#fff;color:#334155;border:1px solid #E2E8F0;border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.14);padding:10px;font-size:12px;font-weight:500;line-height:1.45;max-width:260px;white-space:normal;}
+.app-tooltip-popover{background:var(--bg-card);color:var(--text-primary);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 24px rgba(0,0,0,.14);padding:10px;font-size:12px;font-weight:500;line-height:1.45;max-width:260px;white-space:normal;}
 /* Línea de umbral límite sobre las barras -- ver requerimiento "Tipos de Gráfico Adaptativos...", punto (b),
    y renderBarChart/opts.threshold en app.js. .chart-bars-outer es el contenedor posicionado (position:relative)
    que ancla la línea absoluta exactamente a la altura proporcional calculada en JS. */
@@ -656,7 +659,7 @@ table{width:100%;border-collapse:collapse;min-width:1080px;}
    apretaba etiquetas/botones de acción como "Restablecer clave" contra el borde de su columna. */
 table.table-compact{min-width:0;}
 table.table-compact thead th,table.table-compact tbody td{padding-left:14px;padding-right:14px;}
-thead th{text-align:left;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:#666666;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg-card-soft);white-space:nowrap;}
+thead th{text-align:left;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg-card-soft);white-space:nowrap;}
 tbody td{padding:12px 16px;border-bottom:1px solid var(--border);vertical-align:middle;font-size:12.5px;}
 tbody tr:last-child td{border-bottom:none;}
 /* CORRECCIÓN "Diagnóstico y Corrección Crítica de Interacción: Parpadeo Continuo en Tabla al Mover el
@@ -726,6 +729,17 @@ tbody tr:hover{background:var(--bg-card-soft);}
 .badge-justified{background:var(--lilac-soft);color:#5B21B6;} .badge-justified i{background:var(--lilac-deep);}
 .badge-disabled{background:#E9EAEE;color:#5C6470;} .badge-disabled i{background:#8A8F98;}
 :root[data-theme="dark"] .badge-disabled{background:#2A2745;color:#B5B1D6;}
+/* Ver requerimiento "Auditoría de Modo Oscuro" (reporte de Fabian Meneses/Cabify, sidebar en claro sobre fondo
+   oscuro): [data-theme="dark"] nunca lo fija ningún código JS -- no existe toggle manual de tema en la app
+   (ver app.js, sin ninguna referencia a data-theme). El ÚNICO disparador real de modo oscuro es la preferencia
+   del sistema operativo/navegador (prefers-color-scheme), así que cualquier override que dependiera solo de
+   [data-theme="dark"] (como el de arriba, dejado tal cual por si en el futuro se agrega un selector manual)
+   nunca se aplicaba en la práctica. Se añade aquí el mismo override vía @media, que es el que SÍ funciona hoy. */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) .badge-disabled{background:#2A2745;color:#B5B1D6;}
+  :root:not([data-theme="light"]) .badge-dock{background:#133338;color:var(--cyan);} :root:not([data-theme="light"]) .badge-dock i{background:var(--cyan);}
+  :root:not([data-theme="light"]) .badge-dispatched{background:#113A2C;color:var(--green);} :root:not([data-theme="light"]) .badge-dispatched i{background:var(--green);}
+}
 
 .sla-wrap{display:flex;flex-direction:column;gap:4px;min-width:130px;}
 .sla-track{height:6px;border-radius:4px;background:var(--muted-soft);overflow:hidden;}
@@ -783,8 +797,8 @@ button.row-menu-toggle:hover{background:#E3E1FB;color:#635BFF;}
 
 /* Menú "⋮" de acciones secundarias de fila (ver rowMenuToggleHtml/toggleRowMenu en app.js) — mismo tratamiento
    visual que el selector de bodega del Header (sede-dropdown-menu): siempre claro, independiente del tema. */
-.row-actions-menu{position:fixed;background:#ffffff;color:#1e1e1e;border-radius:8px;box-shadow:var(--shadow-lg);padding:6px;min-width:190px;z-index:1001;border:1px solid var(--border);display:flex;flex-direction:column;gap:2px;}
-.row-actions-menu button{width:100%;height:32px;border:none;background:none;border-radius:6px;padding:0 10px;font-size:12px;font-weight:600;color:#1e1e1e;display:flex;align-items:center;gap:8px;cursor:pointer;text-align:left;white-space:nowrap;}
+.row-actions-menu{position:fixed;background:var(--bg-card);color:var(--text-primary);border-radius:8px;box-shadow:var(--shadow-lg);padding:6px;min-width:190px;z-index:1001;border:1px solid var(--border);display:flex;flex-direction:column;gap:2px;}
+.row-actions-menu button{width:100%;height:32px;border:none;background:none;border-radius:6px;padding:0 10px;font-size:12px;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px;cursor:pointer;text-align:left;white-space:nowrap;}
 .row-actions-menu button svg{flex-shrink:0;}
 .row-actions-menu button:not([disabled]):hover{background:var(--muted-soft);}
 .row-actions-menu button.danger{color:var(--danger);}
@@ -809,7 +823,7 @@ button.row-menu-toggle:hover{background:#E3E1FB;color:#635BFF;}
 .mensajero-typeahead-input{width:100%;height:36px;padding:0 10px;border:1px solid var(--border);border-radius:8px;font-size:12.5px;font-family:inherit;color:var(--text-primary);background:var(--bg-card);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;}
 .mensajero-typeahead-input:focus{outline:none;border-color:var(--lilac-deep);box-shadow:0 0 0 3px var(--lilac-soft);}
 .mensajero-typeahead-input:disabled{opacity:.6;cursor:not-allowed;background:var(--muted-soft);}
-.mensajero-typeahead-menu{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#ffffff;color:#1e1e1e;border-radius:8px;box-shadow:var(--shadow-lg);border:1px solid var(--border);z-index:1001;max-height:240px;overflow-y:auto;padding:4px;}
+.mensajero-typeahead-menu{position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--bg-card);color:var(--text-primary);border-radius:8px;box-shadow:var(--shadow-lg);border:1px solid var(--border);z-index:1001;max-height:240px;overflow-y:auto;padding:4px;}
 .mensajero-typeahead-item{padding:8px 10px;border-radius:6px;font-size:12.5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .mensajero-typeahead-item.highlighted,.mensajero-typeahead-item:hover{background:var(--lilac-soft);color:#5B21B6;}
 .mensajero-typeahead-empty{padding:8px 10px;font-size:12px;color:var(--text-secondary);font-style:italic;}
@@ -1070,7 +1084,7 @@ button.icon-btn-edit:hover{background:var(--border);}
    nativo del navegador (azul, sin formato) al no definir background/appearance/focus. */
 .cuotas-hora-add select{width:100%;font-size:11px;padding:6px 24px 6px 8px;border-radius:7px;border:1px solid var(--border);background:var(--bg-card-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%236C757D' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 8px center;color:var(--text-primary);appearance:none;-webkit-appearance:none;-moz-appearance:none;outline:none;cursor:pointer;transition:border-color .12s ease;}
 .cuotas-hora-add select:focus{border-color:var(--lilac-deep);box-shadow:0 0 0 3px var(--lilac-soft);}
-.cuotas-hora-add button{width:100%;font-size:10.5px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;white-space:normal;line-height:1.3;font-weight:600;}
+.cuotas-hora-add button{width:100%;font-size:10.5px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-card);color:var(--text-primary);cursor:pointer;white-space:normal;line-height:1.3;font-weight:600;}
 .cuotas-hora-add button:hover{background:var(--lilac-soft);}
 .cuotas-vehiculo-remove{margin-left:6px;border:none;background:none;color:var(--danger);cursor:pointer;font-size:11px;font-weight:700;padding:0;vertical-align:middle;}
 .cuotas-vehiculo-remove:hover{text-decoration:underline;}
@@ -1147,7 +1161,7 @@ button.icon-btn-edit:hover{background:var(--border);}
    elemento que quede debajo al hacer scroll (p. ej. el ícono de fórmula (ℹ️) de una tabla larga, ver
    requerimiento "Incorporación de Tabla de Ranking Comparativo y Detalle Multinivel por Indicador" -- la
    tabla de Ranking nueva estira la página lo suficiente para que esto se notara). */
-.cumplimiento-export-fab{position:fixed;left:222px;right:0;bottom:0;z-index:1000;background:#FFFFFF;border-top:1px solid #E5E7EB;box-shadow:0 -2px 10px rgba(17,15,55,.06);padding:14px 30px;display:flex;justify-content:flex-end;transition:left .3s ease,width .3s ease;pointer-events:none;}
+.cumplimiento-export-fab{position:fixed;left:222px;right:0;bottom:0;z-index:1000;background:var(--bg-card);border-top:1px solid var(--border);box-shadow:0 -2px 10px rgba(17,15,55,.06);padding:14px 30px;display:flex;justify-content:flex-end;transition:left .3s ease,width .3s ease;pointer-events:none;}
 .cumplimiento-export-fab>*{pointer-events:auto;}
 body:has(#modalOverlay.open) .cumplimiento-export-fab{display:none;}
 /* #sidebar y #mainContent son hermanos directos dentro de .shell -- cuando el sidebar de escritorio se
