@@ -351,19 +351,26 @@ var SUPABASE_ANON_KEY = 'sb_publishable_uD-7aN72jdjAjiquU92y8A_cn-Kt649';
 var supabaseClient = (typeof window !== 'undefined' && window.supabase)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
-/* Ver requerimiento "Integración de Google reCAPTCHA v3 (Invisible)": RECAPTCHA_SITE_KEY es pública por
-   diseño (viaja al cliente igual que en cualquier integración de reCAPTCHA) -- la Secret Key correspondiente
-   NUNCA vive aquí; está como secreto del lado del servidor en el Edge Function verify-recaptcha (ver
+/* Ver requerimiento "Integración de Google reCAPTCHA v2 Invisible" (reemplaza el par v3 anterior, descartado
+   tras 3 intentos fallidos de aprovisionamiento del lado de Google -- ver historial de commits): mismo
+   patrón de integración (api.js?render=SITE_KEY + grecaptcha.execute(SITE_KEY,{action}), API compartida por
+   v2 Invisible y v3 cuando se auto-renderizan así). RECAPTCHA_SITE_KEY es pública por diseño (viaja al
+   cliente igual que en cualquier integración de reCAPTCHA) -- la Secret Key correspondiente NUNCA vive aquí;
+   está como secreto del lado del servidor en el Edge Function verify-recaptcha (ver
    supabase/functions/verify-recaptcha/index.ts), al que este archivo solo le manda el token ya generado. */
-var RECAPTCHA_SITE_KEY = '6LcW6vItAAAAACaPv84AnE8dWGzz3L3ljNqtvCdb';
-/* Obtiene un token de reCAPTCHA v3 (acción puntual, ej. 'login') y lo manda a verificar al Edge Function --
-   nunca a la inversa (el navegador JAMÁS ve la Secret Key ni llama directo a la API de Google con ella).
+var RECAPTCHA_SITE_KEY = '6Lf06vItAAAAADiiO6u6m3tPS3g8O9lHozwtNA1C';
+/* Obtiene un token de reCAPTCHA (acción puntual, ej. 'login') y lo manda a verificar al Edge Function --
+   nunca a la inversa (el navegador JAMÁS ve la Secret Key ni llama directo a la API de Google con ella). A
+   diferencia de v3 (100% silencioso, nunca interrumpe), v2 Invisible SÍ puede mostrarle un reto visual real
+   al usuario si Google considera el intento sospechoso -- ese flujo lo maneja Google por completo dentro de
+   su propio iframe/overlay, este código solo espera a que el execute() finalmente resuelva (con o sin reto
+   de por medio) o se agote el timeout de abajo.
    Diseño "fail-open": si el script de Google no cargó (bloqueado por una extensión/red corporativa, offline,
    etc.) o la llamada al Edge Function falla por una razón de RED/infraestructura propia, se deja pasar el
-   login en vez de bloquear a un usuario real por un fallo ajeno a su intento -- reCAPTCHA v3 es invisible y
-   pensado como señal de riesgo adicional, no como único punto de falla de todo el acceso a la plataforma.
-   Solo se bloquea cuando Google layer responde explícitamente que el token NO es válido (success:false),
-   que es la señal real y concreta de que algo no verificó bien. */
+   login en vez de bloquear a un usuario real por un fallo ajeno a su intento -- pensado como señal de riesgo
+   adicional, no como único punto de falla de todo el acceso a la plataforma. Solo se bloquea cuando Google
+   responde explícitamente que el token NO es válido (success:false), que es la señal real y concreta de que
+   algo no verificó bien. */
 function ejecutarVerificacionRecaptcha(accion) {
   if (typeof grecaptcha === 'undefined' || !grecaptcha || !grecaptcha.execute) {
     return Promise.resolve(true);
@@ -17796,7 +17803,7 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
-  /* Ver requerimiento "Integración de Google reCAPTCHA v3 (Invisible)": reemplaza la nota anterior ("Remover
+  /* Ver requerimiento "Integración de Google reCAPTCHA v2 Invisible": reemplaza la nota anterior ("Remover
      Mock reCAPTCHA...", que asumía que Google gestionaba todo sin intervención) -- ahora SÍ hay gating real:
      intentarCredenciales() llama a ejecutarVerificacionRecaptcha('login') antes de evaluar credenciales (ver
      más abajo). El badge oficial de Google sigue siendo 100% automático (inyectado por el script con
@@ -17822,7 +17829,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (lock) { mostrarBloqueoLogin(email, lock.lockedUntil); return; }
     document.getElementById('loginSubmitBtn').disabled = true;
     document.getElementById('loginError').textContent = '';
-    /* Ver requerimiento "Integración de Google reCAPTCHA v3 (Invisible)": gating real antes de tocar
+    /* Ver requerimiento "Integración de Google reCAPTCHA v2 Invisible": gating real antes de tocar
        credenciales -- un rechazo EXPLÍCITO de Google (token inválido/manipulado) corta aquí mismo, sin
        siquiera llegar a scPullAll/resolverCredenciales. Ver ejecutarVerificacionRecaptcha (arriba, junto a
        SUPABASE_URL) para el diseño fail-open ante fallos de infraestructura (propia o de terceros). */

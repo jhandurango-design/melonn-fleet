@@ -1,4 +1,4 @@
-// Verificacion server-side de reCAPTCHA v3 (Invisible) -- recibe el token que el frontend obtuvo via
+// Verificacion server-side de reCAPTCHA v2 Invisible -- recibe el token que el frontend obtuvo via
 // grecaptcha.execute() y lo valida contra la API de Google usando la Secret Key, que SOLO vive aqui (como
 // secreto de Supabase, nunca en el repo ni en ningun archivo que el navegador descargue). El frontend
 // (app.js, intentarCredenciales/ejecutarVerificacionRecaptcha) llama a esta funcion sin JWT de usuario --

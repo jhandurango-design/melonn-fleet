@@ -3494,13 +3494,13 @@
 <!-- Ver requerimiento "Migración a Supabase": cliente supabase-js (expone window.supabase.createClient,
      usado por app.js para la persistencia multiusuario en la nube de usuarios/mensajeros/turnos). -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<!-- Ver requerimiento "Integración de Google reCAPTCHA v3 (Invisible)": solo la Site Key viaja al cliente
+<!-- Ver requerimiento "Integración de Google reCAPTCHA v2 Invisible": solo la Site Key viaja al cliente
      (es pública por diseño) -- la Secret Key vive exclusivamente en el Edge Function verify-recaptcha de
      Supabase (ver supabase/functions/verify-recaptcha/index.ts), nunca en este repo ni en ningún archivo que
      el navegador descargue. render=SITE_KEY precarga el badge oficial (abajo a la derecha) y habilita
      grecaptcha.execute() sin esperar un segundo onload -- ver intentarCredenciales/ejecutarVerificacionRecaptcha
      en app.js, que capturan el token en el submit de "Iniciar sesión". -->
-<script src="https://www.google.com/recaptcha/api.js?render=6LcW6vItAAAAACaPv84AnE8dWGzz3L3ljNqtvCdb"></script>
+<script src="https://www.google.com/recaptcha/api.js?render=6Lf06vItAAAAADiiO6u6m3tPS3g8O9lHozwtNA1C"></script>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 </body>
