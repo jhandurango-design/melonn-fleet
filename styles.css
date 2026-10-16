@@ -136,6 +136,33 @@ a{color:inherit;}
 }
 .login-info-banner h3{margin:0 0 8px;font-size:14px;font-weight:700;color:#fff;}
 .login-info-banner p{margin:0;font-size:12.5px;line-height:1.5;color:rgba(255,255,255,0.78);}
+/* Ver requerimiento "Tarjeta de Aliados en Colombia (Login)": simetrica a .login-info-banner (misma
+   geometria -- ancho, padding, radio, margin-top -- en la columna 1, espejada con justify-self:end en vez
+   de start) pero con estilo glassmorphism mas sutil (#ffffff10/#ffffff20) en vez del fondo mas opaco del
+   aviso de plataforma, para no competir visualmente con el panel de login. */
+.login-partners-banner{
+  position:relative;z-index:10;grid-column:1;justify-self:end;align-self:start;margin-top:110px;
+  max-width:340px;padding:22px 24px;border-radius:16px;
+  background:#ffffff10;border:1px solid #ffffff20;
+  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+}
+.login-partners-banner h3{margin:0 0 16px;font-size:14px;font-weight:700;color:#fff;}
+/* 2 columnas (no 3): con el ancho acotado de la tarjeta (340px), 3 columnas le dejaban muy poco ancho a
+   cada logo -- Easyway (isotipo tipo wordmark, proporcion ~6:1) quedaba ilegible, aplastado contra el techo
+   de ancho de su celda. 2 columnas le dan mas aire a los 4 isotipos mas cuadrados (Rapiboy/DRN/Cabify/
+   Cordiandina); Easyway, al ser el único wordmark ancho, ocupa su propia fila completa
+   (.login-partner-wide) en vez de competir por el mismo ancho de celda que el resto. */
+.login-partners-grid{display:grid;grid-template-columns:repeat(2,1fr);align-items:center;justify-items:center;gap:20px 16px;}
+/* Ver requerimiento "Tarjeta de Aliados en Colombia": el tratamiento monocromatico blanco de cada logo
+   (originalmente blanco, morado, negro, azul claro -- ver los 5 proveedores) viene HORNEADO directo en el
+   PNG (mismo trazo, canal alpha intacto, RGB forzado a blanco), no aplicado en vivo via filter:brightness(0)
+   invert(1) -- ese filtro CSS, combinado con el downscale fuerte que exige esta grilla (logos de hasta 790px
+   de ancho mostrados en ~30px), dispara un bug de rendering de Chromium que hace desaparecer trazos finos
+   (confirmado aislando el filtro: sin él el logo se ve completo en cualquier tamaño, con él se pierden
+   letras o el recuadro completo colapsa a un relleno plano). Hornear el blanco en el asset logra el mismo
+   resultado visual sin depender de ese filtro en tiempo real. */
+.login-partners-grid img{max-width:100%;max-height:32px;width:auto;object-fit:contain;opacity:0.85;}
+.login-partners-grid img.login-partner-wide{grid-column:1/-1;max-height:26px;}
 .login-form .field-required-msg{display:none;font-size:12px !important;color:#e53e3e;font-style:italic;margin-top:4px;}
 .login-form .field.error label{color:#e53e3e;}
 .login-form .field.error input{border:1px solid #e53e3e;}
@@ -1261,7 +1288,25 @@ body:has(#modalOverlay.open) .cumplimiento-export-fab{display:none;}
   .login-screen{grid-template-columns:1fr;justify-items:center;row-gap:18px;padding:32px 20px 84px;}
   .login-corner-logo{display:none;}
   .login-fleet-art{display:none;}
-  .login-panel{grid-column:1;order:1;max-width:460px;margin:0 auto;padding:32px 26px 28px;}
+  /* .login-panel-col (no .login-panel) es el verdadero grid item de .login-screen -- conservaba grid-column:2
+     de escritorio sin ningun override aqui, asi que seguia reclamando una 2a columna real a tamano de
+     contenido (440px) en este breakpoint de 1 sola columna, desbordando .login-screen (overflow:hidden) y
+     recortando visualmente el panel de login. .login-panel (la regla de abajo) es un DIV anidado DENTRO de
+     login-panel-col, no un grid item -- su propio grid-column/order ya existian pero nunca tuvieron efecto. */
+  .login-panel-col{grid-column:1;order:1;}
+  .login-panel{max-width:460px;margin:0 auto;padding:32px 26px 28px;}
+  /* Ver requerimiento "Tarjeta de Aliados en Colombia", punto 4 (responsive): grid-column:1 explicito (en
+     vez de heredar el de escritorio) evita que el grid cree una columna implicita extra fuera de la unica
+     columna real de este breakpoint -- eso desbordaria .login-screen (overflow:hidden) y recortaria visualmente
+     la tarjeta. order:2 la deja apilada justo debajo del panel de login, sin invadirlo. */
+  .login-partners-banner{grid-column:1;order:2;justify-self:center;align-self:auto;margin-top:0;max-width:460px;width:100%;}
+  /* Hallazgo incidental al implementar el punto de arriba: .login-info-banner (columna 3 en escritorio)
+     tenia exactamente la misma vulnerabilidad SIN tocarla siquiera -- un grid-column explicito fuera de la
+     unica columna real de este breakpoint obliga al grid a crear columnas implicitas extra (anchas, a
+     tamano de contenido) para satisfacerlo, lo que ya desbordaba .login-panel (recortado por el
+     overflow:hidden de .login-screen) en produccion aun ANTES de este cambio. Mismo criterio que
+     .login-panel/.login-partners-banner arriba -- grid-column:1 explicito, apilada al final. */
+  .login-info-banner{grid-column:1;order:3;justify-self:center;align-self:auto;margin-top:0;max-width:460px;width:100%;}
 }
 @media (max-width:860px){
   .sidebar{position:fixed;left:0;top:56px;z-index:35;box-shadow:var(--shadow-lg);}
