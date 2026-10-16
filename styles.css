@@ -36,14 +36,12 @@
   --radius-card:6px;
   --radius-btn:6px;
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --bg-app:#0E0C1F; --bg-card:#181530; --bg-card-soft:#1D1A38;
-    --text-primary:#F1EEFB; --text-secondary:#A7A2C9; --border:#2D2A52;
-    --header-alt:#0B0940; --muted-soft:#231F44; --danger-soft:#3A1720; --warn-soft:#332A0A;
-    --shadow-sm:0 2px 4px rgba(0,0,0,0.25); --shadow-md:0 8px 24px rgba(0,0,0,0.35); --shadow-lg:0 24px 60px rgba(0,0,0,0.5);
-  }
-}
+/* Ver requerimiento "Forzar tema claro corporativo por defecto" (reporte de Fabian Meneses/Cabify): la app ya
+   NO cambia de tema solo porque el sistema operativo/navegador del usuario esté en modo oscuro -- ese
+   auto-disparador por @media (prefers-color-scheme: dark) se retira a propósito. El tema oscuro completo
+   queda listo e intacto más abajo, bajo el selector manual :root[data-theme="dark"] (hoy nadie lo fija --
+   ver app.js, sin ninguna referencia a data-theme), para poder ofrecerlo en el futuro como un toggle opcional
+   en el menú de usuario sin tener que rehacer esta paleta. */
 :root[data-theme="dark"]{
   --bg-app:#0E0C1F; --bg-card:#181530; --bg-card-soft:#1D1A38;
   --text-primary:#F1EEFB; --text-secondary:#A7A2C9; --border:#2D2A52;
@@ -452,10 +450,9 @@ main{flex:1;min-width:0;padding:26px 30px 60px;overflow-x:hidden;}
    y gana por venir de la hoja de estilos del autor — sin esto, poner .hidden=true en JS (ver openTurnoModal,
    turnoBloqueado) no ocultaba visualmente el banner. */
 .cutoff-banner[hidden]{display:none;}
+/* Ver requerimiento "Forzar tema claro corporativo por defecto": variante lista bajo el selector manual
+   :root[data-theme="dark"] para un futuro toggle -- sin disparador automático por @media. */
 :root[data-theme="dark"] .cutoff-banner{background:#2B2050;color:#D8B4FE;border-color:#4C3A80;}
-/* Ver mismo requerimiento "Auditoría de Modo Oscuro" que .badge-disabled más abajo: sin esta variante por
-   @media, este override nunca se aplicaba (ningún código JS fija data-theme="dark"). */
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .cutoff-banner{background:#2B2050;color:#D8B4FE;border-color:#4C3A80;}}
 .cutoff-banner strong{font-weight:700;}
 .cutoff-banner.danger{background:var(--danger-soft);color:var(--danger);border-color:#F3B9BC;}
 
@@ -728,18 +725,11 @@ tbody tr:hover{background:var(--bg-card-soft);}
 .badge-critical{background:var(--danger-soft);color:var(--danger);} .badge-critical i{background:var(--danger);}
 .badge-justified{background:var(--lilac-soft);color:#5B21B6;} .badge-justified i{background:var(--lilac-deep);}
 .badge-disabled{background:#E9EAEE;color:#5C6470;} .badge-disabled i{background:#8A8F98;}
+/* Ver requerimiento "Forzar tema claro corporativo por defecto": las 3 variantes oscuras quedan listas bajo
+   el selector manual :root[data-theme="dark"] para un futuro toggle -- sin disparador automático por @media. */
 :root[data-theme="dark"] .badge-disabled{background:#2A2745;color:#B5B1D6;}
-/* Ver requerimiento "Auditoría de Modo Oscuro" (reporte de Fabian Meneses/Cabify, sidebar en claro sobre fondo
-   oscuro): [data-theme="dark"] nunca lo fija ningún código JS -- no existe toggle manual de tema en la app
-   (ver app.js, sin ninguna referencia a data-theme). El ÚNICO disparador real de modo oscuro es la preferencia
-   del sistema operativo/navegador (prefers-color-scheme), así que cualquier override que dependiera solo de
-   [data-theme="dark"] (como el de arriba, dejado tal cual por si en el futuro se agrega un selector manual)
-   nunca se aplicaba en la práctica. Se añade aquí el mismo override vía @media, que es el que SÍ funciona hoy. */
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]) .badge-disabled{background:#2A2745;color:#B5B1D6;}
-  :root:not([data-theme="light"]) .badge-dock{background:#133338;color:var(--cyan);} :root:not([data-theme="light"]) .badge-dock i{background:var(--cyan);}
-  :root:not([data-theme="light"]) .badge-dispatched{background:#113A2C;color:var(--green);} :root:not([data-theme="light"]) .badge-dispatched i{background:var(--green);}
-}
+:root[data-theme="dark"] .badge-dock{background:#133338;color:var(--cyan);} :root[data-theme="dark"] .badge-dock i{background:var(--cyan);}
+:root[data-theme="dark"] .badge-dispatched{background:#113A2C;color:var(--green);} :root[data-theme="dark"] .badge-dispatched i{background:var(--green);}
 
 .sla-wrap{display:flex;flex-direction:column;gap:4px;min-width:130px;}
 .sla-track{height:6px;border-radius:4px;background:var(--muted-soft);overflow:hidden;}
@@ -1186,8 +1176,9 @@ body:has(#modalOverlay.open) .cumplimiento-export-fab{display:none;}
    #E9D5FF borde, morado oscuro de texto. */
 .aviso-aliado-banner{display:flex;align-items:center;gap:14px;padding:10px 20px;font-size:12.5px;font-weight:600;background:#F3E8FF;color:#581C87;border:1px solid #E9D5FF;border-radius:12px;margin:10px 20px 0;}
 .aviso-aliado-banner[hidden]{display:none;}
+/* Ver requerimiento "Forzar tema claro corporativo por defecto": variante lista bajo el selector manual
+   :root[data-theme="dark"] para un futuro toggle -- sin disparador automático por @media. */
 :root[data-theme="dark"] .aviso-aliado-banner{background:#2B2050;color:#E9D5FF;border-color:#4C3A80;}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .aviso-aliado-banner{background:#2B2050;color:#E9D5FF;border-color:#4C3A80;}}
 .aviso-aliado-banner-inner{display:flex;align-items:center;gap:10px;flex:1;flex-wrap:wrap;min-width:0;}
 /* Pill de severidad (ver requerimiento "Confirmación de Implementación y Validación Final de UI/UX", punto 1):
    casing normal (sin uppercase) y tonos pastel + texto oscuro, en vez de azul/rojo brillante con texto
