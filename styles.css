@@ -158,19 +158,27 @@ a{color:inherit;}
   text-shadow:0 1px 4px rgba(0,0,0,0.45);
 }
 .flag-co{width:20px;height:13.3px;border-radius:2px;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,0.4);}
-/* 2 columnas (no 3): Easyway (isotipo tipo wordmark, proporcion ~6:1) queda aplastado contra el techo de
-   ancho de una celda de 3 columnas -- 2 le dan mas aire a los 4 isotipos mas cuadrados (Rapiboy/DRN/Cabify/
-   Cordiandina); Easyway, al ser el único wordmark ancho, ocupa su propia fila completa
-   (.login-partner-wide) en vez de competir por el mismo ancho de celda que el resto. Con el bloque ahora a
-   ancho fijo (340px, antes se achicaba a su contenido), cada celda tiene mas aire real -- se aprovecha para
-   logos mas grandes (ver max-height de abajo) en vez de quedar chicos y apretados. */
-.login-partners-grid{display:grid;grid-template-columns:repeat(2,1fr);align-items:center;justify-items:center;gap:28px 24px;}
+.login-partners-grid{display:grid;grid-template-columns:repeat(2,1fr);align-items:center;justify-items:center;gap:20px;}
 /* Colores e identidad de marca reales de cada proveedor (sin filtro monocromatico) -- cada asset ya viene
-   con su fondo propio (blanco/morado/negro/azul claro segun el logo) recortado a transparente. drop-shadow
-   (no box-shadow -- sigue el alpha real del logo, no un rectangulo) para que se distingan del patron de
-   fondo de login-bg-pattern al flotar sin tarjeta detras. */
-.login-partners-grid img{max-width:100%;max-height:46px;width:auto;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.35));}
-.login-partners-grid img.login-partner-wide{grid-column:1/-1;max-height:40px;}
+   con su fondo propio (blanco/morado/negro/azul claro segun el logo) recortado a transparente.
+   Ver requerimiento "Contraste y proporción de los logos":
+   1) CONTRASTE -- Cordiandina/DRN/Easyway tienen trazos oscuros (texto negro, detalles en tinta oscura) que
+      se perdían contra el fondo azul marino del login. En vez de forzarlos a blanco (eso ya se probó y
+      perdían su identidad de marca, ver commits anteriores), se les pone un resplandor blanco detrás --
+      3 drop-shadow apilados con offset 0 y blur creciente actúan como un halo que sigue el alpha real del
+      logo (no un rectángulo), dándole a cualquier trazo oscuro un borde claro que lo separa del fondo sin
+      tocar su color.
+   2) PROPORCIÓN -- Cabify/Easyway son wordmarks anchos y densos (mucho trazo por área) que antes dominaban
+      visualmente; Rapiboy/DRN/Cordiandina son insignias mas verticales/con mucho espacio en blanco interno
+      que se veían diminutas con el mismo tope de alto. Esta regla base (160/64) es para estas últimas;
+      .login-partner-compact (Cabify/Easyway, ver index.html) la topa mas abajo (120/45) -- object-fit:contain
+      hace que cada una escale al máximo dentro de su propia caja sin deformarse, logrando un peso visual
+      equivalente entre todas pese a sus proporciones tan distintas. */
+.login-partners-grid img{
+  max-width:160px;max-height:64px;width:auto;height:auto;object-fit:contain;
+  filter:drop-shadow(0 0 2px #ffffffb3) drop-shadow(0 0 5px #ffffff66) drop-shadow(0 2px 6px rgba(0,0,0,0.35));
+}
+.login-partners-grid img.login-partner-compact{max-width:120px;max-height:45px;}
 .login-form .field-required-msg{display:none;font-size:12px !important;color:#e53e3e;font-style:italic;margin-top:4px;}
 .login-form .field.error label{color:#e53e3e;}
 .login-form .field.error input{border:1px solid #e53e3e;}
