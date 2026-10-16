@@ -153,9 +153,14 @@ a{color:inherit;}
   position:relative;z-index:10;grid-column:1;grid-row:1;justify-self:end;align-self:center;
   width:340px;max-width:340px;
 }
+/* white-space:nowrap -- el texto (nodo de texto suelto, no un <span>) podia seguir partiendose en 2 líneas
+   dentro del flex aunque justify-content:center ya centraba el conjunto; con esto "Colombia" y la bandera
+   quedan siempre en la misma línea, uno junto al otro. La tarjeta/banner en sí no recorta overflow (no tiene
+   overflow:hidden), así que si el texto excede los 340px de ancho del bloque simplemente se centra
+   desbordando unos px a cada lado en vez de partirse. */
 .login-partners-banner h3{
   margin:0 0 24px;font-size:14px;font-weight:700;color:#fff;display:flex;align-items:center;justify-content:center;
-  gap:8px;text-align:center;text-shadow:0 1px 4px rgba(0,0,0,0.45);
+  gap:8px;text-align:center;text-shadow:0 1px 4px rgba(0,0,0,0.45);white-space:nowrap;
 }
 .flag-co{width:20px;height:13.3px;border-radius:2px;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,0.4);}
 /* Ver requerimiento "Tarjetas blancas individuales para los logos de Aliados": reemplaza el halo de
@@ -178,7 +183,12 @@ a{color:inherit;}
    quedaban con un marco blanco alrededor ("efecto recortado y pegado"). Mismo tamaño de tarjeta (62px,
    altura efectiva de las demás: max-height 38px + padding 12px×2) pero sin padding, con la imagen llenando
    el 100% y heredando el radio de la tarjeta -- el resto (Rapiboy/Cordiandina/Easyway) sigue igual. */
-.partner-logo-card.partner-logo-card-filled{width:62px;height:62px;padding:0;overflow:hidden;}
+/* background:transparent (no #ffffff heredado de .partner-logo-card) -- aunque overflow:hidden + border-radius
+   ya recortan geometricamente la imagen al radio exacto de la tarjeta, el antialiasing del navegador en esa
+   curva sigue mezclando un filo de sub-pixel con lo que haya DETRAS del recorte -- con fondo blanco ese filo
+   se veia como un borde claro asomando en las esquinas. Transparente deja que se mezcle con el azul oscuro
+   del login en vez de blanco, haciendolo imperceptible. */
+.partner-logo-card.partner-logo-card-filled{width:62px;height:62px;padding:0;overflow:hidden;background:transparent;}
 .partner-logo-card.partner-logo-card-filled img{width:100%;height:100%;max-width:100%;max-height:100%;object-fit:cover;border-radius:inherit;}
 .login-form .field-required-msg{display:none;font-size:12px !important;color:#e53e3e;font-style:italic;margin-top:4px;}
 .login-form .field.error label{color:#e53e3e;}
@@ -1321,6 +1331,10 @@ body:has(#modalOverlay.open) .cumplimiento-export-fab{display:none;}
      columna real de este breakpoint -- eso desbordaria .login-screen (overflow:hidden) y recortaria visualmente
      la tarjeta. order:2 la deja apilada justo debajo del panel de login, sin invadirlo. */
   .login-partners-banner{grid-column:1;grid-row:auto;order:2;justify-self:center;align-self:auto;margin-top:0;max-width:460px;width:100%;}
+  /* white-space:nowrap (regla base, escritorio) vuelve a 'normal' aqui -- en pantallas angostas el titulo
+     completo con la bandera no siempre entra en una sola línea sin desbordar el viewport; se prioriza que no
+     se recorte sobre mantenerlo forzado en una sola línea, que era el ajuste pedido para escritorio. */
+  .login-partners-banner h3{white-space:normal;}
   /* Hallazgo incidental al implementar el punto de arriba: .login-info-banner (columna 3 en escritorio)
      tenia exactamente la misma vulnerabilidad SIN tocarla siquiera -- un grid-column explicito fuera de la
      unica columna real de este breakpoint obliga al grid a crear columnas implicitas extra (anchas, a
