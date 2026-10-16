@@ -136,33 +136,31 @@ a{color:inherit;}
 }
 .login-info-banner h3{margin:0 0 8px;font-size:14px;font-weight:700;color:#fff;}
 .login-info-banner p{margin:0;font-size:12.5px;line-height:1.5;color:rgba(255,255,255,0.78);}
-/* Ver requerimiento "Tarjeta de Aliados en Colombia (Login)": simetrica a .login-info-banner (misma
-   geometria -- ancho, padding, radio, margin-top -- en la columna 1, espejada con justify-self:end en vez
-   de start) pero con estilo glassmorphism mas sutil (#ffffff10/#ffffff20) en vez del fondo mas opaco del
-   aviso de plataforma, para no competir visualmente con el panel de login. */
+/* Ver requerimiento "Corrección de la implementación de Aliados": sin caja/tarjeta -- flota directo sobre
+   el fondo azul del login, igual que login-corner-logo/el patron de fondo. Mismo ancho/columna/justify-self
+   que .login-info-banner (alineado a la izquierda del panel central), pero sin background/border/padding/
+   blur, y mas arriba (margin-top reducido) para quedar a la altura del panel en vez de pegado abajo en la
+   esquina. */
 .login-partners-banner{
-  position:relative;z-index:10;grid-column:1;justify-self:end;align-self:start;margin-top:110px;
-  max-width:340px;padding:22px 24px;border-radius:16px;
-  background:#ffffff10;border:1px solid #ffffff20;
-  backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  position:relative;z-index:10;grid-column:1;justify-self:end;align-self:start;margin-top:30px;
+  max-width:340px;
 }
-.login-partners-banner h3{margin:0 0 16px;font-size:14px;font-weight:700;color:#fff;}
-/* 2 columnas (no 3): con el ancho acotado de la tarjeta (340px), 3 columnas le dejaban muy poco ancho a
-   cada logo -- Easyway (isotipo tipo wordmark, proporcion ~6:1) quedaba ilegible, aplastado contra el techo
-   de ancho de su celda. 2 columnas le dan mas aire a los 4 isotipos mas cuadrados (Rapiboy/DRN/Cabify/
+.login-partners-banner h3{
+  margin:0 0 16px;font-size:14px;font-weight:700;color:#fff;display:flex;align-items:center;gap:8px;
+  text-shadow:0 1px 4px rgba(0,0,0,0.45);
+}
+.flag-co{width:20px;height:13.3px;border-radius:2px;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,0.4);}
+/* 2 columnas (no 3): Easyway (isotipo tipo wordmark, proporcion ~6:1) queda aplastado contra el techo de
+   ancho de una celda de 3 columnas -- 2 le dan mas aire a los 4 isotipos mas cuadrados (Rapiboy/DRN/Cabify/
    Cordiandina); Easyway, al ser el único wordmark ancho, ocupa su propia fila completa
    (.login-partner-wide) en vez de competir por el mismo ancho de celda que el resto. */
-.login-partners-grid{display:grid;grid-template-columns:repeat(2,1fr);align-items:center;justify-items:center;gap:20px 16px;}
-/* Ver requerimiento "Tarjeta de Aliados en Colombia": el tratamiento monocromatico blanco de cada logo
-   (originalmente blanco, morado, negro, azul claro -- ver los 5 proveedores) viene HORNEADO directo en el
-   PNG (mismo trazo, canal alpha intacto, RGB forzado a blanco), no aplicado en vivo via filter:brightness(0)
-   invert(1) -- ese filtro CSS, combinado con el downscale fuerte que exige esta grilla (logos de hasta 790px
-   de ancho mostrados en ~30px), dispara un bug de rendering de Chromium que hace desaparecer trazos finos
-   (confirmado aislando el filtro: sin él el logo se ve completo en cualquier tamaño, con él se pierden
-   letras o el recuadro completo colapsa a un relleno plano). Hornear el blanco en el asset logra el mismo
-   resultado visual sin depender de ese filtro en tiempo real. */
-.login-partners-grid img{max-width:100%;max-height:32px;width:auto;object-fit:contain;opacity:0.85;}
-.login-partners-grid img.login-partner-wide{grid-column:1/-1;max-height:26px;}
+.login-partners-grid{display:grid;grid-template-columns:repeat(2,1fr);align-items:center;justify-items:center;gap:22px 18px;}
+/* Colores e identidad de marca reales de cada proveedor (sin filtro monocromatico) -- cada asset ya viene
+   con su fondo propio (blanco/morado/negro/azul claro segun el logo) recortado a transparente. drop-shadow
+   (no box-shadow -- sigue el alpha real del logo, no un rectangulo) para que se distingan del patron de
+   fondo de login-bg-pattern al flotar sin tarjeta detras. */
+.login-partners-grid img{max-width:100%;max-height:34px;width:auto;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,0.35));}
+.login-partners-grid img.login-partner-wide{grid-column:1/-1;max-height:30px;}
 .login-form .field-required-msg{display:none;font-size:12px !important;color:#e53e3e;font-style:italic;margin-top:4px;}
 .login-form .field.error label{color:#e53e3e;}
 .login-form .field.error input{border:1px solid #e53e3e;}
