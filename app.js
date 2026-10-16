@@ -13125,6 +13125,12 @@ function submitTurno(e) {
           registrarHistorialCambio(route, { tipo: 'reasignacion_directa', accion: modo === 'confirm' ? 'mensajero_confirmado' : 'editado', motivo: cambiosDirecto.join(' · '), horaAnterior: horaAnteriorDirecto, horaPropuesta: hora, por: state.user.nombre });
         }
         toast('ok', modo === 'confirm' ? 'Mensajero confirmado' : 'Turno actualizado', route.id + ' fue actualizado.');
+        /* Ver requerimiento "Recalculación / Promoción Automática de Adicionales al Eliminar": mover este
+           turno a otra hora/vehículo saca su plaza del bucket ANTERIOR exactamente igual que eliminarlo -- si
+           ahí quedaba un Adicional esperando, esta edición puede ser justo lo que lo saca de cupo excedido. */
+        if (horaAnteriorDirecto !== hora || vehiculoAnteriorDirecto !== vehiculo) {
+          recalcularPromocionCupo(route.sede, state.user.aliado, vehiculoAnteriorDirecto, horaAnteriorDirecto, route.fecha);
+        }
         turnoAfectado = route;
       }
     }
@@ -13407,6 +13413,51 @@ function turnoEsExcedenteDeCuota(route) {
   var actuales = turnosProgramadosCount(route.sede, aliado, route.fecha, franja, route.vehiculo);
   return actuales > cantidad;
 }
+/* Ver requerimiento "Recalculación / Promoción Automática de Adicionales al Eliminar" (reporte de Fabian
+   Meneses/Cabify): turnosProgramadosCount cuenta TODOS los turnos de un bucket sede+aliado+vehículo+franja+
+   fecha por igual, estén o no "Pendiente de Aprobación por Planner" (ver su propio comentario) -- así que
+   liberar una plaza (eliminar/desasignar uno de los N turnos YA confirmados) nunca bajaba el conteo por
+   debajo de la cuota mientras el Adicional (el N+1, pendienteAprobacionPlanner por causal 'cupo') seguía
+   contando, dejándolo huérfano esperando una aprobación que ya no hacía falta. Se llama DESPUÉS de cualquier
+   mutación que pueda haber liberado una plaza (eliminarTurnoPendiente, ambas ramas de desasignarMensajero) --
+   si el número de turnos YA confirmados (actuales - pendientes) queda por debajo de la cuota, promueve al más
+   antiguo de los pendientes 'cupo' de ese mismo bucket a turno normal. Festivo/domingo NUNCA se promueven
+   aquí: su causal no depende del número de recursos, así que liberar una plaza no cambia su condición -- solo
+   Planner puede resolverlos (aprobarCuotaPlanner/rechazarCuotaPlanner). */
+function recalcularPromocionCupo(sede, aliado, vehiculo, hora, fecha) {
+  if (!cuotasActivoPais(countryForSede(sede)) || esFlotaPropia(aliado)) return;
+  var dia = diaSemanaKey(fecha);
+  var franja = franjaForHora(hora, countryForSede(sede));
+  if (!dia || !franja) return;
+  var cantidad = cuotaAsignada(sede, aliado, dia, franja, vehiculo);
+  if (cantidad <= 0) return;
+  var pendientes = state.turnos.filter(function (r) {
+    return r.sede === sede && r.fecha === fecha && r.vehiculo === vehiculo && r.pendienteAprobacionPlanner &&
+      r.pendienteAprobacionMotivo === 'cupo' && franjaForHora(r.hora, countryForSede(sede)) === franja &&
+      getMensajero(r.mensajeroId).aliado === aliado;
+  }).sort(function (a, b) { return (a.pendienteAprobacionSolicitadoEn || '').localeCompare(b.pendienteAprobacionSolicitadoEn || ''); });
+  if (!pendientes.length) return;
+  var actuales = turnosProgramadosCount(sede, aliado, fecha, franja, vehiculo);
+  var confirmadosActuales = actuales - pendientes.length;
+  var huecosLibres = Math.min(cantidad - confirmadosActuales, pendientes.length);
+  if (huecosLibres <= 0) return;
+  var promovidos = pendientes.slice(0, huecosLibres);
+  promovidos.forEach(function (t) {
+    t.pendienteAprobacionPlanner = false;
+    t.cuotaAprobacion = {
+      estado: 'aprobada_automatica', causal: t.pendienteAprobacionMotivo,
+      motivo: 'Promovido automáticamente a turno confirmado: se liberó una plaza dentro de la cuota de ' + sede + '.',
+      resueltoPor: 'Sistema', resueltoPorRol: 'SISTEMA', resueltoEn: fmtClock(state.now), resueltoFecha: TODAY_STR
+    };
+    registrarHistorialCambio(t, {
+      tipo: 'aprobacion_cuota', accion: 'promovido_automatico',
+      motivo: 'Se liberó una plaza dentro de la cuota de ' + sede + ' — este turno pasó de "Adicional / Pendiente de Aprobación" a confirmado automáticamente, sin intervención de Planner.',
+      horaAnterior: null, horaPropuesta: null, por: 'Sistema'
+    });
+  });
+  toast('ok', 'Cupo liberado', promovidos.length + ' turno' + (promovidos.length === 1 ? '' : 's') + ' "Pendiente de Aprobación" ' + (promovidos.length === 1 ? 'fue promovido' : 'fueron promovidos') + ' a confirmado automáticamente al liberarse una plaza de la cuota de ' + sede + '.');
+  scPushRows('app_turnos', promovidos);
+}
 /* Ver requerimiento "Corrección de Flujo: Acciones de Programar Flota según Pestaña (Mañana vs. Hoy) para
    Turnos Pendientes": a diferencia de desasignarMensajero() (quita un mensajero YA asignado), esta acción es
    para un cupo que NUNCA llegó a tener mensajero real -- el Aliado simplemente cancela el cupo en fase de
@@ -13423,6 +13474,10 @@ function eliminarTurnoPendiente(routeId) {
     onConfirm: function () {
       state.turnos = state.turnos.filter(function (r) { return r.id !== routeId; });
       toast('ok', 'Turno eliminado', route.id + ' fue eliminado de la Programación de Flota.');
+      /* Ver requerimiento "Recalculación / Promoción Automática de Adicionales al Eliminar": esta plaza recién
+         liberada puede ser justo la que faltaba para que un turno "Adicional" de este mismo bucket deje de
+         superar la cuota -- se recalcula de inmediato, nunca se deja esperando al próximo render/pull. */
+      recalcularPromocionCupo(route.sede, state.user.aliado, route.vehiculo, route.hora, route.fecha);
       syncAndRender(true);
       /* Ver requerimiento "Fallo de Persistencia al Eliminar Turno" (reporte de Fabian Meneses/Cabify,
          Álvaro en Medellín): esta eliminación quedaba SOLO en memoria si el borrado en Supabase fallaba --
@@ -13463,6 +13518,11 @@ function desasignarMensajero(routeId) {
         horaAnterior: null, horaPropuesta: null, por: state.user.nombre
       });
       toast('ok', 'Mensajero eliminado', route.id + ' quedó "Pendiente / Por Confirmar" — la plaza sigue disponible dentro de tu cuota.');
+      /* Ver requerimiento "Recalculación / Promoción Automática de Adicionales al Eliminar": aunque ESTE
+         turno se queda convertido en "Pendiente / Por Confirmar" (sigue ocupando su propia plaza, ver
+         turnosProgramadosCount), el Adicional de este mismo bucket puede haber quedado fuera de cupo por
+         OTRA razón mientras tanto -- se recalcula igual, de forma defensiva (no-op si no corresponde). */
+      recalcularPromocionCupo(route.sede, state.user.aliado, route.vehiculo, route.hora, route.fecha);
       scPushRows('app_turnos', [route]).then(function (res) {
         if (res && res.ok === false) {
           route.mensajeroId = mensajeroIdAnteriorDes;
@@ -13477,6 +13537,10 @@ function desasignarMensajero(routeId) {
         : 'Programación Libre — sin cuotas activas para esta bodega';
       state.turnos = state.turnos.filter(function (r) { return r.id !== routeId; });
       toast('ok', 'Mensajero eliminado', route.id + ' fue eliminado por completo (' + motivoEliminacion + '), sin dejar plaza vacante.');
+      /* Ver requerimiento "Recalculación / Promoción Automática de Adicionales al Eliminar": este turno SÍ
+         sale del conteo por completo -- si quedaba un Adicional pendiente en este mismo bucket, esta es
+         justo la plaza que lo saca de cupo excedido. */
+      recalcularPromocionCupo(route.sede, state.user.aliado, route.vehiculo, route.hora, route.fecha);
       scDeleteRows('app_turnos', [routeId]).then(function (res) {
         if (res && res.ok === false) {
           state.turnos.push(route);
