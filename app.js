@@ -358,7 +358,7 @@ var supabaseClient = (typeof window !== 'undefined' && window.supabase)
    cliente igual que en cualquier integración de reCAPTCHA) -- la Secret Key correspondiente NUNCA vive aquí;
    está como secreto del lado del servidor en el Edge Function verify-recaptcha (ver
    supabase/functions/verify-recaptcha/index.ts), al que este archivo solo le manda el token ya generado. */
-var RECAPTCHA_SITE_KEY = '6Lf06vItAAAAADiiO6u6m3tPS3g8O9lHozwtNA1C';
+var RECAPTCHA_SITE_KEY = '6Lfc7fItAAAAAJsxtExBkbiYkdVNbJat5V3yJrQe';
 /* Obtiene un token de reCAPTCHA (acción puntual, ej. 'login') y lo manda a verificar al Edge Function --
    nunca a la inversa (el navegador JAMÁS ve la Secret Key ni llama directo a la API de Google con ella). A
    diferencia de v3 (100% silencioso, nunca interrumpe), v2 Invisible SÍ puede mostrarle un reto visual real
