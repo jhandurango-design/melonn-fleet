@@ -2651,7 +2651,29 @@ function computeEstado(route) {
      pendienteAsignacion a propósito: un turno "Pendiente / Por Confirmar" que ADEMÁS excede cupo o cae en
      festivo debe mostrar la alerta de aprobación (más urgente para Planner) y no quedar enmascarado. */
   if (route.pendienteAprobacionPlanner) return { code: 'pendiente_aprobacion_planner', label: estadoLabel('pendiente_aprobacion_planner') };
-  if (route.pendienteAsignacion) return { code: 'pendiente_asignacion', label: estadoLabel('pendiente_asignacion') };
+  if (route.pendienteAsignacion) {
+    /* Ver requerimiento "Ciclo de Vida y Auto-Resolución de Alertas (Pendiente por Confirmar)" (reporte de
+       Easyway/Cabify): antes este código se devolvía SIEMPRE, sin importar cuánto tiempo pasara desde la hora
+       de cargue -- una plaza "Pendiente / Por Confirmar" sin gestionar se quedaba congelada así para siempre
+       (nunca escalaba, nunca generaba Incumplimiento Confirmado, nunca liberaba su alerta). Se le aplica
+       exactamente el mismo reloj de tolerancia/gestión que ya usa el resto del ciclo (gravityThresholds) --
+       hasta T0 sigue "Pendiente por Confirmar" sin alarma; de T0 a T0+tolerancia (1h por defecto) sigue igual
+       pero ya en ventana de confirmación/despacho; de ahí a +gestión (1h adicional) escala a 'critical'
+       ("Incumplimiento / Requiere Reemplazo" -- reutiliza TAL CUAL la misma alerta/botón "Confirmar Reemplazo"
+       que ya usa el resto de la plataforma, ver alertaConfirmarReemplazoElegible/alertRowHtml); vencida esa
+       ventana sin gestión, cierra solo como 'afectacion_confirmada' (Incumplimiento Confirmado). La
+       "auto-resolución sin esperar medianoche" la cubre gratis el mecanismo YA existente de scanRoutes/
+       TRANSICION_AUTOMATICA (detecta el cambio de código en el siguiente tick y lo registra de inmediato) --
+       antes nunca se disparaba porque el código jamás cambiaba con el tiempo. */
+    var progDTpa = parseDT(route.fecha, route.hora);
+    var diffpa = minutesDiff(progDTpa, state.now);
+    if (diffpa > 0) return { code: 'pendiente_asignacion', label: estadoLabel('pendiente_asignacion'), diff: diffpa };
+    var latepa = -diffpa;
+    var thpa = gravityThresholds();
+    if (latepa <= thpa.tolerancia) return { code: 'pendiente_asignacion', label: estadoLabel('pendiente_asignacion'), late: latepa };
+    if (latepa <= thpa.tolerancia + thpa.gestion) return { code: 'critical', label: estadoLabel('critical'), late: latepa };
+    return { code: 'afectacion_confirmada', label: estadoLabel('afectacion_confirmada'), late: latepa };
+  }
   if (route.reemplazoPendiente) {
     /* Ventana de sustitución tras cancelación del Aliado, contada desde T0 = hora de citación (mismos
        umbrales de Motor Gravity & SLA que el resto del ciclo, ver gravityThresholds): 0-60 min tolerancia
@@ -5702,15 +5724,20 @@ function removeAppTooltip() {
     tip.style.left = left + 'px';
     tip.style.top = top + 'px';
     appTooltipEl = tip;
-    el._appTipEl = tip;
   });
   document.addEventListener('mouseout', function (e) {
     var el = e.target.closest('[data-tip]');
-    if (!el || !el._appTipEl) return;
+    if (!el) return;
     if (e.relatedTarget && el.contains(e.relatedTarget)) return;
-    el._appTipEl.remove();
-    el._appTipEl = null;
-    appTooltipEl = null;
+    /* Ver requerimiento "Bug Visual de Tooltip Persistente": antes solo se limpiaba vía el._appTipEl,
+       propiedad fijada sobre el nodo DOM concreto en el mouseover. Si la tabla se re-renderiza (gravityTick/
+       scanRoutes recalcula el estado del turno cada pocos segundos) MIENTRAS el cursor sigue sobre el ícono
+       de acción, el nodo original se destruye sin disparar su propio mouseout (innerHTML lo reemplaza, no lo
+       "abandona") -- el tooltip, que vive aparte en document.body, nunca se limpiaba, y el mouseout que sí
+       llega más tarde cae sobre el nodo NUEVO (sin _appTipEl propio), así que el guard de arriba lo dejaba
+       pasar de largo. Se limpia siempre por la referencia GLOBAL (solo existe un tooltip a la vez, ver
+       removeAppTooltip), nunca por la propiedad del nodo puntual. */
+    removeAppTooltip();
   });
 })();
 
