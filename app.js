@@ -12819,13 +12819,18 @@ function openRechazarSolicitudModal(routeId) {
    operación y retorno a bodega entre una entrega y la siguiente. Compara contra CUALQUIER otro turno ya
    asignado a ese mensajero ese mismo día (sin importar sede), excluyendo el propio turno cuando se está
    editando uno existente. Mensajeros DISTINTOS sí pueden compartir exactamente la misma hora -- el choque
-   siempre es por mensajero, nunca por el slot horario en sí mismo. */
+   siempre es por mensajero, nunca por el slot horario en sí mismo.
+   Ver requerimiento "Falso Positivo en Validación de Retorno/Duplicidad" (reporte de Rapiboy/Cabify): un
+   turno ya 'cancelled' (computeEstado -- cancelación aceptada, terminal/permanente) no libera de verdad al
+   mensajero si sigue contando aquí; el mismo criterio de exclusión que mensajeroProgramadoPorOtroAliado ya
+   usa para su cruce entre aliados. */
 var VENTANA_RETORNO_MINUTOS = 240;
 function turnoEnVentanaRetorno(mensajeroId, fecha, hora, excluirRouteId) {
   var dtNuevo = parseDT(fecha, hora);
   var conflicto = null, diferenciaMinima = Infinity;
   state.turnos.forEach(function (r) {
     if (r.id === excluirRouteId || r.mensajeroId !== mensajeroId || r.fecha !== fecha) return;
+    if (computeEstado(r).code === 'cancelled') return;
     var diff = Math.abs(minutesDiff(dtNuevo, parseDT(r.fecha, r.hora)));
     if (diff < VENTANA_RETORNO_MINUTOS && diff < diferenciaMinima) { diferenciaMinima = diff; conflicto = r; }
   });
@@ -13046,9 +13051,12 @@ function submitTurno(e) {
     if (mensajerosIdsAntes.indexOf(mensajeroIdCreate) === -1) mensajeroNuevoCreado = getMensajero(mensajeroIdCreate);
     /* Antes nada impedía asignar al mismo mensajero 2 veces al mismo bloque sede+fecha+hora -- bastaba un
        doble clic en "Guardar" para terminar con 2 filas idénticas (caso real reportado: Carlos Arturo Rico
-       Vergara duplicado en Medellín #2 a las 08:30 AM). */
+       Vergara duplicado en Medellín #2 a las 08:30 AM). Ver "Falso Positivo en Validación de Retorno/
+       Duplicidad" (Rapiboy/Cabify): un turno ya 'cancelled' (cancelación aceptada, terminal) no cuenta --
+       no está realmente "programado" para nadie, aunque siga viviendo en state.turnos por trazabilidad. */
     var duplicadoAliado = state.turnos.some(function (r) {
-      return r.mensajeroId === mensajeroIdCreate && r.sede === sede && r.fecha === fecha && r.hora === hora;
+      return r.mensajeroId === mensajeroIdCreate && r.sede === sede && r.fecha === fecha && r.hora === hora &&
+        computeEstado(r).code !== 'cancelled';
     });
     if (duplicadoAliado) {
       toast('warn', 'Turno duplicado', getMensajero(mensajeroIdCreate).nombre + ' ya tiene una ruta programada en ' + sede + ' a las ' + fmtTime12(hora) + '.');
@@ -16096,6 +16104,21 @@ function guardarCuotasMatriz() {
       if (cantidad > 0) state.cuotasMatriz.push({ sede: sede, aliado: aliado, dia: input.dataset.dia, franja: input.dataset.franja, vehiculo: input.dataset.vehiculo, cantidad: cantidad });
     });
     persistCuotasMatriz();
+    /* Ver requerimiento "Corrección y Auditoría de Cuota Base" (reporte de Rapiboy): si el ajuste de Admin
+       libera cupo en un bucket de MAÑANA (único día donde la matriz recién guardada ya rige -- ver comentario
+       de arriba) que tenga turnos 'Pendiente de Aprobación por Planner' por causal 'cupo', se promueven de
+       una vez -- sin este llamado quedaban huérfanos esperando una aprobación manual que ya no hacía falta
+       (idéntico al huérfano que ya resuelve recalcularPromocionCupo tras eliminar/desasignar un turno). */
+    var bucketsPendientesCupo = {};
+    state.turnos.forEach(function (r) {
+      if (r.fecha !== TOMORROW_STR || !r.pendienteAprobacionPlanner || r.pendienteAprobacionMotivo !== 'cupo') return;
+      if (getMensajero(r.mensajeroId).aliado !== aliado || r.sede !== sede) return;
+      bucketsPendientesCupo[r.vehiculo + '|' + r.hora] = r;
+    });
+    Object.keys(bucketsPendientesCupo).forEach(function (k) {
+      var r = bucketsPendientesCupo[k];
+      recalcularPromocionCupo(sede, aliado, r.vehiculo, r.hora, r.fecha);
+    });
     toast('ok', 'Matriz guardada', 'La matriz de cuotas de ' + aliado + ' en ' + sede + ' se actualizó — entra en vigor a partir de mañana ' + fmtDateLong(addDaysYMD(TODAY_STR, 1)) + '.');
   }
   /* Filas forzadas ("+ Agregar vehículo" sin guardar todavía, ver cuotasFilaForzada) de este sede+aliado+tab
