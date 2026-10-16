@@ -17366,12 +17366,22 @@ function completarInicioSesion(user) {
      (ver notificarCambiosSolicitudes) SIEMPRE arranca limpia en cada login -- nunca debe notificar como
      "nueva" una solicitud que ya existía antes de que esta sesión empezara a mirar la pantalla. */
   state.solicitudesNotifBaseline = null;
-  /* Claims con forma de idToken de Cognito (username/role/bodegaId/aliadoId) — ver auth.js. */
+  /* Claims con forma de idToken de Cognito (username/role/bodegaId/aliadoId) — ver auth.js.
+     Ver requerimiento "Fusión de Vista por Cuenta Multirrol con Bodega+Aliado Simultáneos" (reporte de
+     Cabify/Easyway, Jhan Durango): un usuario multirrol puede tener AMBOS user.sede (su rol BODEGA) y
+     user.aliado (su rol ALIADO) poblados a la vez en el mismo registro -- antes esto mandaba SIEMPRE los 2
+     al claim, sin importar cuál rol estuviera activo en este login. userEffectiveScope()/scopeSedes()
+     (ver más arriba) priorizan bodegaId sobre aliadoId sin saber que ese bodegaId era un residuo de OTRO
+     rol, así que una sesión ALIADO terminaba filtrando por bodega fija (ignorando el aliado por completo) y
+     mezclando los turnos de TODOS los aliados de esa única sede -- exactamente el síntoma reportado ("36
+     mensajeros" de Cabify Y Easyway, todos bajo Medellín, sin que el filtro de Bodega devolviera nada en
+     otras sedes). Cada claim ahora solo lleva el campo del rol con el que de verdad se está iniciando esta
+     sesión. */
   Auth.setCurrentUser({
     username: user.email.split('@')[0],
     role: user.role,
-    bodegaId: user.sede || null,
-    aliadoId: user.aliado || null,
+    bodegaId: user.role === 'BODEGA' ? (user.sede || null) : null,
+    aliadoId: user.role === 'ALIADO' ? (user.aliado || null) : null,
   });
   localStorage.setItem('melonn_session', user.id);
   document.getElementById('loginScreen').style.display = 'none';
@@ -17415,11 +17425,15 @@ function confirmarSeleccionPerfil(rolElegido) {
    los que son exclusivos del ARRANQUE de la sesión (overlay de carga, reset de vista, localStorage, ocultar
    login/appShell): la sesión sigue siendo la misma, solo cambia el "lente" de rol con el que se opera. */
 function aplicarRolActivo() {
+  /* Ver mismo requerimiento que completarInicioSesion ("Fusión de Vista por Cuenta Multirrol con Bodega+
+     Aliado Simultáneos"): el cambio de rol en caliente es el punto donde más importa -- una cuenta
+     multirrol que tenía BODEGA activo y pasa a ALIADO (o viceversa) debe soltar el claim del rol anterior,
+     nunca arrastrarlo junto al nuevo. */
   Auth.setCurrentUser({
     username: state.user.email.split('@')[0],
     role: state.user.role,
-    bodegaId: state.user.sede || null,
-    aliadoId: state.user.aliado || null,
+    bodegaId: state.user.role === 'BODEGA' ? (state.user.sede || null) : null,
+    aliadoId: state.user.role === 'ALIADO' ? (state.user.aliado || null) : null,
   });
   initUserContext();
   renderShell();
