@@ -351,6 +351,47 @@ var SUPABASE_ANON_KEY = 'sb_publishable_uD-7aN72jdjAjiquU92y8A_cn-Kt649';
 var supabaseClient = (typeof window !== 'undefined' && window.supabase)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
+/* Ver requerimiento "Integración de Google reCAPTCHA v3 (Invisible)": RECAPTCHA_SITE_KEY es pública por
+   diseño (viaja al cliente igual que en cualquier integración de reCAPTCHA) -- la Secret Key correspondiente
+   NUNCA vive aquí; está como secreto del lado del servidor en el Edge Function verify-recaptcha (ver
+   supabase/functions/verify-recaptcha/index.ts), al que este archivo solo le manda el token ya generado. */
+var RECAPTCHA_SITE_KEY = '6Ld3K-gtAAAAACjatg9g66wLc-1eAPT0Zzdv4Zg6';
+/* Obtiene un token de reCAPTCHA v3 (acción puntual, ej. 'login') y lo manda a verificar al Edge Function --
+   nunca a la inversa (el navegador JAMÁS ve la Secret Key ni llama directo a la API de Google con ella).
+   Diseño "fail-open": si el script de Google no cargó (bloqueado por una extensión/red corporativa, offline,
+   etc.) o la llamada al Edge Function falla por una razón de RED/infraestructura propia, se deja pasar el
+   login en vez de bloquear a un usuario real por un fallo ajeno a su intento -- reCAPTCHA v3 es invisible y
+   pensado como señal de riesgo adicional, no como único punto de falla de todo el acceso a la plataforma.
+   Solo se bloquea cuando Google layer responde explícitamente que el token NO es válido (success:false),
+   que es la señal real y concreta de que algo no verificó bien. */
+function ejecutarVerificacionRecaptcha(accion) {
+  if (typeof grecaptcha === 'undefined' || !grecaptcha || !grecaptcha.execute) {
+    return Promise.resolve(true);
+  }
+  var tokenPromise = new Promise(function (resolve) {
+    var resuelto = false;
+    var resolverUnaVez = function (v) { if (!resuelto) { resuelto = true; resolve(v); } };
+    try {
+      grecaptcha.ready(function () {
+        grecaptcha.execute(RECAPTCHA_SITE_KEY, { action: accion })
+          .then(function (token) { resolverUnaVez(token || null); })
+          .catch(function () { resolverUnaVez(null); });
+      });
+    } catch (e) { resolverUnaVez(null); }
+    setTimeout(function () { resolverUnaVez(null); }, 4000);
+  });
+  return tokenPromise.then(function (token) {
+    if (!token) return true; // fail-open: Google no respondió a tiempo/no disponible
+    return fetch(SUPABASE_URL + '/functions/v1/verify-recaptcha', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token, action: accion })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) { return data.success !== false; }) // solo bloquea un rechazo EXPLÍCITO
+      .catch(function () { return true; }); // fail-open: nuestro propio Edge Function no respondió
+  });
+}
 function scPullTable(table) {
   if (!supabaseClient) return Promise.resolve(null);
   /* Ver requerimiento "Duplicación de Nelly Molano en Gestión de Usuarios": se trae también updated_at (no
@@ -17755,9 +17796,11 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
-  /* Ver requerimiento "Remover Mock reCAPTCHA y Reasignar Herramienta al Logo de Melonn": en producción,
-     Google inyecta y gestiona su propio script/iframe de reCAPTCHA v3 automáticamente (verificación
-     invisible en segundo plano) -- no requiere ningún paso de gating manual desde este código. */
+  /* Ver requerimiento "Integración de Google reCAPTCHA v3 (Invisible)": reemplaza la nota anterior ("Remover
+     Mock reCAPTCHA...", que asumía que Google gestionaba todo sin intervención) -- ahora SÍ hay gating real:
+     intentarCredenciales() llama a ejecutarVerificacionRecaptcha('login') antes de evaluar credenciales (ver
+     más abajo). El badge oficial de Google sigue siendo 100% automático (inyectado por el script con
+     render=SITE_KEY en index.html) -- no hace falta ningún marcado propio para mostrarlo. */
   /* Ver requerimiento "Verificación de creación de Nuevo Usuario": un usuario creado desde Gestión de
      Usuarios existe de inmediato en Supabase (scPushRows, ver #formUsuario), pero un navegador/dispositivo
      que JAMÁS vio esta app antes arranca con state.users = solo el roster local (seed) + lo que scPullAll()
@@ -17779,20 +17822,30 @@ document.addEventListener('DOMContentLoaded', function () {
     if (lock) { mostrarBloqueoLogin(email, lock.lockedUntil); return; }
     document.getElementById('loginSubmitBtn').disabled = true;
     document.getElementById('loginError').textContent = '';
-    /* FIX "Contraseña recién cambiada en otra sesión se revierte sola tras un login fallido en una pestaña
-       vieja": la versión anterior de este fix (ver "mustChangePassword vuelve a pedirse tras borrar caché")
-       solo esperaba scPullEnVuelo -- la promesa del ÚLTIMO pull, que si la pestaña lleva abierta un rato ya
-       resolvió hace tiempo con datos que para entonces pueden estar desactualizados (p. ej. el password se
-       cambió desde OTRO navegador/sesión después de esa resolución). Un intento de login contra ese
-       state.users ya viejo fallaba ("incorrecta") -- y ESE fallo, vía registrarIntentoFallido ->
-       mirrorIntentosFallidosAUsuario, empuja a Supabase el objeto de usuario COMPLETO tal cual está en esta
-       pestaña (solo para persistir failedLoginCount/lockedUntil) -- incluyendo su password VIEJO, revirtiendo
-       en la nube el cambio real más reciente sin que nadie lo pidiera. Forzar SIEMPRE un scPullAll() fresco
-       (no solo esperar el último, posiblemente viejo) antes de resolver CUALQUIER intento -- éxito o fallo --
-       garantiza que state.users (y por lo tanto cualquier push posterior de ese mismo registro) refleje la
-       verdad actual de Supabase en el momento de decidir, cerrando esta ventana de carrera de raíz. */
-    scPullAll().then(function () {
-      document.getElementById('loginSubmitBtn').disabled = false;
+    /* Ver requerimiento "Integración de Google reCAPTCHA v3 (Invisible)": gating real antes de tocar
+       credenciales -- un rechazo EXPLÍCITO de Google (token inválido/manipulado) corta aquí mismo, sin
+       siquiera llegar a scPullAll/resolverCredenciales. Ver ejecutarVerificacionRecaptcha (arriba, junto a
+       SUPABASE_URL) para el diseño fail-open ante fallos de infraestructura (propia o de terceros). */
+    ejecutarVerificacionRecaptcha('login').then(function (humanoVerificado) {
+      if (!humanoVerificado) {
+        document.getElementById('loginSubmitBtn').disabled = false;
+        document.getElementById('loginError').textContent = 'No pudimos verificar la solicitud. Intenta de nuevo.';
+        return;
+      }
+      /* FIX "Contraseña recién cambiada en otra sesión se revierte sola tras un login fallido en una pestaña
+         vieja": la versión anterior de este fix (ver "mustChangePassword vuelve a pedirse tras borrar caché")
+         solo esperaba scPullEnVuelo -- la promesa del ÚLTIMO pull, que si la pestaña lleva abierta un rato ya
+         resolvió hace tiempo con datos que para entonces pueden estar desactualizados (p. ej. el password se
+         cambió desde OTRO navegador/sesión después de esa resolución). Un intento de login contra ese
+         state.users ya viejo fallaba ("incorrecta") -- y ESE fallo, vía registrarIntentoFallido ->
+         mirrorIntentosFallidosAUsuario, empuja a Supabase el objeto de usuario COMPLETO tal cual está en esta
+         pestaña (solo para persistir failedLoginCount/lockedUntil) -- incluyendo su password VIEJO, revirtiendo
+         en la nube el cambio real más reciente sin que nadie lo pidiera. Forzar SIEMPRE un scPullAll() fresco
+         (no solo esperar el último, posiblemente viejo) antes de resolver CUALQUIER intento -- éxito o fallo --
+         garantiza que state.users (y por lo tanto cualquier push posterior de ese mismo registro) refleje la
+         verdad actual de Supabase en el momento de decidir, cerrando esta ventana de carrera de raíz. */
+      scPullAll().then(function () {
+        document.getElementById('loginSubmitBtn').disabled = false;
       /* FIX "El bloqueo por intentos fallidos se puede saltar recargando la página / borrando caché":
          loginLockStatus() SOLO consultaba state.loginAttempts -- un objeto puramente en memoria, nunca
          persistido (ni en localStorage ni en Supabase), que arranca vacío en cada carga de página. El
@@ -17816,6 +17869,7 @@ document.addEventListener('DOMContentLoaded', function () {
       var lockPostPull = loginLockStatus(email);
       if (lockPostPull) { mostrarBloqueoLogin(email, lockPostPull.lockedUntil); return; }
       resolverCredenciales(email, password);
+      });
     });
   }
   function resolverCredenciales(email, password) {
