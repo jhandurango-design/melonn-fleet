@@ -30,6 +30,11 @@ server {
         # estado/iconos. script-src/connect-src/frame-src solo permiten los origenes reales que la app usa:
         # el CDN del SDK de Supabase, el proyecto real de Supabase (REST + Edge Functions) y reCAPTCHA de
         # Google (script, verificacion e iframe del widget).
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gstatic.com; font-src 'self' data:; connect-src 'self' https://dtfrhtzciidpljwqpzjr.supabase.co https://www.google.com https://www.gstatic.com; frame-src https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+        # FIX (verificado en produccion tras el primer despliegue de esta cabecera): styles.css carga la
+        # tipografia oficial del Design System (Sora) via @import a fonts.googleapis.com -- sin
+        # fonts.googleapis.com en style-src (la hoja de estilos del font) y fonts.gstatic.com en font-src
+        # (los archivos .woff2 reales que esa hoja referencia) el CSP la bloqueaba en silencio y la
+        # plataforma caia a la tipografia default del sistema.
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://www.gstatic.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://dtfrhtzciidpljwqpzjr.supabase.co https://www.google.com https://www.gstatic.com; frame-src https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
     }
 }
