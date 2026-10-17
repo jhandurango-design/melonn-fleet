@@ -467,6 +467,32 @@ function fijarSessionTokenNoBloqueante(email, password) {
     }
   });
 }
+/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa C: el token de "mint" nunca lleva el
+   rol (se decide client-side, DESPUÉS del mint, por cuenta multirol o no). Esta función pide un token
+   NUEVO que sí lo lleva -- el servidor confirma por su cuenta (releyendo app_users con service role) que
+   el rol pedido está realmente en user.roles, nunca confía en lo que el cliente afirme. Se llama en los 3
+   momentos reales en que el rol activo queda decidido: login de un solo rol (startSession), selección en
+   el modal multirol de primer ingreso, y cambio de rol en caliente (ambos en confirmarSeleccionPerfil) --
+   no bloqueante, igual criterio que fijarSessionTokenNoBloqueante: si falla, la sesión en curso sigue
+   funcionando con el token sin rol (solo pierde acceso `authenticated` a tablas con scoping por rol hasta
+   que se reintente, nunca bloquea nada). */
+function fijarSessionTokenConRolNoBloqueante(user) {
+  var tokenActual = localStorage.getItem('melonn_session');
+  if (!tokenActual || !user || !user.role) return;
+  fetch(SUPABASE_URL + '/functions/v1/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'mint_with_role', token: tokenActual, role: user.role })
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (res && res.ok && res.token) {
+        localStorage.setItem('melonn_session', res.token);
+        rebuildSupabaseAuthClient(res.token);
+      }
+    })
+    .catch(function () {});
+}
 function verificarSessionToken(token) {
   return fetch(SUPABASE_URL + '/functions/v1/session', {
     method: 'POST',
@@ -17736,6 +17762,7 @@ function startSession(user) {
     return;
   }
   user.role = (user.roles && user.roles[0]) || user.role;
+  fijarSessionTokenConRolNoBloqueante(user);
   completarInicioSesion(user);
 }
 function completarInicioSesion(user) {
@@ -17808,12 +17835,14 @@ function confirmarSeleccionPerfil(rolElegido) {
     var user = pendingRoleSelectionUser;
     pendingRoleSelectionUser = null;
     user.role = rolElegido;
+    fijarSessionTokenConRolNoBloqueante(user);
     closeModal();
     completarInicioSesion(user);
     return;
   }
   if (!state.user) return;
   state.user.role = rolElegido;
+  fijarSessionTokenConRolNoBloqueante(state.user);
   closeModal();
   aplicarRolActivo();
 }

@@ -5,23 +5,33 @@
 // firma -- APP_JWT_SECRET -- vive EXCLUSIVAMENTE como secreto de Supabase, nunca en el repo ni en ningun
 // archivo que el navegador descargue).
 //
-// Dos acciones:
+// Tres acciones:
 //   - "mint": recibe email+password, los verifica contra app_users con la SERVICE ROLE KEY (bypassa RLS
 //     a proposito -- esta funcion es la unica autoridad real sobre "quien es quien"), y si son validos
 //     firma un token nuevo. Se llama SOLO en los 3 momentos reales de prueba de credenciales frescas del
 //     frontend (login normal, cambio obligatorio de primer ingreso, restablecimiento via enlace de
 //     recuperacion) -- nunca reemplaza esa logica de negocio existente (lockouts, mustChangePassword,
 //     multirol, etc., que siguen viviendo intactos en app.js), solo añade una prueba criptografica encima.
+//     El token de "mint" NUNCA lleva el rol todavia -- ver "mint_with_role" abajo.
+//   - "mint_with_role" (Fase 2, Etapa C): recibe un token YA VALIDO (emitido por "mint"/"verify") + el rol
+//     que el usuario eligio operar (app.js ya decide esto -- login de un solo rol, o seleccion explicita
+//     en el modal multirol/cambio en caliente). Verifica la firma+expiracion del token entrante, vuelve a
+//     leer el registro FRESCO del usuario con la SERVICE ROLE KEY, confirma que `role` esta realmente en
+//     user.roles (un cliente no puede pedir un rol que no tiene, aunque edite el payload de su propio
+//     token -- la respuesta la decide esta funcion, no lo que el cliente mande), y firma un token NUEVO con
+//     el rol + bodegaId/aliadoId segun corresponda (mismo criterio exacto que Auth.setCurrentUser en
+//     app.js: bodegaId solo si role==='BODEGA', aliadoId solo si role==='ALIADO'). Este es el token que las
+//     politicas RLS de tablas con scoping real (ver app_users) pueden leer via auth.jwt()->>'app_role'.
 //   - "verify": recibe un token ya emitido (lo que el navegador guarda en localStorage) y, si la firma y
 //     la expiracion son validas, vuelve a leer el registro FRESCO del usuario desde app_users (asi una
 //     cuenta desactivada o editada despues de emitido el token deja de poder restaurar sesion de
 //     inmediato, sin esperar a que el token expire). Reemplaza el `state.users.find(id => savedId)` que
 //     hoy confia ciegamente en lo que haya en memoria/localStorage.
 //
-// IMPORTANTE (Etapa A, a proposito): el token emitido aqui todavia NO se adjunta a ninguna llamada a
-// PostgREST -- el rol `authenticated` no tiene ningun GRANT todavia sobre las tablas (ver Etapa B/C), asi
-// que intentar usarlo ahi solo rompería todo acceso a datos. Por ahora el token sirve EXCLUSIVAMENTE como
-// prueba de sesion para restaurarla de forma segura tras recargar la pagina.
+// IMPORTANTE (a proposito, Etapa A/B): el token emitido por "mint" NO se adjunta a ninguna llamada a
+// PostgREST hasta que el rol real se conoce -- el rol `authenticated` solo tiene GRANT sobre las tablas que
+// ya pasaron por su propia migracion de RLS (ver Etapa B: app_config_settings; Etapa C: app_users), nunca
+// sobre las demas todavia.
 const ALLOWED_ORIGINS = ["https://melonn-fleet.onrender.com"];
 function isAllowedOrigin(origin: string): boolean {
   if (ALLOWED_ORIGINS.includes(origin)) return true;
@@ -170,7 +180,7 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true, token, user: sanitizeUser(user) }), { headers: jsonHeaders });
     }
 
-    if (action === "verify") {
+    if (action === "verify" || action === "mint_with_role") {
       const token = typeof body?.token === "string" ? body.token : "";
       if (!token) {
         return new Response(JSON.stringify({ ok: false, error: "missing_token" }), { status: 400, headers: jsonHeaders });
@@ -190,6 +200,29 @@ Deno.serve(async (req: Request) => {
       if (!user || !user.activo) {
         return new Response(JSON.stringify({ ok: false, error: "inactive_or_missing" }), { status: 401, headers: jsonHeaders });
       }
+
+      if (action === "mint_with_role") {
+        const roleSolicitado = typeof body?.role === "string" ? body.role : "";
+        const rolesReales = Array.isArray(user.roles) ? (user.roles as unknown[]) : [];
+        /* El cliente NUNCA decide por si solo -- roleSolicitado tiene que estar realmente en user.roles,
+           releido fresco con service role en esta misma llamada (nunca lo que el cliente afirme). Un
+           intento de pedir un rol que no tiene queda rechazado aqui, no en el navegador. */
+        if (!roleSolicitado || rolesReales.indexOf(roleSolicitado) === -1) {
+          return new Response(JSON.stringify({ ok: false, error: "role_not_allowed" }), { status: 403, headers: jsonHeaders });
+        }
+        const now = Math.floor(Date.now() / 1000);
+        const nuevoToken = await signSessionJwt({
+          sub: user.id,
+          role: "authenticated",
+          app_role: roleSolicitado,
+          bodegaId: roleSolicitado === "BODEGA" ? (user.sede ?? null) : null,
+          aliadoId: roleSolicitado === "ALIADO" ? (user.aliado ?? null) : null,
+          iat: now,
+          exp: now + SESSION_TTL_SECONDS,
+        }, secret);
+        return new Response(JSON.stringify({ ok: true, token: nuevoToken, user: sanitizeUser(user) }), { headers: jsonHeaders });
+      }
+
       return new Response(JSON.stringify({ ok: true, user: sanitizeUser(user) }), { headers: jsonHeaders });
     }
 
