@@ -399,6 +399,21 @@ function ejecutarVerificacionRecaptcha(accion) {
       .catch(function () { return true; }); // fail-open: nuestro propio Edge Function no respondió
   });
 }
+/* Ver requerimiento "Correo transaccional via Resend": único punto desde donde app.js dispara un correo real
+   -- llama al Edge Function send-email (ver supabase/functions/send-email/index.ts), que arma el HTML del
+   mensaje del lado del servidor según "type" y lo manda con la API de Resend usando RESEND_API_KEY (secreto
+   de Supabase, nunca expuesto aquí). type/data documentados en ese mismo archivo (hoy: 'recovery',
+   'invitation', 'test'). Resuelve siempre con {ok, error?} -- nunca rechaza -- para que el llamador decida
+   si avisa al usuario o solo lo registra, igual que scPushRows. */
+function enviarCorreoTransaccional(to, type, data) {
+  return fetch(SUPABASE_URL + '/functions/v1/send-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to: to, type: type, data: data || {} })
+  })
+    .then(function (r) { return r.json(); })
+    .catch(function (e) { return { ok: false, error: String(e) }; });
+}
 function scPullTable(table) {
   if (!supabaseClient) return Promise.resolve(null);
   /* Ver requerimiento "Duplicación de Nelly Molano en Gestión de Usuarios": se trae también updated_at (no
@@ -626,8 +641,8 @@ var scPullEnVuelo = null;
    real que ya existía. */
 var cuotasVigenteHoySincronizadaReal = false;
 function scPullAll() {
-  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual'), scPullTable('app_config_settings')]).then(function (res) {
-    var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4], flotaHabitualRows = res[5], configSettingsRows = res[6];
+  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual'), scPullTable('app_config_settings'), scPullTable('app_security_events')]).then(function (res) {
+    var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4], flotaHabitualRows = res[5], configSettingsRows = res[6], securityEventRows = res[7];
     var changed = false;
     if (users && users.length) {
       state.users = deduplicarUsuariosPorEmail(users);
@@ -701,6 +716,20 @@ function scPullAll() {
       state.configSettings = configSettingsRows[0].value.settings;
       try { localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(state.configSettings)); } catch (e) {}
       syncCatalogosDesdeConfig();
+      changed = true;
+    }
+    /* Ver requerimiento "Sincronización de Solicitudes de Recuperación al panel de Admin": merge, no
+       reemplazo ciego -- un evento recién creado en ESTA pestaña (ej. el propio Admin resolviéndolo hace un
+       instante) puede no haber terminado su scPushRows todavía cuando cae este pull; se conserva cualquier
+       evento local cuyo id aún no aparezca en lo remoto, para no hacerlo parpadear/desaparecer un momento.
+       Orden por id descendente (timestamp en base36 al frente, ver nextSecurityEventId) -- mismo efecto que
+       el unshift() de registrarEventoSeguridad (más nuevo primero). */
+    if (securityEventRows && securityEventRows.length) {
+      var eventosRemotos = securityEventRows.map(function (row) { return row.value; });
+      var idsRemotos = {};
+      eventosRemotos.forEach(function (ev) { idsRemotos[ev.id] = true; });
+      var localesSinConfirmar = state.securityEvents.filter(function (ev) { return !idsRemotos[ev.id]; });
+      state.securityEvents = eventosRemotos.concat(localesSinConfirmar).sort(function (a, b) { return (b.id || '').localeCompare(a.id || ''); });
       changed = true;
     }
     if (changed && state.user) syncAndRender(true);
@@ -1940,7 +1969,6 @@ const state = {
   cumplimientoATiempoMicroFiltro: 'todos',
   loginAttempts: {},
   securityEvents: [],
-  securityEventCounter: 0,
   securityConfig: { maxIntentos: 2, bloqueoMs: 60000 },
   /* Filtro del nuevo panel "Solicitudes de Recuperación de Contraseña" (ver requerimiento "Módulo de Gestión
      en Seguridad y Accesos"): 'pendientes' (default) muestra solo los eventos tipo 'recuperacion' aún sin
@@ -14730,7 +14758,12 @@ function initUserContext() {
   document.querySelectorAll('#progDaySegment button').forEach(function (b) { b.classList.toggle('active', b.dataset.day === state.progDay); });
 }
 /* ---------------- Seguridad y Autenticación ---------------- */
-function nextSecurityEventId() { state.securityEventCounter++; return 'SEC-' + String(state.securityEventCounter).padStart(3, '0'); }
+/* Ver requerimiento "Sincronización de Solicitudes de Recuperación al panel de Admin": el contador secuencial
+   (state.securityEventCounter) era puramente local -- 2 navegadores distintos (ej. el de Nelly y el de
+   William) arrancan ambos en 0 y producirían el mismo "SEC-001", chocando al hacer upsert contra la misma
+   fila de Supabase (uno pisaría silenciosamente al otro). Con timestamp+random en vez de un contador, cada
+   id nace único sin depender de que el navegador ya conozca los eventos de los demás. */
+function nextSecurityEventId() { return 'SEC-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8); }
 /* Ver requerimiento "Módulo de Gestión en Seguridad y Accesos": solo los eventos tipo 'recuperacion' tienen
    un ciclo de vida Pendiente -> Resuelto (ver renderSolicitudesRecuperacion/resolverEventoRecuperacion) --
    el resto de tipos (bloqueo, fallo, desbloqueo, reset, creacion, etc.) siguen siendo puramente informativos,
@@ -14739,6 +14772,12 @@ function nextSecurityEventId() { state.securityEventCounter++; return 'SEC-' + S
 function registrarEventoSeguridad(tipo, email, detalle) {
   var ev = { id: nextSecurityEventId(), tipo: tipo, email: email, detalle: detalle, ts: fmtClock(state.now), fecha: TODAY_STR, estado: tipo === 'recuperacion' ? 'pendiente' : null };
   state.securityEvents.unshift(ev);
+  /* Ver requerimiento "Sincronización de Solicitudes de Recuperación al panel de Admin": antes este evento
+     quedaba solo en la memoria del navegador que lo disparó (ej. el Aliado pidiendo "Olvidé mi contraseña"
+     desde el login, incluso ANTES de que exista sesión alguna) -- scPushRows ya tolera llamarse sin que
+     supabaseClient esté listo (resuelve {ok:true} sin hacer nada), así que es seguro invocarlo aquí
+     incondicionalmente, con o sin sesión activa. */
+  scPushRows('app_security_events', [ev]);
   return ev;
 }
 /* Estado de bloqueo vigente de un correo (real, en milisegundos de reloj del navegador — independiente del reloj Gravity simulado). */
@@ -14858,6 +14897,7 @@ function resolverEventoRecuperacion(eventId, detalleResolucion) {
   if (!ev || ev.estado !== 'pendiente') return;
   ev.estado = 'resuelto';
   ev.detalle = detalleResolucion;
+  scPushRows('app_security_events', [ev]);
 }
 /* "Copiar Enlace de Recuperación": token propio (independiente del de activación -- vigencia de 24h, no 7
    días, porque una recuperación de clave es un trámite puntual, no una invitación nueva). Resuelve el evento
@@ -14888,6 +14928,14 @@ function copiarEnlaceRecuperacion(eventId) {
   }
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(marcarCopiado, copiarFallback);
   else copiarFallback();
+  /* Ver requerimiento "Conecta de forma definitiva... enlaces de recuperación manuales... al sistema de
+     correo configurado": además de copiar el enlace (sigue disponible como respaldo/envío manual por otro
+     canal), ahora también se envía por correo real via Resend -- no bloquea el flujo si el envío falla (el
+     Admin siempre se queda con el enlace copiado como respaldo). */
+  enviarCorreoTransaccional(u.email, 'recovery', { nombre: u.nombre, link: link }).then(function (res) {
+    if (res && res.ok) toast('ok', 'Correo enviado', 'También se envió el enlace por correo a ' + u.email + '.');
+    else toast('warn', 'Correo no enviado', 'El enlace quedó copiado, pero el envío por correo falló -- compártelo manualmente.');
+  });
   resolverEventoRecuperacion(eventId, 'Se generó y copió un enlace de recuperación (vigente 24h) para ' + u.email + ', solicitado por ' + state.user.nombre + '.');
   renderSeguridad();
 }
@@ -17569,6 +17617,13 @@ function completarInicioSesion(user) {
   localStorage.setItem('melonn_session', user.id);
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appShell').hidden = false;
+  /* Ver requerimiento "Bug de reCAPTCHA persistente en la app": el badge oficial de Google
+     (.grecaptcha-badge) solo tiene sentido en las rutas públicas de autenticación (Login/Recuperación) --
+     dentro de la plataforma ya autenticada no vuelve a dispararse ninguna verificación, así que mostrarlo
+     ahí es puro ruido visual. Clase en <body> (ver .grecaptcha-badge en styles.css) en vez de tocar el
+     elemento del badge directamente -- el script de Google lo inyecta de forma asíncrona, así que
+     manipularlo por selector CSS evita cualquier carrera con el momento exacto en que aparece en el DOM. */
+  document.body.classList.add('app-authenticated');
   document.getElementById('loginError').textContent = '';
   initUserContext();
   renderShell();
@@ -17696,6 +17751,7 @@ function logout() {
   document.getElementById('contextPill').hidden = true;
   document.getElementById('appShell').hidden = true;
   document.getElementById('loginScreen').style.display = '';
+  document.body.classList.remove('app-authenticated');
   document.getElementById('loginForm').reset();
   document.getElementById('loginError').textContent = '';
   document.getElementById('userDropdown').classList.remove('open');
@@ -19055,6 +19111,13 @@ document.addEventListener('DOMContentLoaded', function () {
       scPushRows('app_users', [nuevo]).then(function () {
         registrarEventoSeguridad('creacion', email, 'Se creó la cuenta de ' + nombre + ' (' + roles.join(' + ') + '), activa de inmediato con clave temporal -- solicitado por ' + state.user.nombre + '. Deberá cambiarla en su primer inicio de sesión.');
         toast('ok', 'Usuario creado', nombre + ' fue registrado como ' + roles.join(' + ') + ' y ya puede iniciar sesión con la clave temporal ' + CLAVE_TEMPORAL_USUARIO_NUEVO + '.');
+        /* Ver requerimiento "Conecta... invitaciones a usuarios nuevos... al sistema de correo configurado":
+           puramente informativo, fire-and-forget -- la cuenta YA quedó activa y utilizable (ver comentario
+           de arriba, "Eliminación del Sistema de Activación por Enlace/Token": esto se retiró antes
+           precisamente porque el flujo de creación NUNCA debe depender de que un correo llegue). Si el envío
+           falla, nadie se entera por un toast de error -- el Admin ya tiene la clave temporal en pantalla y
+           se la puede compartir por el canal que prefiera, igual que siempre. */
+        enviarCorreoTransaccional(email, 'invitation', { nombre: nombre, email: email, tempPassword: CLAVE_TEMPORAL_USUARIO_NUEVO });
         closeModal();
         renderUsuarios();
       });

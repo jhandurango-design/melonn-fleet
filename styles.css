@@ -219,6 +219,11 @@ a{color:inherit;}
 @keyframes loginFooterScroll{from{transform:translateX(0);}to{transform:translateX(-50%);}}
 
 @media (prefers-reduced-motion: reduce){.login-footer-track{animation:none;}}
+/* Ver requerimiento "Bug de reCAPTCHA persistente en la app": el badge oficial de Google solo aplica a las
+   rutas públicas de autenticación (Login/Recuperación) -- app.js agrega .app-authenticated a <body> justo al
+   entrar a la plataforma (startSession) y la quita al salir (logout), así que esta regla por selector cubre
+   cualquier momento en que el badge aparezca en el DOM sin depender de cuándo lo inyecta el script de Google. */
+.app-authenticated .grecaptcha-badge{display:none !important;}
 .orbit{width:230px;height:230px;border-radius:50%;border:1px solid rgba(255,255,255,0.14);display:flex;align-items:center;justify-content:center;position:relative;}
 .orbit::before{content:"";position:absolute;inset:-38px;border-radius:50%;border:1px dashed rgba(255,255,255,0.1);}
 .orbit-core{
