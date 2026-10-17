@@ -4745,6 +4745,16 @@ function registrarSalida(routeId) {
   if (!canDo('departure.register')) return;
   var route = state.turnos.find(function (r) { return r.id === routeId; });
   if (!route) return;
+  /* FIX "Acción de despacho activa en turnos con Incumplimiento Confirmado/Cancelado": segunda barrera,
+     independiente de que el botón ya esté oculto en rowHtmlDespacho (ver `bloqueado` ahí) -- esta función
+     nunca validaba el estado del turno por sí misma, así que una llamada directa (botón ya renderizado
+     antes de este fix, un doble clic en vuelo, o cualquier otro llamador futuro) podía sobreescribir
+     route.salida sobre un ciclo ya cerrado (salida/retiro/incumplimiento confirmado/cancelación aceptada). */
+  var estSalida = computeEstado(route);
+  if (route.salida || route.retirado || estSalida.code === 'afectacion_confirmada' || estSalida.code === 'cancelled') {
+    toast('warn', 'Turno ya cerrado', route.id + ' ya no admite registrar salida — su ciclo está terminado (' + estSalida.label + ').');
+    return;
+  }
   /* Tramo 3 "Espera Prolongada" de la Matriz de Tiempos en bodega (ver classifyAuditRecord):
      si el mensajero llevaba >= 2 horas desde su llegada y AÚN ASÍ se despachó con
      éxito (a diferencia de un "Se Retira", ver formRetiro), se marca la afectación para reconocer el Tiempo
@@ -7500,8 +7510,13 @@ function rowHtmlDespacho(route) {
   /* pendienteAprobacionPlanner (ver evaluarAprobacionCuota/submitTurno): el turno excedió cupo o cayó en
      festivo con el módulo de Cuotas activo para ese país — congelado hasta que Planner lo apruebe/rechace
      desde "Aprobaciones de Cuotas y Festivos" (Solicitudes y Cambios), mismo tratamiento que un Incumplimiento
-     Confirmado para efectos de bloquear Llegó a Bodega/Marcar Salida/Se Retira. */
-  var bloqueado = !!route.salida || !!route.retirado || est.code === 'afectacion_confirmada' || !!route.pendienteAprobacionPlanner;
+     Confirmado para efectos de bloquear Llegó a Bodega/Marcar Salida/Se Retira.
+     FIX "Acción de despacho activa en turnos con Incumplimiento Confirmado/Cancelado": 'cancelled' (ver
+     SOLICITUD_TIPO_CODES.cancelacion.aceptada/computeEstado) quedaba afuera de este chequeo -- un turno que
+     ya tenía route.llegada=true ANTES de que Planner/Admin aprobara su cancelación conservaba ese flag (es
+     un hecho histórico, la cancelación nunca lo resetea), así que "Marcar Salida"/"Se Retira" seguían
+     renderizándose como si el ciclo aún estuviera abierto sobre una ruta ya terminada/inerte. */
+  var bloqueado = !!route.salida || !!route.retirado || est.code === 'afectacion_confirmada' || est.code === 'cancelled' || !!route.pendienteAprobacionPlanner;
   var novedadVencida = est.code === 'afectacion_confirmada' && !!route.novedadElementos;
 
   /* Control de check Maleta/Celular: vienen MARCADOS por defecto (checked salvo === false explícito, no
