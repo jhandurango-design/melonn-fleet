@@ -414,6 +414,46 @@ function enviarCorreoTransaccional(to, type, data) {
     .then(function (r) { return r.json(); })
     .catch(function (e) { return { ok: false, error: String(e) }; });
 }
+/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa A ("mecanismo de token, sin tocar
+   RLS todavía"): localStorage.melonn_session guardaba hasta ahora el id PLANO del usuario -- cualquiera
+   podía escribir el id de otro usuario en su propio navegador y suplantarlo, porque nada lo verificaba
+   criptográficamente. Estas 2 funciones hablan con el nuevo Edge Function "session" (mint/verify de un JWT
+   HS256 firmado server-side, ver supabase/functions/session/index.ts) -- el secreto de firma vive
+   EXCLUSIVAMENTE como secreto de Supabase, nunca llega al navegador.
+   IMPORTANTE (a propósito, Etapa A): este token todavía NO se adjunta a ninguna llamada a Supabase/
+   PostgREST -- scPullTable/scPushRows/scDeleteRows siguen exactamente igual, con la anon key de siempre.
+   El rol `authenticated` no tiene ningún GRANT sobre las tablas todavía (eso es Etapa B/C de la Fase 2);
+   adjuntar el token ahora solo rompería todo acceso a datos. Por ahora el token sirve EXCLUSIVAMENTE para
+   restaurar la sesión de forma segura tras recargar la página, en vez de confiar ciegamente en un id. */
+function solicitarSessionToken(email, password) {
+  return fetch(SUPABASE_URL + '/functions/v1/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'mint', email: email, password: password })
+  })
+    .then(function (r) { return r.json(); })
+    .catch(function (e) { return { ok: false, error: String(e) }; });
+}
+/* Llamada en 3 puntos (ver resolverCredenciales, #formCambioObligatorio, #formRecuperarCuenta) -- los 3
+   momentos reales en que el frontend acaba de probar una credencial fresca -- de forma NO bloqueante: si
+   falla (red caída, Edge Function temporalmente abajo), la sesión en curso sigue funcionando igual que
+   siempre (startSession ya corrió, sin esperar esto); el único efecto de un fallo aquí es que, si el
+   usuario recarga la pestaña, tendrá que volver a iniciar sesión -- nunca bloquea el login mismo. */
+function fijarSessionTokenNoBloqueante(email, password) {
+  solicitarSessionToken(email, password).then(function (res) {
+    if (res && res.ok && res.token) localStorage.setItem('melonn_session', res.token);
+  });
+}
+function verificarSessionToken(token) {
+  return fetch(SUPABASE_URL + '/functions/v1/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'verify', token: token })
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (res) { return (res && res.ok) ? res.user : null; })
+    .catch(function () { return null; });
+}
 function scPullTable(table) {
   if (!supabaseClient) return Promise.resolve(null);
   /* Ver requerimiento "Duplicación de Nelly Molano en Gestión de Usuarios": se trae también updated_at (no
@@ -17697,7 +17737,10 @@ function completarInicioSesion(user) {
     bodegaId: user.role === 'BODEGA' ? (user.sede || null) : null,
     aliadoId: user.role === 'ALIADO' ? (user.aliado || null) : null,
   });
-  localStorage.setItem('melonn_session', user.id);
+  /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa A: localStorage.melonn_session ya
+     NO se fija aquí con el id plano del usuario -- ahora lo fija fijarSessionTokenNoBloqueante() (ver sus
+     3 llamadores: resolverCredenciales, #formCambioObligatorio, #formRecuperarCuenta) con un JWT firmado
+     server-side, el único momento en que el frontend realmente tiene credenciales frescas para probar. */
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('appShell').hidden = false;
   /* Ver requerimiento "Bug de reCAPTCHA persistente en la app": el badge oficial de Google
@@ -17916,11 +17959,18 @@ document.addEventListener('DOMContentLoaded', function () {
   wireSidebarDelegation();
 
   if (!resolverRecuperacionDesdeUrl()) {
-    var savedId = localStorage.getItem('melonn_session');
-    if (savedId) {
-      var u = state.users.find(function (x) { return x.id === savedId; });
-      if (u && u.activo) startSession(u);
-      else localStorage.removeItem('melonn_session');
+    /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa A: localStorage.melonn_session ya
+       no es un id plano (trivialmente forjable -- cualquiera podía escribir el id de OTRO usuario en su
+       propio navegador y suplantarlo) -- ahora es un JWT firmado server-side, verificado aquí contra el
+       Edge Function "session" antes de restaurar cualquier sesión. verificarSessionToken() además vuelve a
+       leer el registro FRESCO del usuario (no el que hubiera quedado cacheado), así que una cuenta
+       desactivada/editada después de emitido el token deja de poder restaurar sesión de inmediato. */
+    var savedToken = localStorage.getItem('melonn_session');
+    if (savedToken) {
+      verificarSessionToken(savedToken).then(function (u) {
+        if (u && u.activo) startSession(u);
+        else localStorage.removeItem('melonn_session');
+      });
     }
   }
 
@@ -18052,6 +18102,10 @@ document.addEventListener('DOMContentLoaded', function () {
       delete state.loginAttempts[email];
       document.getElementById('loginError').textContent = '';
       document.getElementById('loginSubmitBtn').disabled = false;
+      /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa A: credencial fresca recién
+         probada -- momento real para pedir un token de sesión firmado (no bloqueante, ver su propio
+         comentario). */
+      fijarSessionTokenNoBloqueante(email, password);
       var teniaBloqueoPrevio = !!(user.failedLoginCount || user.lockedUntil);
       if (teniaBloqueoPrevio) { user.failedLoginCount = 0; user.lockedUntil = null; }
       /* Migración perezosa (ver cabecera "Seguridad: Hash de Contraseñas"): un login correcto contra un
@@ -18133,6 +18187,9 @@ document.addEventListener('DOMContentLoaded', function () {
       }
       pendingFirstLoginUser = null;
       closeModal();
+      /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa A: credencial fresca (la clave
+         recién definida) -- momento real para pedir un token de sesión firmado. */
+      fijarSessionTokenNoBloqueante(user.email, nueva);
       startSession(user);
     });
     });
@@ -18203,6 +18260,9 @@ document.addEventListener('DOMContentLoaded', function () {
       });
       registrarEventoSeguridad('recuperacion_completada', u.email, 'El usuario restableció su propia contraseña a través del enlace de recuperación.');
       document.getElementById('recoveryScreen').hidden = true;
+      /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa A: credencial fresca (la clave
+         recién restablecida) -- momento real para pedir un token de sesión firmado. */
+      fijarSessionTokenNoBloqueante(u.email, nueva);
       startSession(u);
     });
     });
