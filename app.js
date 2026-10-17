@@ -977,11 +977,26 @@ function capacidadPorTipo(tipo) { return CAPACIDAD_POR_TIPO[tipo] || '—'; }
 
 /* ---------------- Programación (rutas) ---------------- */
 /* Ver requerimiento "Desconexión del Reloj Simulado": TODAY_STR/TOMORROW_STR ya NO son fechas fijas de
-   semilla -- se calculan una sola vez, al cargar el script, contra la fecha real del sistema. Toda la data
-   semilla de TURNOS que referencia TODAY_STR/TOMORROW_STR (en vez de un string de fecha hardcodeado aparte)
-   queda así automáticamente anclada al día real en que se abre la app, sin tocar cada registro. */
-const TODAY_STR = fmtDateYMD(new Date());
-const TOMORROW_STR = addDaysYMD(TODAY_STR, 1);
+   semilla -- se calculan contra la fecha real. Toda la data semilla de TURNOS que referencia TODAY_STR/
+   TOMORROW_STR (en vez de un string de fecha hardcodeado aparte) queda así automáticamente anclada al día
+   real en que se abre la app, sin tocar cada registro.
+   Ver requerimiento "Riesgo de Zona Horaria en TODAY_STR/TOMORROW_STR": antes se leían del reloj/zona
+   horaria LOCAL del dispositivo (`new Date()` interpretado en esa zona) -- toda la operación es de Colombia
+   (y las sedes de México, que para efectos de este corte de día siguen el mismo calendario operativo), así
+   que un dispositivo con la zona horaria u hora mal configurada corría el riesgo real de desalinear qué
+   turnos cuentan como "hoy"/"mañana" en TODA la plataforma. bogotaTodayStr() fija el cálculo a
+   'America/Bogota' explícitamente vía Intl.DateTimeFormat, sin importar la configuración del dispositivo.
+   TODAY_STR/TOMORROW_STR dejan de ser `const`: gravityTick() las re-deriva cada segundo (mismo tick que ya
+   refresca state.now) para que una pestaña abierta cruzando medianoche real de Bogotá avance de día sin
+   necesidad de recargar. */
+function bogotaTodayStr() {
+  var parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+  var map = {};
+  parts.forEach(function (p) { map[p.type] = p.value; });
+  return map.year + '-' + map.month + '-' + map.day;
+}
+var TODAY_STR = bogotaTodayStr();
+var TOMORROW_STR = addDaysYMD(TODAY_STR, 1);
 const AUDIT_MIN_MONTH = '2026-01';
 
 const TURNOS = (function () {
@@ -4840,6 +4855,12 @@ var scAutosaveTickCount = 0;
 function gravityTick() {
   if (!state.clockRunning || !state.user) return;
   state.now = new Date();
+  /* Ver requerimiento "Riesgo de Zona Horaria en TODAY_STR/TOMORROW_STR": re-deriva el día calendario real
+     de Bogotá en cada tick (1/seg) -- si una pestaña queda abierta cruzando la medianoche real, TODAY_STR/
+     TOMORROW_STR avanzan solas, sin esperar a un refresh manual, y syncAndRender(false) de abajo ya
+     repinta todo lo que filtra por ellas con el día correcto. */
+  var hoyBogota = bogotaTodayStr();
+  if (hoyBogota !== TODAY_STR) { TODAY_STR = hoyBogota; TOMORROW_STR = addDaysYMD(TODAY_STR, 1); }
   syncAndRender(false);
   scAutosaveTickCount++;
   if (scAutosaveTickCount >= 30) { scAutosaveTickCount = 0; scPushAll(); }
