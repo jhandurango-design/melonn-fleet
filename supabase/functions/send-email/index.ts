@@ -6,11 +6,25 @@
 //
 // El HTML de cada correo se arma SERVER-SIDE segun "type" -- el cliente nunca manda HTML libre (evita
 // inyeccion de contenido arbitrario en el correo enviado desde la cuenta de Resend de Melonn).
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+// Ver requerimiento "Auditoria Integral de Seguridad", Fase 1, punto 1 (CORS): antes reflejaba "*" -- cualquier
+// sitio podia invocar este endpoint desde el navegador de una victima y leer la respuesta (aunque el riesgo
+// real aqui es menor que en verify-recaptcha, ya que este endpoint no revela nada sensible en su respuesta,
+// mantener el mismo criterio de origenes permitidos en TODOS los Edge Functions evita que uno quede como
+// excepcion olvidada si mas adelante empieza a devolver algo sensible).
+const ALLOWED_ORIGINS = ["https://melonn-fleet.onrender.com"];
+function isAllowedOrigin(origin: string): boolean {
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+function corsHeadersFor(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin") || "";
+  return {
+    "Access-Control-Allow-Origin": isAllowedOrigin(origin) ? origin : ALLOWED_ORIGINS[0],
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  };
+}
 
 const FROM = "melonn fleet <onboarding@resend.dev>";
 
@@ -81,6 +95,7 @@ function buildEmail(type: string, data: Record<string, unknown>): { subject: str
 }
 
 Deno.serve(async (req: Request) => {
+  const CORS_HEADERS = corsHeadersFor(req);
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ ok: false, error: "method_not_allowed" }), {

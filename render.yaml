@@ -1,0 +1,16 @@
+# Ver requerimiento "Auditoria Integral de Seguridad", Fase 1, punto 2 (Cabeceras de Seguridad HTTP).
+#
+# NOTA IMPORTANTE: este servicio es un contenedor Docker/nginx (ver Dockerfile), no un "Static Site"
+# nativo de Render -- la clave `headers` del spec de render.yaml es exclusiva de ese otro tipo de
+# servicio y, sobre un servicio Docker, Render la ignora en silencio. Por eso las cabeceras de seguridad
+# (CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, HSTS) NO viven aqui -- viven en
+# nginx.conf.template, el servidor real que las envia en cada respuesta. Este archivo solo deja
+# declarada la definicion del servicio para quien quiera administrarlo como Blueprint desde Render.
+services:
+  - type: web
+    name: melonn-fleet
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 8080

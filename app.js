@@ -14867,6 +14867,41 @@ function generarClaveTemporal() { return 'Melonn' + Math.floor(1000 + Math.rando
    nuevo (#formUsuario) nace con esta MISMA clave fija -- deliberado, para que Admin pueda comunicarla de
    memoria sin depender de copiar/pegar nada por cuenta. mustChangePassword la neutraliza de inmediato: nadie
    queda operando con ella más allá del primer inicio de sesión. */
+/* ---------------- Seguridad: Hash de Contraseñas ----------------
+   Ver requerimiento "Auditoría Integral de Seguridad", Fase 1, punto 3 ("Hashing de Contraseñas"): u.password
+   vivía en texto plano en Supabase, comparado con `===` -- un acceso no autorizado a la tabla (o un volcado
+   de backup) exponía TODAS las contraseñas reales de un vistazo. Se adopta SHA-256 + salt aleatorio por
+   usuario vía Web Crypto (crypto.subtle, nativo del navegador -- sin librería ni backend nuevo, tal como se
+   definió en el plan aprobado). Formato persistido: "sha256$<saltHex>$<hashHex>".
+   RETROCOMPATIBILIDAD/transición progresiva: isPasswordHashed() distingue el formato nuevo del texto plano
+   legado -- verifyPassword() detecta cuál es y compara con el método correcto, así ninguna cuenta existente
+   pierde acceso el día del despliegue. Cada login exitoso contra un registro todavía en texto plano lo
+   re-hashea de inmediato (ver resolverCredenciales) -- migración perezosa, sin tocar cuentas que no vuelven
+   a loguearse ni requerir un script de migración masiva aparte. */
+var PASSWORD_HASH_PREFIX = 'sha256$';
+function hashRandomSaltHex() {
+  var bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.prototype.map.call(bytes, function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+}
+function sha256Hex(texto) {
+  return crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto)).then(function (buf) {
+    return Array.prototype.map.call(new Uint8Array(buf), function (b) { return b.toString(16).padStart(2, '0'); }).join('');
+  });
+}
+function isPasswordHashed(stored) { return typeof stored === 'string' && stored.indexOf(PASSWORD_HASH_PREFIX) === 0; }
+/* Promise<string> -- password ya hasheado, listo para asignar a u.password/persistir. */
+function hashPassword(plano) {
+  var salt = hashRandomSaltHex();
+  return sha256Hex(salt + ':' + plano).then(function (hash) { return PASSWORD_HASH_PREFIX + salt + '$' + hash; });
+}
+/* Promise<boolean> -- true si `plano` corresponde al password almacenado, sea cual sea su formato (hasheado
+   nuevo o texto plano legado todavía sin migrar). */
+function verifyPassword(stored, plano) {
+  if (!isPasswordHashed(stored)) return Promise.resolve(stored === plano);
+  var partes = stored.split('$'); // ['sha256', saltHex, hashHex]
+  return sha256Hex(partes[1] + ':' + plano).then(function (hash) { return hash === partes[2]; });
+}
 var CLAVE_TEMPORAL_USUARIO_NUEVO = 'Melonn2026*';
 /* REGLA ESTRICTA DE PRIVACIDAD: la clave temporal generada nunca se expone en pantalla (ni en el modal ni en
    ningún toast) -- solo queda almacenada en u.password, igual que antes, para que el usuario inicie sesión.
@@ -14878,7 +14913,11 @@ function restablecerClaveTemporal(userId) {
   var u = state.users.find(function (x) { return x.id === userId; });
   if (!u) return;
   var temp = generarClaveTemporal();
-  u.password = temp;
+  /* Ver requerimiento "Hashing de Contraseñas": `temp` sigue viajando en texto plano SOLO dentro de esta
+     función (nunca se expone, ver REGLA ESTRICTA DE PRIVACIDAD arriba) -- lo que se persiste en u.password
+     es su hash, nunca el valor plano. */
+  hashPassword(temp).then(function (hashed) {
+  u.password = hashed;
   u.mustChangePassword = true;
   u.isTemporaryPassword = true;
   u.failedLoginCount = 0;
@@ -14895,6 +14934,7 @@ function restablecerClaveTemporal(userId) {
   document.getElementById('resetPasswordDoneStep').hidden = false;
   document.getElementById('resetPasswordDoneNote').textContent = '✅ Se ha enviado un correo a ' + u.email + ' con las instrucciones de restablecimiento. Por motivos de seguridad, la clave no es visible en pantalla.';
   syncAndRender(true);
+  });
 }
 /* Ver requerimiento "Eliminación del Sistema de Activación por Enlace/Token -- Creación Directa con Clave
    Temporal": generador de token genérico, compartido por lo que quede de ese estilo de flujo -- hoy solo lo
@@ -14970,16 +15010,21 @@ function asignarClaveTemporalRecuperacion(eventId) {
   var u = state.users.find(function (x) { return x.email.toLowerCase() === ev.email.toLowerCase(); });
   if (!u) { toast('warn', 'Usuario no encontrado', 'No existe ninguna cuenta con el correo ' + ev.email + '.'); return; }
   var temp = generarClaveTemporal();
-  u.password = temp;
-  u.mustChangePassword = true;
-  u.isTemporaryPassword = true;
-  u.failedLoginCount = 0;
-  u.lockedUntil = null;
-  delete u.recoveryToken;
-  delete u.recoveryTokenExpiraEn;
-  delete state.loginAttempts[u.email.toLowerCase()];
-  persistUsers();
-  scPushRows('app_users', [u]);
+  /* Ver requerimiento "Hashing de Contraseñas": `temp` sigue copiándose en texto plano al portapapeles del
+     Admin (es el canal de entrega real a la persona) -- lo que se persiste en u.password es su hash. La
+     copia al portapapeles no depende de este hash, así que corre en paralelo, sin esperarlo. */
+  hashPassword(temp).then(function (hashed) {
+    u.password = hashed;
+    u.mustChangePassword = true;
+    u.isTemporaryPassword = true;
+    u.failedLoginCount = 0;
+    u.lockedUntil = null;
+    delete u.recoveryToken;
+    delete u.recoveryTokenExpiraEn;
+    delete state.loginAttempts[u.email.toLowerCase()];
+    persistUsers();
+    scPushRows('app_users', [u]);
+  });
   function marcarCopiada() { toast('ok', 'Clave temporal copiada', 'Compártela con ' + u.nombre + ' por un canal seguro -- deberá cambiarla en su próximo ingreso.'); }
   function copiarFallback() {
     var ta = document.createElement('textarea');
@@ -15055,7 +15100,8 @@ function establecerPasswordBodegaDirecta(userId, nuevaPassword) {
   var u = state.users.find(function (x) { return x.id === userId; });
   if (!u || u.roles.indexOf('BODEGA') === -1) return;
   if (!nuevaPassword || nuevaPassword.length < 6) { toast('warn', 'Contraseña muy corta', 'Debe tener al menos 6 caracteres.'); return; }
-  u.password = nuevaPassword;
+  hashPassword(nuevaPassword).then(function (hashed) {
+  u.password = hashed;
   u.mustChangePassword = false;
   u.isTemporaryPassword = false;
   u.failedLoginCount = 0;
@@ -15070,6 +15116,7 @@ function establecerPasswordBodegaDirecta(userId, nuevaPassword) {
   toast('ok', 'Contraseña establecida', 'La nueva contraseña de ' + u.nombre + ' ya está activa.');
   closeModal();
   syncAndRender(true);
+  });
 }
 /* Cablea el ícono de ojo (mostrar/ocultar) de un <input type="password"> -- mismo patrón visual que
    #loginPasswordToggle, reutilizado aquí para los 2 campos nuevos del Bloque 1 (no se tocó el de login). */
@@ -17957,34 +18004,58 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
   function resolverCredenciales(email, password) {
-    var user = state.users.find(function (u) { return u.email.toLowerCase() === email && u.password === password; });
+    var user = state.users.find(function (u) { return u.email.toLowerCase() === email; });
     if (!user) {
-      var rec = registrarIntentoFallido(email);
-      if (rec.lockedUntil) {
-        mostrarBloqueoLogin(email, rec.lockedUntil);
+      var recSinUsuario = registrarIntentoFallido(email);
+      if (recSinUsuario.lockedUntil) {
+        mostrarBloqueoLogin(email, recSinUsuario.lockedUntil);
       } else {
-        var restantes = state.securityConfig.maxIntentos - rec.count;
-        document.getElementById('loginError').textContent = 'Correo o contraseña incorrectos. Queda ' + restantes + ' intento' + (restantes === 1 ? '' : 's') + ' restante' + (restantes === 1 ? '' : 's') + '.';
+        var restantesSinUsuario = state.securityConfig.maxIntentos - recSinUsuario.count;
+        document.getElementById('loginError').textContent = 'Correo o contraseña incorrectos. Queda ' + restantesSinUsuario + ' intento' + (restantesSinUsuario === 1 ? '' : 's') + ' restante' + (restantesSinUsuario === 1 ? '' : 's') + '.';
       }
       return;
     }
-    if (!user.activo) {
-      document.getElementById('loginError').textContent = 'Este usuario está inactivo. Contacta a un administrador.';
-      return;
-    }
-    delete state.loginAttempts[email];
-    document.getElementById('loginError').textContent = '';
-    document.getElementById('loginSubmitBtn').disabled = false;
-    if (user.failedLoginCount || user.lockedUntil) {
-      user.failedLoginCount = 0;
-      user.lockedUntil = null;
-      persistUsers();
-      /* Ver nota "Supabase" junto a #formCambioObligatorio: encadenado por el mismo motivo -- startSession()
-         dispara scPullAll() justo después. */
-      scPushRows('app_users', [user]).then(function () { startSession(user); });
-      return;
-    }
-    startSession(user);
+    /* Ver requerimiento "Hashing de Contraseñas": verifyPassword() soporta tanto el hash nuevo
+       (sha256$salt$hash) como el texto plano legado todavía sin migrar -- separar la búsqueda del usuario
+       (por correo) de la verificación de la clave (async, ver abajo) es necesario porque ya no se puede
+       comparar con `===` dentro del mismo .find(). */
+    verifyPassword(user.password, password).then(function (passwordOk) {
+      if (!passwordOk) {
+        var rec = registrarIntentoFallido(email);
+        if (rec.lockedUntil) {
+          mostrarBloqueoLogin(email, rec.lockedUntil);
+        } else {
+          var restantes = state.securityConfig.maxIntentos - rec.count;
+          document.getElementById('loginError').textContent = 'Correo o contraseña incorrectos. Queda ' + restantes + ' intento' + (restantes === 1 ? '' : 's') + ' restante' + (restantes === 1 ? '' : 's') + '.';
+        }
+        return;
+      }
+      if (!user.activo) {
+        document.getElementById('loginError').textContent = 'Este usuario está inactivo. Contacta a un administrador.';
+        return;
+      }
+      delete state.loginAttempts[email];
+      document.getElementById('loginError').textContent = '';
+      document.getElementById('loginSubmitBtn').disabled = false;
+      var teniaBloqueoPrevio = !!(user.failedLoginCount || user.lockedUntil);
+      if (teniaBloqueoPrevio) { user.failedLoginCount = 0; user.lockedUntil = null; }
+      /* Migración perezosa (ver cabecera "Seguridad: Hash de Contraseñas"): un login correcto contra un
+         registro todavía en texto plano lo re-hashea aquí mismo, sin esperar a que el usuario cambie su
+         clave voluntariamente -- así TODA cuenta activa queda migrada sola, con su primer login tras este
+         despliegue, sin script de migración masiva aparte. */
+      var yaHasheado = isPasswordHashed(user.password);
+      var rehash = yaHasheado ? Promise.resolve() : hashPassword(password).then(function (hashed) { user.password = hashed; });
+      rehash.then(function () {
+        if (teniaBloqueoPrevio || !yaHasheado) {
+          persistUsers();
+          /* Ver nota "Supabase" junto a #formCambioObligatorio: encadenado por el mismo motivo -- startSession()
+             dispara scPullAll() justo después. */
+          scPushRows('app_users', [user]).then(function () { startSession(user); });
+          return;
+        }
+        startSession(user);
+      });
+    });
   }
 
   document.getElementById('loginForm').addEventListener('submit', function (e) {
@@ -18014,15 +18085,16 @@ document.addEventListener('DOMContentLoaded', function () {
     if (nueva !== confirmar) { errorEl.textContent = 'La confirmación no coincide con la nueva contraseña.'; return; }
     errorEl.textContent = '';
     var user = pendingFirstLoginUser;
+    var submitBtnObligatoria = e.target.querySelector('button[type="submit"]');
+    if (submitBtnObligatoria) submitBtnObligatoria.disabled = true;
+    hashPassword(nueva).then(function (hashed) {
     var passwordAnterior = user.password, mustChangeAnterior = user.mustChangePassword, temporalAnterior = user.isTemporaryPassword;
-    user.password = nueva;
+    user.password = hashed;
     user.mustChangePassword = false;
     user.isTemporaryPassword = false;
     user.failedLoginCount = 0;
     user.lockedUntil = null;
     persistUsers();
-    var submitBtnObligatoria = e.target.querySelector('button[type="submit"]');
-    if (submitBtnObligatoria) submitBtnObligatoria.disabled = true;
     /* Ver nota "Supabase": push inmediato, igual que cualquier otro cambio de credenciales -- no puede
        esperar al autoguardado periódico de 30s ni al logout. CRÍTICO: startSession() tiene que esperar a que
        este push TERMINE antes de ejecutarse -- completarInicioSesion() dispara scPullAll() como primer paso,
@@ -18047,6 +18119,7 @@ document.addEventListener('DOMContentLoaded', function () {
       pendingFirstLoginUser = null;
       closeModal();
       startSession(user);
+    });
     });
   });
 
@@ -18077,8 +18150,11 @@ document.addEventListener('DOMContentLoaded', function () {
     if (nueva.length < 6) { errorEl.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
     if (nueva !== confirmar) { errorEl.textContent = 'La confirmación no coincide con la contraseña.'; return; }
     errorEl.textContent = '';
+    var submitBtnRecovery = e.target.querySelector('button[type="submit"]');
+    if (submitBtnRecovery) submitBtnRecovery.disabled = true;
+    hashPassword(nueva).then(function (hashed) {
     var passwordAnteriorRec = u.password, mustChangeAnteriorRec = u.mustChangePassword, temporalAnteriorRec = u.isTemporaryPassword;
-    u.password = nueva;
+    u.password = hashed;
     u.mustChangePassword = false;
     u.isTemporaryPassword = false;
     u.failedLoginCount = 0;
@@ -18087,8 +18163,6 @@ document.addEventListener('DOMContentLoaded', function () {
     delete u.recoveryTokenExpiraEn;
     delete state.loginAttempts[u.email.toLowerCase()];
     persistUsers();
-    var submitBtnRecovery = e.target.querySelector('button[type="submit"]');
-    if (submitBtnRecovery) submitBtnRecovery.disabled = true;
     /* Ver requerimiento "Bug de Persistencia: Cambio de Contraseña Voluntario": mismo criterio que
        #formCambioObligatorio -- revisa res.ok antes de dar la restauración por completada y avanzar a
        startSession(); si Supabase rechaza o se cuelga el guardado, revierte la clave en memoria y deja al
@@ -18115,6 +18189,7 @@ document.addEventListener('DOMContentLoaded', function () {
       registrarEventoSeguridad('recuperacion_completada', u.email, 'El usuario restableció su propia contraseña a través del enlace de recuperación.');
       document.getElementById('recoveryScreen').hidden = true;
       startSession(u);
+    });
     });
   });
   document.getElementById('btnRecoveryVolverLogin').addEventListener('click', volverAPantallaLoginDesdeRecuperacion);
@@ -18150,10 +18225,16 @@ document.addEventListener('DOMContentLoaded', function () {
     var actual = document.getElementById('passActual').value;
     var nueva = document.getElementById('passNueva').value;
     var confirmar = document.getElementById('passConfirmar').value;
-    if (actual !== state.user.password) { errorEl.textContent = 'La contraseña actual no coincide.'; return; }
+    /* Ver requerimiento "Hashing de Contraseñas": state.user.password puede estar hasheado o (cuenta aún sin
+       migrar) en texto plano -- verifyPassword() soporta ambos formatos, igual que en el login. */
+    verifyPassword(state.user.password, actual).then(function (actualOk) {
+    if (!actualOk) { errorEl.textContent = 'La contraseña actual no coincide.'; return; }
     if (nueva.length < 6) { errorEl.textContent = 'La nueva contraseña debe tener al menos 6 caracteres.'; return; }
     if (nueva !== confirmar) { errorEl.textContent = 'La confirmación no coincide con la nueva contraseña.'; return; }
     errorEl.textContent = '';
+    var submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+    hashPassword(nueva).then(function (hashed) {
     /* Ver requerimiento "Bug de Persistencia: Cambio de Contraseña Voluntario": a diferencia de
        #formCambioObligatorio/formRecuperarCuenta (primer login / enlace de recuperación, ya corregidos antes
        en este mismo archivo), ESTE flujo -- "Cambiar Contraseña" desde el menú de la cuenta, con la sesión ya
@@ -18163,12 +18244,10 @@ document.addEventListener('DOMContentLoaded', function () {
        state.user es el mismo objeto referenciado dentro de state.users (viene de state.users.find en el
        login), así que mutar .password aquí ya actualiza el arreglo en memoria. */
     var passwordAnterior = state.user.password;
-    state.user.password = nueva;
+    state.user.password = hashed;
     state.user.mustChangePassword = false;
     state.user.isTemporaryPassword = false;
     persistUsers();
-    var submitBtn = e.target.querySelector('button[type="submit"]');
-    if (submitBtn) submitBtn.disabled = true;
     scPushRows('app_users', [state.user]).then(function (res) {
       if (submitBtn) submitBtn.disabled = false;
       if (!res.ok) {
@@ -18184,6 +18263,8 @@ document.addEventListener('DOMContentLoaded', function () {
       toast('ok', 'Contraseña actualizada', 'Tu contraseña fue cambiada correctamente.');
       document.getElementById('formCambiarPassword').reset();
       closeModal();
+    });
+    });
     });
   });
 
@@ -19120,10 +19201,16 @@ document.addEventListener('DOMContentLoaded', function () {
       var nuevo = {
         id: nextUserId(), nombre: nombre, email: email, roles: roles, avatarInitials: initialsOf(nombre),
         activo: true, modulosDeshabilitados: [], modulosAdicionales: [],
-        status: 'ACTIVE', password: CLAVE_TEMPORAL_USUARIO_NUEVO, mustChangePassword: true, isTemporaryPassword: true
+        status: 'ACTIVE', password: null, mustChangePassword: true, isTemporaryPassword: true
       };
       if (sede !== undefined) nuevo.sede = sede;
       if (aliado !== undefined) nuevo.aliado = aliado;
+      /* Ver requerimiento "Hashing de Contraseñas": CLAVE_TEMPORAL_USUARIO_NUEVO sigue siendo la MISMA clave
+         fija comunicada al Admin/al correo de invitación (ver comentario junto a su declaración) -- solo lo
+         que se persiste en nuevo.password cambia, de texto plano a su hash (con salt propio por usuario, así
+         que 2 cuentas nuevas con la misma clave temporal NUNCA comparten el mismo hash almacenado). */
+      hashPassword(CLAVE_TEMPORAL_USUARIO_NUEVO).then(function (hashed) {
+      nuevo.password = hashed;
       state.users.push(nuevo);
       persistUsers();
       /* Ver nota "Supabase": esperado por el mismo motivo que la edición de arriba -- si Admin refresca
@@ -19141,6 +19228,7 @@ document.addEventListener('DOMContentLoaded', function () {
         enviarCorreoTransaccional(email, 'invitation', { nombre: nombre, email: email, tempPassword: CLAVE_TEMPORAL_USUARIO_NUEVO });
         closeModal();
         renderUsuarios();
+      });
       });
       return;
     }

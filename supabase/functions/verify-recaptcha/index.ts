@@ -3,13 +3,29 @@
 // secreto de Supabase, nunca en el repo ni en ningun archivo que el navegador descargue). El frontend
 // (app.js, intentarCredenciales/ejecutarVerificacionRecaptcha) llama a esta funcion sin JWT de usuario --
 // corre ANTES de que exista una sesion, asi que se despliega con --no-verify-jwt.
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+// Ver requerimiento "Auditoria Integral de Seguridad", Fase 1, punto 1 (CORS): antes reflejaba "*" -- cualquier
+// sitio (p.ej. un phishing clonando el login) podia llamar este endpoint desde el navegador de una victima y
+// leer la respuesta. Se restringe a los origenes reales de esta plataforma + puertos locales de desarrollo
+// habituales -- cualquier otro origen sigue pudiendo invocar el endpoint (Origin no es informacion secreta,
+// el ataque real es que el NAVEGADOR de un tercero pueda LEER la respuesta), pero el navegador bloquea la
+// lectura de la respuesta porque Access-Control-Allow-Origin no coincide con su origen.
+const ALLOWED_ORIGINS = ["https://melonn-fleet.onrender.com"];
+function isAllowedOrigin(origin: string): boolean {
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+}
+function corsHeadersFor(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin") || "";
+  return {
+    "Access-Control-Allow-Origin": isAllowedOrigin(origin) ? origin : ALLOWED_ORIGINS[0],
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  };
+}
 
 Deno.serve(async (req: Request) => {
+  const CORS_HEADERS = corsHeadersFor(req);
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: CORS_HEADERS });
   }

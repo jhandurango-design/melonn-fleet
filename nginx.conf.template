@@ -15,5 +15,21 @@ server {
         # condicional, 304 si no cambio) -- practicamente gratis en latencia, nunca sirve una version
         # vieja en silencio.
         add_header Cache-Control "no-cache";
+
+        # Ver requerimiento "Auditoria Integral de Seguridad", Fase 1, punto 2 (Cabeceras de Seguridad
+        # HTTP). Este servicio es un contenedor Docker/nginx (ver Dockerfile), NO un "Static Site" nativo
+        # de Render -- la clave "headers" de render.yaml es exclusiva de ese otro tipo de servicio y aqui
+        # se ignoraria en silencio, asi que las cabeceras se fijan directamente en nginx, el servidor real.
+        # "always" asegura que tambien viajen en respuestas de error (ej. 404), no solo en el 200 feliz.
+        add_header X-Frame-Options "DENY" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+        # CSP: 'unsafe-inline' en style-src es necesario porque app.js inyecta estilos inline (style="...")
+        # al construir filas/tarjetas dinamicamente -- sin esto, TODA la plataforma pierde sus colores de
+        # estado/iconos. script-src/connect-src/frame-src solo permiten los origenes reales que la app usa:
+        # el CDN del SDK de Supabase, el proyecto real de Supabase (REST + Edge Functions) y reCAPTCHA de
+        # Google (script, verificacion e iframe del widget).
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://www.google.com https://www.gstatic.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://www.gstatic.com; font-src 'self' data:; connect-src 'self' https://dtfrhtzciidpljwqpzjr.supabase.co https://www.google.com https://www.gstatic.com; frame-src https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
     }
 }
