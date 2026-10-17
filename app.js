@@ -16740,7 +16740,7 @@ function cuotasDesgloseHtml(key, sede, franjas) {
     (abierto ? 'Ocultar desglose por franja' : 'Ver desglose por franja') + '</button>';
   if (!abierto) return '<div class="cuotas-resumen-desglose-wrap">' + boton + '</div>';
   var panel = '<div class="cuotas-resumen-desglose">' +
-    '<button type="button" class="cuotas-desglose-cerrar" data-act="cerrar-cuotas-desglose" data-key="' + key + '" data-tip="Cerrar desglose">✕</button>' +
+    '<div class="cuotas-resumen-desglose-header"><button type="button" class="cuotas-desglose-cerrar" data-act="cerrar-cuotas-desglose" data-key="' + key + '" data-tip="Cerrar desglose">✕</button></div>' +
     '<ul>' + franjas.map(function (f) {
       var fCubierto = f.actuales >= f.cuota;
       return '<li' + (fCubierto ? '' : ' class="descalce-franja-item"') + '>' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(sede))) + ': ' + f.actuales + '/' + f.cuota + cuotasSobrecupoBadgeHtml(f.actuales, f.cuota) + '</li>';

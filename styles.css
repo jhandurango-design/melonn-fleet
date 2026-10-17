@@ -294,7 +294,7 @@ a{color:inherit;}
 
 /* Ver requerimiento "Integración y Reglas de Cuotas en Programar Flota": chips de avance por bodega. */
 .cuotas-resumen-chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;}
-.cuotas-resumen-chip{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:9px;border:1px solid var(--border);background:var(--bg-card-soft);font-size:12.5px;font-weight:600;color:var(--text-primary);}
+.cuotas-resumen-chip{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 12px;border-radius:9px;border:1px solid var(--border);background:var(--bg-card-soft);font-size:12.5px;font-weight:600;color:var(--text-primary);}
 .cuotas-resumen-chip.ok{border-color:#1E8E5A33;background:#1E8E5A14;}
 .cuotas-resumen-chip.pendiente{border-color:#B4530933;background:#B4530914;}
 /* Ver requerimiento "Zona ciega nocturna — Avance y Carga T+1": 3er estado del semáforo (0 cargado todavía,
@@ -308,11 +308,19 @@ a{color:inherit;}
 /* Ver requerimiento "Persistencia del Desglose por Franja (control onClick + botón de cierre)": sustituye
    el <details> nativo -- su estado abierto se pierde en cada re-render; ahora vive en
    state.cuotasDesgloseExpandidos y se re-pinta igual en cada tick (ver cuotasDesgloseHtml). */
-.cuotas-resumen-desglose-wrap{width:100%;}
-.cuotas-resumen-desglose{position:relative;width:100%;font-size:11.5px;font-weight:500;color:var(--text-secondary);margin-top:6px;padding:8px 24px 8px 0;}
+.cuotas-resumen-desglose-wrap{width:100%;flex-basis:100%;}
+/* FIX "Botón 'Cerrar desglose' flotando fuera del contenedor": .cuotas-resumen-chip es un flex row sin wrap
+   -- este wrap (width:100%) competía por espacio en la misma línea que el chip de número/etiqueta en vez de
+   ocupar su propia línea, y el botón ✕ (position:absolute) terminaba anclado a una caja ya desbordada hacia
+   la derecha. flex-basis:100% arriba (junto con flex-wrap:wrap agregado a .cuotas-resumen-chip) fuerza este
+   bloque a su propia línea completa; aquí se reemplaza el position:absolute del botón por un header flex
+   propio (justify-content:flex-end) -- el botón vive en el flujo normal del documento, nunca puede
+   desbordarse fuera de su contenedor. */
+.cuotas-resumen-desglose{width:100%;font-size:11.5px;font-weight:500;color:var(--text-secondary);margin-top:6px;display:flex;flex-direction:column;gap:4px;}
+.cuotas-resumen-desglose-header{display:flex;justify-content:flex-end;}
 .cuotas-resumen-desglose ul{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:4px 14px;}
 .cuotas-resumen-desglose li.descalce-franja-item{color:#B45309;font-weight:700;}
-.cuotas-desglose-cerrar{position:absolute;top:6px;right:0;border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:13px;line-height:1;padding:2px 4px;}
+.cuotas-desglose-cerrar{border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:13px;line-height:1;padding:2px 4px;}
 .cuotas-desglose-cerrar:hover{color:var(--text-primary);}
 /* Ver requerimiento "Agrupación Dinámica en Avance y Carga T+1 (Bodega → Aliado)": mismo patrón visual de
    encabezado "📍 Bodega" que ya usan Consolidado/Programación (consol-subgroup-row), aplicado aquí sobre
