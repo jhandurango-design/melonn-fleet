@@ -351,6 +351,23 @@ var SUPABASE_ANON_KEY = 'sb_publishable_uD-7aN72jdjAjiquU92y8A_cn-Kt649';
 var supabaseClient = (typeof window !== 'undefined' && window.supabase)
   ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
+/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa B ("piloto de RLS real, sin romper
+   las otras 7 tablas"): supabaseClient (arriba) sigue siendo el cliente anon de SIEMPRE, usado por las 8
+   tablas tal como hoy -- adjuntarle el JWT globalmente habría roto de inmediato cualquier tabla donde el
+   rol `authenticated` todavía no tiene GRANT (todas, salvo app_config_settings en esta etapa). Este
+   segundo cliente, en cambio, SOLO se usa explícitamente para app_config_settings (ver su propio
+   scPullTable/scPushRows en scPullAll/guardarConfigSettings) -- las demás 7 tablas ni lo tocan.
+   rebuildSupabaseAuthClient() se llama cada vez que se mintea/restaura/pierde el token de sesión (ver
+   fijarSessionTokenNoBloqueante/verificarSessionToken/logout) -- sin token válido todavía (p.ej. el breve
+   instante entre completar el login y que el mint resuelva, o si el mint falló), queda en null y
+   scPullTable/scPushRows caen de vuelta al cliente anon de siempre -- nunca bloquean la operación. */
+var supabaseAuthClient = null;
+function rebuildSupabaseAuthClient(token) {
+  if (!token || typeof window === 'undefined' || !window.supabase) { supabaseAuthClient = null; return; }
+  supabaseAuthClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: { headers: { Authorization: 'Bearer ' + token } }
+  });
+}
 /* Ver requerimiento "Integración de Google reCAPTCHA v2 Invisible" (reemplaza el par v3 anterior, descartado
    tras 3 intentos fallidos de aprovisionamiento del lado de Google -- ver historial de commits): mismo
    patrón de integración (api.js?render=SITE_KEY + grecaptcha.execute(SITE_KEY,{action}), API compartida por
@@ -441,7 +458,13 @@ function solicitarSessionToken(email, password) {
    usuario recarga la pestaña, tendrá que volver a iniciar sesión -- nunca bloquea el login mismo. */
 function fijarSessionTokenNoBloqueante(email, password) {
   solicitarSessionToken(email, password).then(function (res) {
-    if (res && res.ok && res.token) localStorage.setItem('melonn_session', res.token);
+    if (res && res.ok && res.token) {
+      localStorage.setItem('melonn_session', res.token);
+      /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa B: habilita el camino
+         `authenticated` para app_config_settings en cuanto hay un token real -- antes de esto, esa tabla
+         sigue cayendo al cliente anon (ver scPullTable/scPushRows). */
+      rebuildSupabaseAuthClient(res.token);
+    }
   });
 }
 function verificarSessionToken(token) {
@@ -454,15 +477,21 @@ function verificarSessionToken(token) {
     .then(function (res) { return (res && res.ok) ? res.user : null; })
     .catch(function () { return null; });
 }
-function scPullTable(table) {
-  if (!supabaseClient) return Promise.resolve(null);
+/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa B: `useAuthClient` (opcional, false
+   por defecto) elige supabaseAuthClient en vez de supabaseClient -- hoy SOLO lo pasa en true el llamador
+   de app_config_settings (ver scPullAll/guardarConfigSettings); las demás 7 tablas ni lo pasan, así que
+   siguen exactamente igual que siempre. Si no hay token/sesión todavía (supabaseAuthClient en null), cae
+   de vuelta al cliente anon -- nunca bloquea la operación por falta de sesión. */
+function scPullTable(table, useAuthClient) {
+  var client = (useAuthClient && supabaseAuthClient) ? supabaseAuthClient : supabaseClient;
+  if (!client) return Promise.resolve(null);
   /* Ver requerimiento "Duplicación de Nelly Molano en Gestión de Usuarios": se trae también updated_at (no
      solo data) -- deduplicarUsuariosPorEmail lo necesita para decidir, entre 2 filas con distinto id pero el
      mismo correo (ver ese caso real: u3 y u8, ambos n.molano@cordiandina.com -- quedaron así por más de un
      INSERT manual contra la tabla desde el SQL Editor, cada uno con su propio id), cuál de las 2 es la más
      reciente y debe prevalecer. Se devuelve como { value, updatedAt } en vez de la fila "data" pelada -- scPullTable
      es de uso interno exclusivo de scPullAll, así que este cambio de forma no afecta a nadie más. */
-  return supabaseClient.from(table).select('data, updated_at').then(function (res) {
+  return client.from(table).select('data, updated_at').then(function (res) {
     if (res.error || !res.data) return null;
     return res.data.map(function (row) { return { value: row.data, updatedAt: row.updated_at }; });
   }, function () { return null; });
@@ -521,8 +550,11 @@ function scNotificarFalloSupabase(table) {
   scUltimoAvisoFalloEn = ahora;
   toast('warn', 'Sin conexión con Supabase', 'No se pudo confirmar el guardado en la nube (tabla ' + table + '). El cambio quedó solo en este navegador — evita cerrar la pestaña o borrar la caché hasta reconectar y volver a intentar.');
 }
-function scPushRows(table, rows) {
-  if (!supabaseClient || !rows || !rows.length) return Promise.resolve({ ok: true });
+/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa B: mismo criterio de `useAuthClient`
+   que scPullTable -- solo app_config_settings lo pasa en true. */
+function scPushRows(table, rows, useAuthClient) {
+  var client = (useAuthClient && supabaseAuthClient) ? supabaseAuthClient : supabaseClient;
+  if (!client || !rows || !rows.length) return Promise.resolve({ ok: true });
   /* Ver requerimiento "Fallo crítico de arquitectura: contraseña revertida a la genérica tras redeploy":
      .role (exclusivo de app_users) es EFÍMERO de sesión -- nunca debe aterrizar en Supabase, sea cual sea
      la carrera que dispare el push (nunca se lee de vuelta, scPullAll/startSession siempre lo recalculan
@@ -536,7 +568,7 @@ function scPushRows(table, rows) {
   });
   var upsertPromise;
   try {
-    upsertPromise = supabaseClient.from(table).upsert(payload);
+    upsertPromise = client.from(table).upsert(payload);
   } catch (e) {
     console.warn('Supabase: excepción al preparar guardado de ' + table + ':', e);
     scNotificarFalloSupabase(table);
@@ -681,7 +713,7 @@ var scPullEnVuelo = null;
    real que ya existía. */
 var cuotasVigenteHoySincronizadaReal = false;
 function scPullAll() {
-  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual'), scPullTable('app_config_settings'), scPullTable('app_security_events')]).then(function (res) {
+  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual'), scPullTable('app_config_settings', true), scPullTable('app_security_events')]).then(function (res) {
     var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4], flotaHabitualRows = res[5], configSettingsRows = res[6], securityEventRows = res[7];
     var changed = false;
     if (users && users.length) {
@@ -17292,7 +17324,7 @@ function loadConfigSettings() {
    en ningún lado excepto en el navegador donde Admin lo prendió. Una sola fila 'global' (mismo patrón que
    app_cuotas_config) sincroniza TODO el objeto -- no solo los 2 interruptores de Cuotas. */
 function scPushConfigSettings() {
-  scPushRows('app_config_settings', [{ id: 'global', settings: state.configSettings }]);
+  scPushRows('app_config_settings', [{ id: 'global', settings: state.configSettings }], true);
 }
 function persistConfigSettings() { localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(state.configSettings)); scPushConfigSettings(); }
 /* Reconstruye en vivo los catálogos globales (WAREHOUSES/SEDES/ALIADOS/ALIADOS_MX/ALIADOS_ALL) y los expone
@@ -17808,6 +17840,10 @@ function logout() {
   /* Ver nota "Supabase" junto a scPushAll: empuja el snapshot final de la sesión antes de cerrarla. */
   scPushAll();
   localStorage.removeItem('melonn_session');
+  /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa B: sin esto, un logout dejaría
+     supabaseAuthClient vivo con el Bearer token de la sesión que se acaba de cerrar -- el siguiente login
+     (de OTRO usuario, en la misma pestaña) heredaría ese cliente hasta que su propio mint resuelva. */
+  supabaseAuthClient = null;
   state.user = null;
   Auth.clearCurrentUser();
   resetViewState();
@@ -17968,8 +18004,15 @@ document.addEventListener('DOMContentLoaded', function () {
     var savedToken = localStorage.getItem('melonn_session');
     if (savedToken) {
       verificarSessionToken(savedToken).then(function (u) {
-        if (u && u.activo) startSession(u);
-        else localStorage.removeItem('melonn_session');
+        if (u && u.activo) {
+          /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa B: el token ya demostró ser
+             válido (verify lo confirmó server-side) -- habilita el camino `authenticated` para
+             app_config_settings también al restaurar sesión, no solo al loguear de cero. */
+          rebuildSupabaseAuthClient(savedToken);
+          startSession(u);
+        } else {
+          localStorage.removeItem('melonn_session');
+        }
       });
     }
   }
