@@ -13408,9 +13408,25 @@ function openNoUbicaModal(routeId) {
   document.getElementById('noUbicaMotivo').value = '';
   openModal('modalNoUbica');
 }
+/* FIX "Ajustes de UX para RappiBoy" (feedback instantáneo al primer clic): antes, el botón "Guardar turno"
+   solo se deshabilitaba justo antes del push final -- TODA la validación de arriba (duplicados, ventana de
+   retorno, cuotas) corría primero con el botón todavía clicable. Verificado en producción: un reintento
+   rápido (el usuario, sin ver ningún cambio visual inmediato tras el primer clic, hacía clic de nuevo) nunca
+   corrompía datos -- la segunda ejecución siempre detectaba el turno recién creado por la primera y se
+   autobloqueaba con "Turno duplicado" -- pero esa alerta se percibía como un error en vez de la confirmación
+   de que el primer clic sí había funcionado. Ahora el botón se deshabilita DESDE EL PRIMER MILISEGUNDO del
+   clic, antes de cualquier validación; si ya está deshabilitado (un envío anterior sigue en vuelo), este
+   clic se ignora directamente. reactivarBotonGuardar() se llama en cada salida temprana por validación (el
+   usuario necesita poder corregir el campo y reintentar) -- las ramas que sí llegan a empujar a Supabase
+   conservan su propio reactivado en el desenlace async (éxito o fallo), sin cambios. */
 function submitTurno(e) {
   e.preventDefault();
   if (!canDo('schedule.aliado.manage')) return;
+  var turnoSubmitBtnInicial = document.getElementById('turnoSubmitBtn');
+  if (turnoSubmitBtnInicial.disabled) return;
+  turnoSubmitBtnInicial.disabled = true;
+  turnoSubmitBtnInicial.textContent = 'Guardando…';
+  function reactivarBotonGuardar() { turnoSubmitBtnInicial.disabled = false; turnoSubmitBtnInicial.textContent = 'Guardar turno'; }
   var modo = document.getElementById('turnoModo').value;
   var routeId = document.getElementById('turnoRouteId').value;
   var pendiente = modo === 'create' && document.getElementById('turnoPendiente').checked;
@@ -13424,13 +13440,14 @@ function submitTurno(e) {
   var correo = document.getElementById('turnoCorreo').value.trim();
   if (!pendiente && (!nombre || !telefono || !cedula || !placa)) {
     toast('warn', 'Completa los datos del mensajero', 'Nombre, teléfono, cédula y placa son obligatorios (o marca "Pendiente / Por Confirmar").');
+    reactivarBotonGuardar();
     return;
   }
   var fecha = state.progDay === 'tomorrow' ? TOMORROW_STR : TODAY_STR;
   /* Hallazgo de Auditoría #1, item 1: histórico 100% inmutable — Programar Flota nunca debería llegar aquí
      con una fecha pasada (routesInScope/rowHtmlProg solo exponen Hoy y Mañana), pero se valida también aquí
      como segunda barrera explícita, igual que el resto de la plataforma. */
-  if (fecha < TODAY_STR) { toast('warn', 'No disponible', 'Los registros de fechas pasadas son de solo lectura.'); return; }
+  if (fecha < TODAY_STR) { toast('warn', 'No disponible', 'Los registros de fechas pasadas son de solo lectura.'); reactivarBotonGuardar(); return; }
   /* Ver requerimiento "Validación de Exclusividad de Mensajeros por Fecha": se valida ANTES de resolver/crear
      el mensajero (que es un registro propio de ESTE aliado, ver findOrCreateMensajero) para no dejar pasar
      ningún modo (alta directa, alta con solicitud, confirmar pendiente o editar) sin cruzar primero por
@@ -13440,6 +13457,7 @@ function submitTurno(e) {
     var conflictoOtroAliado = mensajeroProgramadoPorOtroAliado({ cedula: cedula, placa: placa, correo: correo, nombre: nombre }, fecha, state.user.aliado);
     if (conflictoOtroAliado) {
       toast('warn', 'Mensajero ya programado', mensajeDuplicidadAliado(conflictoOtroAliado));
+      reactivarBotonGuardar();
       return;
     }
   }
@@ -13481,10 +13499,11 @@ function submitTurno(e) {
     });
     if (duplicadoAliado) {
       toast('warn', 'Turno duplicado', getMensajero(mensajeroIdCreate).nombre + ' ya tiene una ruta programada en ' + sede + ' a las ' + fmtTime12(hora) + '.');
+      reactivarBotonGuardar();
       return;
     }
     var conflictoRetornoCreate = turnoEnVentanaRetorno(mensajeroIdCreate, fecha, hora, null);
-    if (conflictoRetornoCreate) { alertarVentanaRetorno(mensajeroIdCreate, conflictoRetornoCreate); return; }
+    if (conflictoRetornoCreate) { alertarVentanaRetorno(mensajeroIdCreate, conflictoRetornoCreate); reactivarBotonGuardar(); return; }
   }
   var turnoAfectado = null;
   var solGeneralCreada = null;
@@ -13504,6 +13523,7 @@ function submitTurno(e) {
         message: 'Atención: La tipología ' + cuotasVehiculoLabel(vehiculo, ctTipo) + ' no se encuentra habilitada en tus cuotas para la sede ' + sede + '. ¿Deseas enviar una Solicitud de Autorización de Tipología al Planner para este recurso?',
         onConfirm: function () { state._tipologiaExcepcionConfirmada = true; submitTurno(e); state._tipologiaExcepcionConfirmada = false; }
       });
+      reactivarBotonGuardar();
       return;
     }
   }
@@ -13531,8 +13551,14 @@ function submitTurno(e) {
         motivo: (aprobacion.motivo === 'festivo' ? 'Programación en día festivo' : aprobacion.motivo === 'domingo' ? 'Programación como Recurso Adicional (domingo)' : aprobacion.motivo === 'tipologia' ? 'Excepción de Tipología' : 'Cupo excedido') + ': ' + aprobacion.detalle,
         horaAnterior: null, horaPropuesta: null, por: state.user.nombre
       });
+      /* FIX "Ajustes de UX para RappiBoy": el toast antes solo decía "quedó Pendiente de Aprobación", sin
+         ninguna pista de POR QUÉ -- evaluarAprobacionCuota() ya construye un `detalle` que distingue
+         explícitamente "Cupo GLOBAL contratado" (el límite que de verdad bloquea, suma de TODAS las
+         franjas/vehículos del día, ver checkCuotaGlobalExceso) de festivo/domingo/tipología, pero nunca
+         llegaba a mostrarse -- el Aliado no tenía forma de saber, por ejemplo, que su franja puntual tenía
+         cupo libre pero el TOTAL del día ya estaba cubierto. Se incluye ahora tal cual en el aviso. */
       toast('warn', cuotaCausalLabel(aprobacion.motivo) + ' — requiere aprobación',
-        'El turno ' + turnoPendienteAprobacion.id + ' quedó "Pendiente de Aprobación por Planner" en Solicitudes y Cambios.');
+        'El turno ' + turnoPendienteAprobacion.id + ' quedó "Pendiente de Aprobación por Planner" en Solicitudes y Cambios. ' + aprobacion.detalle);
       /* Ver nota "Supabase" más abajo (cierre de la función): mismo criterio -- se espera la confirmación
          del push antes de cerrar el modal. Ver FIX "mensajero fantasma" más arriba: el mensajero nuevo (si lo
          hay) se empuja aquí también, con el mismo rollback si algo falla. */
@@ -13588,7 +13614,7 @@ function submitTurno(e) {
            la validación pasa. */
         var mensajeroIdDirecto = modo === 'confirm' ? findOrCreateMensajero(payload) : route.mensajeroId;
         var conflictoRetornoDirecto = turnoEnVentanaRetorno(mensajeroIdDirecto, route.fecha, hora, route.id);
-        if (conflictoRetornoDirecto) { alertarVentanaRetorno(mensajeroIdDirecto, conflictoRetornoDirecto); return; }
+        if (conflictoRetornoDirecto) { alertarVentanaRetorno(mensajeroIdDirecto, conflictoRetornoDirecto); reactivarBotonGuardar(); return; }
         /* Ver requerimiento "Optimización: Trazabilidad en Historial...", punto 1c (Reasignaciones/Cambios:
            mensajero, vehículo, placa o tipo de flota): esta edición directa (fuera del flujo formal de
            Solicitudes) no dejaba NINGÚN rastro en route.historialCambios -- se captura el snapshot ANTES de
