@@ -5025,6 +5025,15 @@ function dismissToastEl(el) {
   el.style.transition = 'all .25s ease'; el.style.opacity = '0'; el.style.transform = 'translateY(-6px)';
   setTimeout(function () { el.remove(); }, 260);
 }
+/* FIX "Toast persiste tras cerrar sesión" (reporte en producción): cada toast se auto-descarta con su
+   propio setTimeout independiente (TOAST_DURATION_MS) -- si el usuario cierra sesión mientras uno sigue en
+   pantalla, ese timer sigue corriendo igual en la pantalla PÚBLICA de login, sin que nada lo cancele. Se
+   usa en logout() -- quita los nodos de inmediato, sin la animación de salida (la pantalla ya está
+   cambiando de contexto por completo en ese instante, no tiene sentido animarlo). */
+function clearAllToasts() {
+  var container = document.getElementById('toastContainer');
+  if (container) container.innerHTML = '';
+}
 function toast(type, title, msg) {
   var icon = type === 'critical' ? ICONS.critT : type === 'warn' ? ICONS.warnT : ICONS.okT;
   var el = document.createElement('div');
@@ -18135,6 +18144,10 @@ function logout() {
      aunque algo external fuerce mostrar #appShell antes de que renderSidebar()/renderContextPill() del
      siguiente login terminen de correr, nunca se vea ni por una fracción de segundo el nombre, rol o
      módulos de la cuenta anterior. */
+  /* FIX "Toast persiste tras cerrar sesión": un toast en pantalla (y su propio timer de auto-descarte) no
+     tiene relación con la sesión que se cierra -- se limpia de inmediato para que ninguna notificación del
+     entorno privado quede visible sobre la pantalla pública de login. */
+  clearAllToasts();
   document.getElementById('sidebarNav').innerHTML = '';
   document.getElementById('userName').textContent = '—';
   document.getElementById('contextLabel').textContent = '';
