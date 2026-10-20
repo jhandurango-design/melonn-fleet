@@ -2550,13 +2550,23 @@ function metricTip(label, text, placement) {
    NUNCA se re-derivaba de los turnos ya existentes, así que tras un scPullAll() que trae un dataset más
    grande (de otro dispositivo/sesión), el próximo turno creado podía repetir un id ya usado y
    pisar silenciosamente ese registro al subirse a Supabase (el upsert escribe por id). Se deriva ahora del
-   máximo numérico real ya presente en state.turnos, sin depender de ningún contador aparte. */
+   máximo numérico real ya presente en state.turnos, sin depender de ningún contador aparte.
+   FIX "Edición de Turno y Desviación de Sede" (reporte Easyway/Maicol Bravo y Gonzales Velasco): este fix
+   anterior resuelve el contador desactualizado tras un pull, pero no una colisión ENTRE 2 PESTAÑAS/SESIONES
+   que calculan "el siguiente número" casi al mismo tiempo -- confirmado reproducible en producción (2
+   pestañas con el mismo estado base calculan el MISMO "TUR-NNNN"). El upsert de Supabase escribe por id:
+   la segunda escritura en llegar SOBREESCRIBE por completo a la primera -- sede, hora, mensajeroId, todo --
+   sin ningún error ni aviso. Mismo criterio ya aplicado a nextMensajeroId() (mismo incidente, otra
+   colección): se añade un sufijo corto, único por instante+pestaña (timestamp en base36 + aleatorio) -- el
+   número secuencial se conserva como prefijo legible, pero la unicidad real ya no depende de que ninguna
+   pestaña vea primero el alta de la otra. parseInt ya tolera el sufijo sin cambios (se detiene en el
+   primer carácter no numérico, igual que con cualquier id viejo sin sufijo). */
 function nextTurnoId() {
   var maxNum = state.turnos.reduce(function (max, t) {
     var n = parseInt(String(t.id).slice(4), 10);
     return isNaN(n) ? max : Math.max(max, n);
   }, 999);
-  return 'TUR-' + String(maxNum + 1).padStart(4, '0');
+  return 'TUR-' + String(maxNum + 1).padStart(4, '0') + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 /* FIX "Colisión real de IDs de mensajero (incidente en producción, carga Easyway)": a diferencia de
    nextTurnoId/nextUserId/nextSolicitudGeneralId (ver sus comentarios, ya corregidos antes), esta función
@@ -13674,6 +13684,18 @@ function submitTurno(e) {
     } else {
       var route = state.turnos.find(function (r) { return r.id === routeId; });
       if (route) {
+        /* FIX "Edición de Turno y Desviación de Sede" (reporte Easyway/Maicol Bravo y Gonzales Velasco,
+           aplica a cualquier Aliado): route.id y route.sede NUNCA se reasignan en esta rama -- route es la
+           MISMA referencia ya existente en state.turnos (encontrada arriba por routeId), mutada en sitio
+           -- nunca se crea un turno nuevo aquí, así que no hay forma de que esta edición produzca un
+           duplicado por sí misma. El campo #turnoSede del modal va deshabilitado en 'edit'/'confirm' (ver
+           openTurnoModal) precisamente porque la sede de un turno ya confirmado no es editable por este
+           camino -- pero `payload.sede` (usado por findOrCreateMensajero/forkMensajeroParaEdicion más abajo
+           para fijar la sede del registro de mensajero) todavía se leía del FORMULARIO en vez de la propia
+           ruta -- un campo disabled sigue siendo legible por JS, así que en teoría podía quedar desalineado
+           de route.sede si algo más repoblaba el <select> entre abrir el modal y enviar. Se fuerza aquí a
+           la fuente autoritativa real (route.sede), eliminando esa dependencia por completo. */
+        payload.sede = route.sede;
         /* Ver requerimiento "Validación Dinámica de Ventana de Retorno": para 'confirm' se resuelve el
            mensajero (por cédula, reutilizable) ANTES de mutar nada, para poder validar primero -- se
            reutiliza el mismo resultado abajo, sin volver a llamar findOrCreateMensajero(). Para 'edit' se
