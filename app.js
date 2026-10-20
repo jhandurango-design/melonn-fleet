@@ -627,8 +627,17 @@ var scTablasConAltaEnVuelo = {};
 /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Paso de Reconexión: mismo criterio que
    scPullTable -- clienteParaTabla(table) decide el cliente solo. `clienteAuthOverride` es opcional y SOLO
    lo pasa scPushAll() (ver esa función) para evitar la carrera de logout() con supabaseAuthClient = null;
-   el resto de los ~53 llamadores de scPushRows en toda la app no lo pasan y siguen igual que siempre. */
-function scPushRows(table, rows, clienteAuthOverride) {
+   el resto de los ~53 llamadores de scPushRows en toda la app no lo pasan y siguen igual que siempre.
+   FIX "Control de Alertas: 'Sin conexión con Supabase' en pantalla" (reporte en producción, caso app_users):
+   `silencioso` es opcional y SOLO lo pasa scPushAll() -- ese es el único empuje puramente de FONDO (login/
+   logout/autoguardado cada 30s, nunca disparado por una acción directa del usuario) que además empuja
+   app_users para CUALQUIER rol sin excepción (ver esa función). Un fallo ahí (timeout puntual, hipo de red)
+   no significa que la sesión esté realmente caída -- el próximo ciclo de 30s ya reintenta solo -- así que
+   no amerita la misma alerta intrusiva que una acción directa (crear/editar un turno, etc.), que YA tiene
+   su propio aviso específico más claro ("No se pudo confirmar en la nube...") en el propio `.then()` de
+   quien la llamó. Con `silencioso`, scNotificarFalloSupabase() ni siquiera se invoca -- el fallo sigue
+   quedando en consola (console.warn) y el próximo push periódico lo reintenta normalmente. */
+function scPushRows(table, rows, clienteAuthOverride, silencioso) {
   var client = clienteParaTabla(table, clienteAuthOverride);
   if (!client || !rows || !rows.length) return Promise.resolve({ ok: true });
   var pendientesAlta = scTablasConAltaEnVuelo[table] || (scTablasConAltaEnVuelo[table] = {});
@@ -650,20 +659,20 @@ function scPushRows(table, rows, clienteAuthOverride) {
     upsertPromise = client.from(table).upsert(payload);
   } catch (e) {
     console.warn('Supabase: excepción al preparar guardado de ' + table + ':', e);
-    scNotificarFalloSupabase(table);
+    if (!silencioso) scNotificarFalloSupabase(table);
     liberarAlta();
     return Promise.resolve({ ok: false, error: e });
   }
   var timeoutPromise = new Promise(function (resolve) { setTimeout(function () { resolve({ timedOut: true }); }, SC_PUSH_TIMEOUT_MS); });
   return Promise.race([upsertPromise, timeoutPromise]).then(function (res) {
     liberarAlta();
-    if (res && res.timedOut) { console.warn('Supabase: tiempo de espera agotado al guardar ' + table); scNotificarFalloSupabase(table); return { ok: false, error: 'timeout' }; }
-    if (res.error) { console.warn('Supabase: fallo al guardar ' + table + ':', res.error.message); scNotificarFalloSupabase(table); return { ok: false, error: res.error }; }
+    if (res && res.timedOut) { console.warn('Supabase: tiempo de espera agotado al guardar ' + table); if (!silencioso) scNotificarFalloSupabase(table); return { ok: false, error: 'timeout' }; }
+    if (res.error) { console.warn('Supabase: fallo al guardar ' + table + ':', res.error.message); if (!silencioso) scNotificarFalloSupabase(table); return { ok: false, error: res.error }; }
     return { ok: true };
   }, function (e) {
     liberarAlta();
     console.warn('Supabase: fallo al guardar ' + table + ':', e);
-    scNotificarFalloSupabase(table);
+    if (!silencioso) scNotificarFalloSupabase(table);
     return { ok: false, error: e };
   });
 }
@@ -795,10 +804,14 @@ function scPushAll() {
     return scPullAll();
   }).then(function () {
     var role = rolCapturado;
-    scPushRows('app_users', state.users, clienteAuthCapturado);
-    if (role === 'ALIADO' || role === 'BODEGA') scPushRows('app_mensajeros', state.mensajeros, clienteAuthCapturado);
-    if (role === 'ALIADO' || role === 'BODEGA' || role === 'PLANNER') scPushRows('app_turnos', state.turnos, clienteAuthCapturado);
-    if (role === 'ALIADO' || role === 'PLANNER') scPushRows('app_solicitudes_generales', state.solicitudesGenerales, clienteAuthCapturado);
+    /* Ver scPushRows: `silencioso=true` aquí -- este es el ÚNICO empuje puramente de fondo (login/logout/
+       autoguardado de 30 ticks), nunca disparado por una acción directa del usuario. Un fallo puntual (red
+       inestable, timeout) no amerita la alerta intrusiva "Sin conexión con Supabase" -- el próximo ciclo
+       reintenta solo, y cualquier acción directa del usuario sigue mostrando SU PROPIO aviso específico. */
+    scPushRows('app_users', state.users, clienteAuthCapturado, true);
+    if (role === 'ALIADO' || role === 'BODEGA') scPushRows('app_mensajeros', state.mensajeros, clienteAuthCapturado, true);
+    if (role === 'ALIADO' || role === 'BODEGA' || role === 'PLANNER') scPushRows('app_turnos', state.turnos, clienteAuthCapturado, true);
+    if (role === 'ALIADO' || role === 'PLANNER') scPushRows('app_solicitudes_generales', state.solicitudesGenerales, clienteAuthCapturado, true);
   });
 }
 /* Trae las 3 tablas y, si Supabase tiene datos, los adopta como fuente de verdad en memoria -- un fallo de
@@ -13869,6 +13882,13 @@ function flotaHabitualDemoSeed() {
    guardar solo el subconjunto filtrado descartaría en silencio el resto de bodegas de la plantilla). Excluye
    los turnos "Pendiente / Por Confirmar" (pendienteAsignacion): todavía no tienen un mensajero real asignado,
    así que no hay identidad de flota que guardar para ese cupo. */
+/* FIX "Seguridad y Reconfirmación en 'Guardar como Flota Recurrente'" (reporte en producción): antes
+   sobrescribía la plantilla existente sin avisar. state.flotaHabitual está indexado por ALIADO (no por
+   sede -- una sola plantilla por aliado, que puede cubrir varias sedes a la vez, ver su comentario de
+   cabecera), así que la reconfirmación es "ya existe una Flota Recurrente guardada para tu operación", no
+   por sede individual -- ajustado del pedido original para reflejar el modelo de datos real. Reutiliza
+   openConfirmModal() (mismo modal genérico ya usado en toda la app, ej. tipología no habilitada/cancelar
+   ruta) en vez de inventar un modal nuevo. */
 function guardarFlotaHabitual() {
   var routes = routesInScope(state.progDay).filter(function (r) { return !r.pendienteAsignacion; });
   if (!routes.length) {
@@ -13879,15 +13899,36 @@ function guardarFlotaHabitual() {
     var m = getMensajero(r.mensajeroId);
     return { sede: r.sede, vehiculo: r.vehiculo, hora: r.hora, nombre: m.nombre, telefono: m.telefono, cedula: m.cedula, placa: m.placa, correo: m.correo || '' };
   });
-  state.flotaHabitual[state.user.aliado] = plantilla;
-  persistFlotaHabitual();
-  scPushFlotaHabitual(state.user.aliado);
-  toast('ok', 'Flota Recurrente', 'Programación actual guardada como Flota Recurrente (' + plantilla.length + ' turno' + (plantilla.length === 1 ? '' : 's') + ').');
+  var plantillaExistente = state.flotaHabitual[state.user.aliado];
+  function confirmarGuardadoFlotaHabitual() {
+    state.flotaHabitual[state.user.aliado] = plantilla;
+    persistFlotaHabitual();
+    scPushFlotaHabitual(state.user.aliado);
+    toast('ok', 'Flota Recurrente', 'Programación actual guardada como Flota Recurrente (' + plantilla.length + ' turno' + (plantilla.length === 1 ? '' : 's') + ').');
+  }
+  if (plantillaExistente && plantillaExistente.length) {
+    openConfirmModal({
+      title: 'Reemplazar Flota Recurrente',
+      message: 'Ya existe una Flota Recurrente guardada (' + plantillaExistente.length + ' turno' + (plantillaExistente.length === 1 ? '' : 's') + '). ¿Deseas reemplazar la plantilla anterior por la configuración actual (' + plantilla.length + ' turno' + (plantilla.length === 1 ? '' : 's') + ')? Esta acción no se puede deshacer.',
+      confirmText: 'Sí, reemplazar', danger: true,
+      onConfirm: confirmarGuardadoFlotaHabitual
+    });
+  } else {
+    openConfirmModal({
+      title: 'Guardar como Flota Recurrente',
+      message: '¿Deseas definir la programación actual (' + plantilla.length + ' turno' + (plantilla.length === 1 ? '' : 's') + ') como tu Flota Recurrente? Podrás cargarla rápidamente los próximos días con "Cargar Flota Recurrente".',
+      confirmText: 'Sí, guardar', danger: false,
+      onConfirm: confirmarGuardadoFlotaHabitual
+    });
+  }
 }
 /* "Cargar Flota Habitual": exclusiva de la vista "Mañana" (ver visibilidad del botón en renderProgramacion,
    mismo criterio que "+ Nuevo Turno" -- Hoy ya cerró y es de solo lectura). Un mensajero de la plantilla que ya
    tenga un turno programado para mañana (identificado por cédula, no por mensajeroId -- que puede cambiar
-   entre cargas por edición/fork) se omite para no duplicarlo. */
+   entre cargas por edición/fork) se omite para no duplicarlo.
+   FIX "Seguridad y Reconfirmación...", punto 4: pide confirmación explícita ANTES de ejecutar la carga
+   masiva -- mismo criterio que guardarFlotaHabitual(). El cuerpo real de la carga queda en
+   ejecutarCargaFlotaHabitual(), disparado solo desde el onConfirm. */
 function cargarFlotaHabitual() {
   if (state.progDay !== 'tomorrow') return;
   var plantilla = state.flotaHabitual[state.user.aliado] || [];
@@ -13895,6 +13936,14 @@ function cargarFlotaHabitual() {
     toast('warn', 'Flota Recurrente no disponible', 'Aún no has guardado tu flota recurrente. Programa los turnos de hoy y haz clic en "Guardar como Flota Recurrente".');
     return;
   }
+  openConfirmModal({
+    title: 'Cargar Flota Recurrente',
+    message: '¿Deseas cargar tu Flota Recurrente guardada (' + plantilla.length + ' turno' + (plantilla.length === 1 ? '' : 's') + ') en la Programación de Flota de mañana?',
+    confirmText: 'Sí, cargar', danger: false,
+    onConfirm: function () { ejecutarCargaFlotaHabitual(plantilla); }
+  });
+}
+function ejecutarCargaFlotaHabitual(plantilla) {
   /* Ver requerimiento "Idempotencia / Control de Duplicados en Solicitudes al Planner": defensa complementaria
      al chequeo de yaProgramados de abajo -- deshabilitar el botón mientras la carga está en curso evita que
      un clic repetido (antes de que termine de procesar/empujar la pasada anterior) alcance a disparar una
