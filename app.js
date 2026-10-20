@@ -368,6 +368,23 @@ function rebuildSupabaseAuthClient(token) {
     global: { headers: { Authorization: 'Bearer ' + token } }
   });
 }
+/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Paso de Reconexión: las 7 tablas de negocio
+   (todas salvo app_security_events, que necesita INSERT anónimo desde la pantalla de login -- ver Etapa B)
+   ya tienen políticas RLS reales para `authenticated` desde las Etapas B/C. Esta lista + helper centralizan
+   QUÉ cliente usar por nombre de tabla en un solo lugar, en vez de pasar un booleano en cada uno de los 53+
+   llamados a scPushRows/scPullTable/scDeleteRows repartidos por la app -- así ninguno de esos sitios
+   existentes necesita tocarse: empiezan a usar el cliente autenticado automáticamente en cuanto
+   supabaseAuthClient exista, por el solo hecho de operar sobre una de estas tablas. */
+var TABLAS_RLS_AUTHENTICATED = ['app_users', 'app_mensajeros', 'app_turnos', 'app_solicitudes_generales', 'app_cuotas_config', 'app_flota_habitual', 'app_config_settings'];
+/* clienteAuthOverride es opcional -- solo lo pasa scPushAll() (ver esa función), para evitar la carrera de
+   logout(): anula supabaseAuthClient de forma SÍNCRONA justo después de llamar a scPushAll(), que termina
+   de empujar en un microtask posterior -- sin este override, ese empuje final de cierre de sesión caería
+   siempre al cliente anon, silenciosamente. Todo el resto de llamadores sigue sin pasar este parámetro. */
+function clienteParaTabla(table, clienteAuthOverride) {
+  if (TABLAS_RLS_AUTHENTICATED.indexOf(table) === -1) return supabaseClient;
+  var clienteAuth = clienteAuthOverride !== undefined ? clienteAuthOverride : supabaseAuthClient;
+  return clienteAuth || supabaseClient;
+}
 /* Ver requerimiento "Integración de Google reCAPTCHA v2 Invisible" (reemplaza el par v3 anterior, descartado
    tras 3 intentos fallidos de aprovisionamiento del lado de Google -- ver historial de commits): mismo
    patrón de integración (api.js?render=SITE_KEY + grecaptcha.execute(SITE_KEY,{action}), API compartida por
@@ -503,13 +520,12 @@ function verificarSessionToken(token) {
     .then(function (res) { return (res && res.ok) ? res.user : null; })
     .catch(function () { return null; });
 }
-/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa B: `useAuthClient` (opcional, false
-   por defecto) elige supabaseAuthClient en vez de supabaseClient -- hoy SOLO lo pasa en true el llamador
-   de app_config_settings (ver scPullAll/guardarConfigSettings); las demás 7 tablas ni lo pasan, así que
-   siguen exactamente igual que siempre. Si no hay token/sesión todavía (supabaseAuthClient en null), cae
-   de vuelta al cliente anon -- nunca bloquea la operación por falta de sesión. */
-function scPullTable(table, useAuthClient) {
-  var client = (useAuthClient && supabaseAuthClient) ? supabaseAuthClient : supabaseClient;
+/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Paso de Reconexión: el cliente ya no se
+   elige con un booleano por llamador -- clienteParaTabla(table) decide solo, por nombre de tabla (ver esa
+   función, cerca de supabaseClient/supabaseAuthClient). Si no hay token/sesión todavía (supabaseAuthClient
+   en null), cae de vuelta al cliente anon -- nunca bloquea la operación por falta de sesión. */
+function scPullTable(table) {
+  var client = clienteParaTabla(table);
   if (!client) return Promise.resolve(null);
   /* Ver requerimiento "Duplicación de Nelly Molano en Gestión de Usuarios": se trae también updated_at (no
      solo data) -- deduplicarUsuariosPorEmail lo necesita para decidir, entre 2 filas con distinto id pero el
@@ -576,10 +592,12 @@ function scNotificarFalloSupabase(table) {
   scUltimoAvisoFalloEn = ahora;
   toast('warn', 'Sin conexión con Supabase', 'No se pudo confirmar el guardado en la nube (tabla ' + table + '). El cambio quedó solo en este navegador — evita cerrar la pestaña o borrar la caché hasta reconectar y volver a intentar.');
 }
-/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa B: mismo criterio de `useAuthClient`
-   que scPullTable -- solo app_config_settings lo pasa en true. */
-function scPushRows(table, rows, useAuthClient) {
-  var client = (useAuthClient && supabaseAuthClient) ? supabaseAuthClient : supabaseClient;
+/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Paso de Reconexión: mismo criterio que
+   scPullTable -- clienteParaTabla(table) decide el cliente solo. `clienteAuthOverride` es opcional y SOLO
+   lo pasa scPushAll() (ver esa función) para evitar la carrera de logout() con supabaseAuthClient = null;
+   el resto de los ~53 llamadores de scPushRows en toda la app no lo pasan y siguen igual que siempre. */
+function scPushRows(table, rows, clienteAuthOverride) {
+  var client = clienteParaTabla(table, clienteAuthOverride);
   if (!client || !rows || !rows.length) return Promise.resolve({ ok: true });
   /* Ver requerimiento "Fallo crítico de arquitectura: contraseña revertida a la genérica tras redeploy":
      .role (exclusivo de app_users) es EFÍMERO de sesión -- nunca debe aterrizar en Supabase, sea cual sea
@@ -630,14 +648,18 @@ function scPushRows(table, rows, useAuthClient) {
    PRÓXIMO pull (ya sin este filtro) la trae de vuelta correctamente -- este filtro solo cierra la ventana
    de carrera puntual de la llamada en curso, nunca oculta un fallo real de forma permanente. */
 var scTablasConBorradoEnVuelo = {};
+/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Paso de Reconexión: antes siempre usaba
+   supabaseClient (anon) -- ahora, igual que scPullTable/scPushRows, decide el cliente vía
+   clienteParaTabla(table). Hoy solo app_turnos tiene llamadores reales de scDeleteRows. */
 function scDeleteRows(table, ids) {
-  if (!supabaseClient || !ids || !ids.length) return Promise.resolve({ ok: true });
+  var client = clienteParaTabla(table);
+  if (!client || !ids || !ids.length) return Promise.resolve({ ok: true });
   var pendientes = scTablasConBorradoEnVuelo[table] || (scTablasConBorradoEnVuelo[table] = {});
   ids.forEach(function (id) { pendientes[id] = true; });
   function liberar() { ids.forEach(function (id) { delete pendientes[id]; }); }
   var deletePromise;
   try {
-    deletePromise = supabaseClient.from(table).delete().in('id', ids);
+    deletePromise = client.from(table).delete().in('id', ids);
   } catch (e) {
     console.warn('Supabase: excepción al preparar eliminación de ' + table + ':', e);
     scNotificarFalloSupabase(table);
@@ -710,14 +732,35 @@ function scPushFlotaHabitual(aliado) {
    reciente con una copia local obsoleta, solo reafirma la verdad ya vigente. Las mutaciones individuales
    (submitTurno, registrarLlegadaBodega, registrarSalida, etc.) siguen empujando su propio cambio de inmediato
    -- este sigue siendo solo una red de respaldo periódica, nunca el mecanismo primario de persistencia. */
+/* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Paso de Reconexión (Fix #1/#2): a diferencia
+   de cada mutación puntual (submitTurno, registrarSalida, etc. -- todas ya detrás de su propio canDo()
+   antes de empujar, así que el rol que las dispara siempre coincide con lo que su política RLS permite),
+   este empuje genérico no tiene NINGÚN guardia de permiso -- empuja ciegamente las 4 tablas espejo para
+   CUALQUIER rol. Una vez conectado al cliente authenticated, un rol SIN ningún GRANT de escritura real
+   sobre una tabla (ADMIN/AUDITOR en app_mensajeros/app_turnos; también ADMIN/BODEGA/AUDITOR en
+   app_solicitudes_generales -- ver las políticas desplegadas en supabase/migrations/
+   20261017040000_app_mensajeros_authenticated_rls.sql, 20261017050000_app_solicitudes_generales_authenticated_rls.sql,
+   20261017080000_app_turnos_authenticated_rls.sql) haría fallar el upsert COMPLETO de esa tabla (una sola
+   fila que viola WITH CHECK revierte todo el INSERT ... ON CONFLICT, no solo esa fila). app_users no
+   necesita guardia: su política permite a CUALQUIER rol su propia fila, y ADMIN cualquiera.
+   clienteAuthCapturado/rolCapturado: snapshot tomado AQUÍ, antes de que logout() (que llama a scPushAll()
+   sin esperar y de inmediato anula supabaseAuthClient Y llama a Auth.clearCurrentUser(), ambos de forma
+   síncrona) pueda dejarlos en null antes de que esta cadena asíncrona realmente dispare los 4 empujes --
+   verificado en vivo contra producción: sin capturar `role` también, Auth.getUserRole() ya devolvía null
+   para cuando el .then() se ejecutaba, y el guardia de abajo saltaba TODAS las tablas salvo app_users (las
+   trataba como si ningún rol tuviera permiso, en vez de respetar el rol real de la sesión que se está
+   cerrando) -- mismo patrón de carrera que el cliente, debía capturarse igual. */
 function scPushAll() {
+  var clienteAuthCapturado = supabaseAuthClient;
+  var rolCapturado = Auth.getUserRole();
   (scPullEnVuelo || Promise.resolve()).then(function () {
     return scPullAll();
   }).then(function () {
-    scPushRows('app_users', state.users);
-    scPushRows('app_mensajeros', state.mensajeros);
-    scPushRows('app_turnos', state.turnos);
-    scPushRows('app_solicitudes_generales', state.solicitudesGenerales);
+    var role = rolCapturado;
+    scPushRows('app_users', state.users, clienteAuthCapturado);
+    if (role === 'ALIADO' || role === 'BODEGA') scPushRows('app_mensajeros', state.mensajeros, clienteAuthCapturado);
+    if (role === 'ALIADO' || role === 'BODEGA' || role === 'PLANNER') scPushRows('app_turnos', state.turnos, clienteAuthCapturado);
+    if (role === 'ALIADO' || role === 'PLANNER') scPushRows('app_solicitudes_generales', state.solicitudesGenerales, clienteAuthCapturado);
   });
 }
 /* Trae las 3 tablas y, si Supabase tiene datos, los adopta como fuente de verdad en memoria -- un fallo de
@@ -739,7 +782,7 @@ var scPullEnVuelo = null;
    real que ya existía. */
 var cuotasVigenteHoySincronizadaReal = false;
 function scPullAll() {
-  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual'), scPullTable('app_config_settings', true), scPullTable('app_security_events')]).then(function (res) {
+  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual'), scPullTable('app_config_settings'), scPullTable('app_security_events')]).then(function (res) {
     var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4], flotaHabitualRows = res[5], configSettingsRows = res[6], securityEventRows = res[7];
     var changed = false;
     if (users && users.length) {
@@ -13585,12 +13628,17 @@ function submitTurno(e) {
      General creada aquí (alta/edición fuera de ventana) tampoco se empujaba nunca -- mismo criterio que
      turnoAfectado, con la misma espera de confirmación antes de cerrar el modal. */
   /* Ver FIX "mensajero fantasma" más arriba: el mensajero nuevo (si lo hay) se empuja junto con el turno/
-     solicitud, nunca se deja solo para el autoguardado periódico. */
-  var pushesSubmitTurno = [];
-  if (turnoAfectado) pushesSubmitTurno.push(scPushRows('app_turnos', [turnoAfectado]));
-  if (solGeneralCreada) pushesSubmitTurno.push(scPushRows('app_solicitudes_generales', [solGeneralCreada]));
-  if (mensajeroNuevoCreado) pushesSubmitTurno.push(scPushRows('app_mensajeros', [mensajeroNuevoCreado]));
-  if (pushesSubmitTurno.length) {
+     solicitud, nunca se deja solo para el autoguardado periódico.
+     Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Paso de Reconexión (Fix #3): el push del
+     mensajero nuevo se ESPERA primero, antes de disparar el del turno que lo referencia por mensajeroId --
+     antes corrían en paralelo (Promise.all) -- una vez que app_turnos usa el cliente authenticated, su
+     política de INSERT valida con un EXISTS contra app_mensajeros (ver
+     supabase/migrations/20261017080000_app_turnos_authenticated_rls.sql); si el turno llegara antes de que
+     el INSERT del mensajero nuevo haya comprometido su propia transacción, ese EXISTS podría evaluarse en
+     falso y bloquear el turno por una carrera, no por un permiso real. */
+  var pushMensajeroSubmitTurno = mensajeroNuevoCreado ? scPushRows('app_mensajeros', [mensajeroNuevoCreado]) : Promise.resolve({ ok: true });
+  var hayAlgoQueEmpujarSubmitTurno = !!(turnoAfectado || solGeneralCreada || mensajeroNuevoCreado);
+  if (hayAlgoQueEmpujarSubmitTurno) {
     /* Ver requerimiento "Corrección de Feedback Visual al Crear Mensajero" (reporte de Fabian Meneses/
        Cabify): mismo criterio que la rama de Cuotas más arriba -- el botón queda deshabilitado con un
        indicio visual de espera mientras esta confirmación está en vuelo, en vez de clicable (doble envío) o
@@ -13598,21 +13646,26 @@ function submitTurno(e) {
     var turnoSubmitBtnFinal = document.getElementById('turnoSubmitBtn');
     turnoSubmitBtnFinal.disabled = true;
     turnoSubmitBtnFinal.textContent = 'Guardando…';
-    Promise.all(pushesSubmitTurno).then(function (results) {
-      if (results.some(function (r) { return r && r.ok === false; })) {
-        /* Deshace SOLO lo que esta llamada acaba de crear -- turnoAfectado solo se revierte si es un alta
-           nueva (modo === 'create'); en 'confirm'/'edit' es una ruta YA EXISTENTE antes de esta llamada, así
-           que removerla de state.turnos borraría un registro real que no se creó aquí. */
-        if (modo === 'create' && turnoAfectado) state.turnos = state.turnos.filter(function (r) { return r.id !== turnoAfectado.id; });
-        if (mensajeroNuevoCreado) state.mensajeros = state.mensajeros.filter(function (m) { return m.id !== mensajeroNuevoCreado.id; });
-        if (solGeneralCreada) state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return s.id !== solGeneralCreada.id; });
-        toast('warn', 'No se pudo confirmar en la nube', 'El cambio no se guardó — revisa tu conexión e inténtalo de nuevo.');
+    pushMensajeroSubmitTurno.then(function (mensajeroResult) {
+      var pushesSubmitTurno = [Promise.resolve(mensajeroResult)];
+      if (turnoAfectado) pushesSubmitTurno.push(scPushRows('app_turnos', [turnoAfectado]));
+      if (solGeneralCreada) pushesSubmitTurno.push(scPushRows('app_solicitudes_generales', [solGeneralCreada]));
+      Promise.all(pushesSubmitTurno).then(function (results) {
+        if (results.some(function (r) { return r && r.ok === false; })) {
+          /* Deshace SOLO lo que esta llamada acaba de crear -- turnoAfectado solo se revierte si es un alta
+             nueva (modo === 'create'); en 'confirm'/'edit' es una ruta YA EXISTENTE antes de esta llamada, así
+             que removerla de state.turnos borraría un registro real que no se creó aquí. */
+          if (modo === 'create' && turnoAfectado) state.turnos = state.turnos.filter(function (r) { return r.id !== turnoAfectado.id; });
+          if (mensajeroNuevoCreado) state.mensajeros = state.mensajeros.filter(function (m) { return m.id !== mensajeroNuevoCreado.id; });
+          if (solGeneralCreada) state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return s.id !== solGeneralCreada.id; });
+          toast('warn', 'No se pudo confirmar en la nube', 'El cambio no se guardó — revisa tu conexión e inténtalo de nuevo.');
+          turnoSubmitBtnFinal.disabled = false; turnoSubmitBtnFinal.textContent = 'Guardar turno';
+          syncAndRender(true);
+          return;
+        }
         turnoSubmitBtnFinal.disabled = false; turnoSubmitBtnFinal.textContent = 'Guardar turno';
-        syncAndRender(true);
-        return;
-      }
-      turnoSubmitBtnFinal.disabled = false; turnoSubmitBtnFinal.textContent = 'Guardar turno';
-      closeModal(); syncAndRender(true);
+        closeModal(); syncAndRender(true);
+      });
     });
   } else {
     closeModal();
@@ -13806,29 +13859,36 @@ function cargarFlotaHabitual() {
   if (solicitudes) extra.push(solicitudes + ' se enviaron como Solicitud de Cambio, fuera del horario de programación.');
   if (extra.length) msg += ' ' + extra.join(' ');
   toast('ok', 'Flota Recurrente cargada', msg);
-  var pushesFlotaHabitual = [];
-  if (mensajerosNuevos.length) pushesFlotaHabitual.push(scPushRows('app_mensajeros', mensajerosNuevos));
-  if (turnosNuevos.length) pushesFlotaHabitual.push(scPushRows('app_turnos', turnosNuevos));
-  if (solicitudesGeneralesNuevas.length) pushesFlotaHabitual.push(scPushRows('app_solicitudes_generales', solicitudesGeneralesNuevas));
-  if (pushesFlotaHabitual.length) {
-    Promise.all(pushesFlotaHabitual).then(function (results) {
-      if (results.some(function (r) { return r && r.ok === false; })) {
-        /* Ver mismo rollback en submitTurno: deshace SOLO lo que esta llamada acaba de crear, para que un
-           reintento no choque contra fantasmas locales (mensajero/turno/solicitud nunca confirmados en
-           Supabase). */
-        var idsTurnosNuevos = turnosNuevos.map(function (t) { return t.id; });
-        var idsMensajerosNuevos = mensajerosNuevos.map(function (m) { return m.id; });
-        var idsSolicitudesNuevas = solicitudesGeneralesNuevas.map(function (s) { return s.id; });
-        state.turnos = state.turnos.filter(function (t) { return idsTurnosNuevos.indexOf(t.id) === -1; });
-        state.mensajeros = state.mensajeros.filter(function (m) { return idsMensajerosNuevos.indexOf(m.id) === -1; });
-        state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return idsSolicitudesNuevas.indexOf(s.id) === -1; });
-        toast('warn', 'No se pudo confirmar en la nube', 'La carga de Flota Recurrente no se guardó — revisa tu conexión e inténtalo de nuevo.');
+  /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Paso de Reconexión (Fix #3): mismo criterio
+     que submitTurno -- el push de mensajerosNuevos se ESPERA primero (en vez de correr en Promise.all en
+     paralelo con el de turnosNuevos), porque estos turnos referencian a esos mensajeros por mensajeroId y
+     la política de INSERT de app_turnos valida esa relación con un EXISTS contra app_mensajeros. */
+  var pushMensajerosFlotaHabitual = mensajerosNuevos.length ? scPushRows('app_mensajeros', mensajerosNuevos) : Promise.resolve({ ok: true });
+  var hayAlgoQueEmpujarFlotaHabitual = !!(mensajerosNuevos.length || turnosNuevos.length || solicitudesGeneralesNuevas.length);
+  if (hayAlgoQueEmpujarFlotaHabitual) {
+    pushMensajerosFlotaHabitual.then(function (mensajerosResult) {
+      var pushesFlotaHabitual = [Promise.resolve(mensajerosResult)];
+      if (turnosNuevos.length) pushesFlotaHabitual.push(scPushRows('app_turnos', turnosNuevos));
+      if (solicitudesGeneralesNuevas.length) pushesFlotaHabitual.push(scPushRows('app_solicitudes_generales', solicitudesGeneralesNuevas));
+      Promise.all(pushesFlotaHabitual).then(function (results) {
+        if (results.some(function (r) { return r && r.ok === false; })) {
+          /* Ver mismo rollback en submitTurno: deshace SOLO lo que esta llamada acaba de crear, para que un
+             reintento no choque contra fantasmas locales (mensajero/turno/solicitud nunca confirmados en
+             Supabase). */
+          var idsTurnosNuevos = turnosNuevos.map(function (t) { return t.id; });
+          var idsMensajerosNuevos = mensajerosNuevos.map(function (m) { return m.id; });
+          var idsSolicitudesNuevas = solicitudesGeneralesNuevas.map(function (s) { return s.id; });
+          state.turnos = state.turnos.filter(function (t) { return idsTurnosNuevos.indexOf(t.id) === -1; });
+          state.mensajeros = state.mensajeros.filter(function (m) { return idsMensajerosNuevos.indexOf(m.id) === -1; });
+          state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return idsSolicitudesNuevas.indexOf(s.id) === -1; });
+          toast('warn', 'No se pudo confirmar en la nube', 'La carga de Flota Recurrente no se guardó — revisa tu conexión e inténtalo de nuevo.');
+          btnCargarFlota.disabled = false;
+          syncAndRender(true);
+          return;
+        }
         btnCargarFlota.disabled = false;
         syncAndRender(true);
-        return;
-      }
-      btnCargarFlota.disabled = false;
-      syncAndRender(true);
+      });
     });
   } else {
     btnCargarFlota.disabled = false;
@@ -17350,7 +17410,7 @@ function loadConfigSettings() {
    en ningún lado excepto en el navegador donde Admin lo prendió. Una sola fila 'global' (mismo patrón que
    app_cuotas_config) sincroniza TODO el objeto -- no solo los 2 interruptores de Cuotas. */
 function scPushConfigSettings() {
-  scPushRows('app_config_settings', [{ id: 'global', settings: state.configSettings }], true);
+  scPushRows('app_config_settings', [{ id: 'global', settings: state.configSettings }]);
 }
 function persistConfigSettings() { localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(state.configSettings)); scPushConfigSettings(); }
 /* Reconstruye en vivo los catálogos globales (WAREHOUSES/SEDES/ALIADOS/ALIADOS_MX/ALIADOS_ALL) y los expone
