@@ -468,13 +468,30 @@ function solicitarSessionToken(email, password) {
     .then(function (r) { return r.json(); })
     .catch(function (e) { return { ok: false, error: String(e) }; });
 }
+/* FIX CRÍTICO DE PRODUCCIÓN (hallazgo en vivo durante la verificación del fix de Cabify): fijarSessionTokenConRolNoBloqueante()
+   leía localStorage.melonn_session de forma SÍNCRONA, asumiendo que el mint sin rol (disparado momentos
+   antes, también no bloqueante) ya habría terminado de escribirlo. Cronometrado en producción: si el
+   usuario elige su rol en el modal multirol ANTES de que esa respuesta llegue (confirmado: clic a los
+   2025ms, respuesta del mint a los 2551ms -- una ventana real, no un caso extremo), localStorage seguía
+   vacío -- el guard `if (!tokenActual...) return;` abortaba la función EN SILENCIO, sin ningún reintento.
+   La sesión quedaba con un token válido pero SIN NINGÚN claim de rol, para el resto de la sesión. Antes
+   del Paso de Reconexión esto era inofensivo (ninguna tabla salvo app_config_settings usaba el cliente
+   authenticated) -- pero ahora que clienteParaTabla() enruta las 7 tablas de negocio por ese cliente en
+   cuanto existe, un token sin app_role hace que NINGUNA rama de ninguna política RLS aplique -- las
+   lecturas devuelven 0 filas, vaciando Programar Flota/Despacho/etc. en pantalla para cualquier cuenta
+   multirol que elija su perfil rápido. sessionTokenMintEnVuelo expone la promesa del mint sin rol mientras
+   esté en curso -- fijarSessionTokenConRolNoBloqueante() la espera SIEMPRE antes de leer localStorage, sin
+   importar qué tan rápido se dispare. Si no hay ningún mint en vuelo (sesión restaurada de una pestaña
+   anterior, o cambio de rol en caliente mucho después del login), la promesa ya está resuelta -- no agrega
+   ninguna espera real a esos casos. */
+var sessionTokenMintEnVuelo = null;
 /* Llamada en 3 puntos (ver resolverCredenciales, #formCambioObligatorio, #formRecuperarCuenta) -- los 3
    momentos reales en que el frontend acaba de probar una credencial fresca -- de forma NO bloqueante: si
    falla (red caída, Edge Function temporalmente abajo), la sesión en curso sigue funcionando igual que
    siempre (startSession ya corrió, sin esperar esto); el único efecto de un fallo aquí es que, si el
    usuario recarga la pestaña, tendrá que volver a iniciar sesión -- nunca bloquea el login mismo. */
 function fijarSessionTokenNoBloqueante(email, password) {
-  solicitarSessionToken(email, password).then(function (res) {
+  sessionTokenMintEnVuelo = solicitarSessionToken(email, password).then(function (res) {
     if (res && res.ok && res.token) {
       localStorage.setItem('melonn_session', res.token);
       /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa B: habilita el camino
@@ -482,6 +499,7 @@ function fijarSessionTokenNoBloqueante(email, password) {
          sigue cayendo al cliente anon (ver scPullTable/scPushRows). */
       rebuildSupabaseAuthClient(res.token);
     }
+    return res;
   });
 }
 /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Etapa C: el token de "mint" nunca lleva el
@@ -494,21 +512,22 @@ function fijarSessionTokenNoBloqueante(email, password) {
    funcionando con el token sin rol (solo pierde acceso `authenticated` a tablas con scoping por rol hasta
    que se reintente, nunca bloquea nada). */
 function fijarSessionTokenConRolNoBloqueante(user) {
-  var tokenActual = localStorage.getItem('melonn_session');
-  if (!tokenActual || !user || !user.role) return;
-  fetch(SUPABASE_URL + '/functions/v1/session', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'mint_with_role', token: tokenActual, role: user.role })
-  })
-    .then(function (r) { return r.json(); })
-    .then(function (res) {
-      if (res && res.ok && res.token) {
-        localStorage.setItem('melonn_session', res.token);
-        rebuildSupabaseAuthClient(res.token);
-      }
+  (sessionTokenMintEnVuelo || Promise.resolve()).then(function () {
+    var tokenActual = localStorage.getItem('melonn_session');
+    if (!tokenActual || !user || !user.role) return;
+    return fetch(SUPABASE_URL + '/functions/v1/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'mint_with_role', token: tokenActual, role: user.role })
     })
-    .catch(function () {});
+      .then(function (r) { return r.json(); })
+      .then(function (res) {
+        if (res && res.ok && res.token) {
+          localStorage.setItem('melonn_session', res.token);
+          rebuildSupabaseAuthClient(res.token);
+        }
+      });
+  }).catch(function () {});
 }
 function verificarSessionToken(token) {
   return fetch(SUPABASE_URL + '/functions/v1/session', {
@@ -801,6 +820,18 @@ var scPullEnVuelo = null;
    real que ya existía. */
 var cuotasVigenteHoySincronizadaReal = false;
 function scPullAll() {
+  /* Ver scTablasConAltaEnVuelo/scPushRows (FIX "Ruta desaparece y reaparece sola", reporte Cabify): se
+     captura una FOTO de qué ids están en vuelo justo AHORA, antes de siquiera disparar las 8 consultas --
+     no se puede leer scTablasConAltaEnVuelo recién dentro del .then() de abajo, porque el push que de verdad
+     nos interesa proteger puede resolver (y limpiar su propia marca) DURANTE el propio round-trip de este
+     pull -- dos requests HTTP independientes, sin ningún orden garantizado entre sí. Si se leyera en vivo
+     ahí abajo, un push que resuelve justo a mitad de este pull quedaría desmarcado para cuando el merge
+     corre, aunque la respuesta GET que SÍ se usó haya capturado una foto de la base de datos de un instante
+     anterior a que ese INSERT comprometiera su transacción -- la fila se perdería igual, solo que de forma
+     más esquiva (reproducido en producción al cronometrar la carrera con precisión). Usar la foto tomada
+     ANTES de lanzar las consultas es la única referencia temporal correcta. */
+  var altaMensajerosEnVueloFoto = Object.assign({}, scTablasConAltaEnVuelo['app_mensajeros']);
+  var altaTurnosEnVueloFoto = Object.assign({}, scTablasConAltaEnVuelo['app_turnos']);
   scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual'), scPullTable('app_config_settings'), scPullTable('app_security_events')]).then(function (res) {
     var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4], flotaHabitualRows = res[5], configSettingsRows = res[6], securityEventRows = res[7];
     var changed = false;
@@ -838,8 +869,7 @@ function scPullAll() {
       var mensajerosRemotos = mensajeros.map(function (row) { return row.value; });
       var idsMensajerosRemotos = {};
       mensajerosRemotos.forEach(function (m) { idsMensajerosRemotos[m.id] = true; });
-      var altaMensajerosEnVuelo = scTablasConAltaEnVuelo['app_mensajeros'] || {};
-      var mensajerosLocalesEnVuelo = state.mensajeros.filter(function (m) { return altaMensajerosEnVuelo[m.id] && !idsMensajerosRemotos[m.id]; });
+      var mensajerosLocalesEnVuelo = state.mensajeros.filter(function (m) { return altaMensajerosEnVueloFoto[m.id] && !idsMensajerosRemotos[m.id]; });
       state.mensajeros = mensajerosRemotos.concat(mensajerosLocalesEnVuelo);
       changed = true;
     }
@@ -854,8 +884,7 @@ function scPullAll() {
          todavía no traiga. */
       var idsTurnosRemotos = {};
       turnosRemotos.forEach(function (t) { idsTurnosRemotos[t.id] = true; });
-      var altaTurnosEnVuelo = scTablasConAltaEnVuelo['app_turnos'] || {};
-      var turnosLocalesEnVuelo = state.turnos.filter(function (t) { return altaTurnosEnVuelo[t.id] && !idsTurnosRemotos[t.id]; });
+      var turnosLocalesEnVuelo = state.turnos.filter(function (t) { return altaTurnosEnVueloFoto[t.id] && !idsTurnosRemotos[t.id]; });
       state.turnos = turnosRemotos.concat(turnosLocalesEnVuelo);
       changed = true;
     }
