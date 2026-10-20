@@ -2501,13 +2501,23 @@ function nextTurnoId() {
    original) para cualquier turno que en realidad apuntara al duplicado -- el turno nuevo se mostraba con la
    identidad de OTRO mensajero por completo, y el push a Supabase sobrescribía silenciosamente el registro
    real existente. Mismo criterio que las otras 3 colecciones: se deriva del máximo numérico YA presente en
-   state.mensajeros, nunca de un contador aparte que pueda quedar desactualizado tras un pull. */
+   state.mensajeros, nunca de un contador aparte que pueda quedar desactualizado tras un pull.
+   FIX "Bloqueo de Ventana de Retorno en Alta de Mensajero Nuevo" (reporte Cordiandina): ese fix anterior
+   resuelve el contador desactualizado tras un pull, pero no una colisión ENTRE 2 PESTAÑAS/SESIONES que
+   calculan "el siguiente número" casi al mismo tiempo, cada una con su propia copia local de
+   state.mensajeros todavía sin la del otro -- ambas podían derivar el mismo maxNum+1, y el upsert por id de
+   Supabase fusionaba/sobrescribía silenciosamente un registro sobre el otro (el alta "nueva" terminaba
+   heredando el turno real de otro mensajero ya programado, disparando un falso "Ventana de retorno no
+   cumplida"). Se añade un sufijo corto, único por instante+pestaña (timestamp en base36 + aleatorio) -- el
+   número secuencial se conserva como prefijo legible (para lectura/depuración), pero la unicidad real ya no
+   depende de que ninguna pestaña vea primero el alta de la otra, sin requerir ninguna secuencia del lado
+   del servidor. */
 function nextMensajeroId() {
   var maxNum = state.mensajeros.reduce(function (max, m) {
     var n = parseInt(String(m.id).slice(1), 10);
     return isNaN(n) ? max : Math.max(max, n);
   }, 111);
-  return 'm' + (maxNum + 1);
+  return 'm' + (maxNum + 1) + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 /* Ver requerimiento "Persistencia Crítica: Aprobar Prolongación de Tiempo en Supabase": mismo bug de
    contador obsoleto ya corregido para nextTurnoId/nextUserId -- ahora que state.solicitudesGenerales SÍ se
@@ -13090,7 +13100,15 @@ function openTurnoModal(mode, routeId) {
      el cierre por Incumplimiento Confirmado / Sin Reemplazo (bloqueo total de acciones extemporáneas). */
   if (route) {
     var codeTm = computeEstado(route).code;
-    if (route.fecha < TODAY_STR || route.salida || route.retirado || route.pendienteAprobacionPlanner || route.solicitudEdicionPendiente || (route.solicitud && route.solicitud.estado === 'pendiente') || codeTm === 'afectacion_confirmada' || codeTm === 'sin_reemplazo') {
+    /* FIX "Hora bloqueada tras Cargar Flota Recurrente, sin explicación" (reporte Cordiandina, aplica a
+       cualquier Aliado): el aviso genérico no distinguía la causa -- un turno "Pendiente de Aprobación por
+       Planner" (cupo excedido/festivo/domingo/tipología, ver evaluarAprobacionCuota) se percibía como un
+       campo de hora roto/bloqueado en vez de un estado intencional en espera de que Planner lo resuelva. */
+    if (route.pendienteAprobacionPlanner) {
+      toast('warn', 'No disponible', 'Este turno se encuentra Pendiente de Aprobación por Planner y no admite edición directa.');
+      return;
+    }
+    if (route.fecha < TODAY_STR || route.salida || route.retirado || route.solicitudEdicionPendiente || (route.solicitud && route.solicitud.estado === 'pendiente') || codeTm === 'afectacion_confirmada' || codeTm === 'sin_reemplazo') {
       toast('warn', 'No disponible', 'Este turno no admite edición en este momento.');
       return;
     }
@@ -13232,10 +13250,17 @@ function turnoEnVentanaRetorno(mensajeroId, fecha, hora, excluirRouteId) {
   });
   return conflicto;
 }
+/* FIX "Bloqueo de Ventana de Retorno en Alta de Mensajero Nuevo" (reporte Cordiandina, aplica a cualquier
+   Aliado): el bloqueo en sí es correcto -- findOrCreateMensajero() reutiliza el registro YA EXISTENTE con
+   esa cédula (ver su propio comentario), así que no es un alta nueva de verdad, es la misma persona con un
+   turno activo ese día. Lo que SÍ faltaba era decírselo con claridad: el aviso genérico ("ya está
+   programado") no dejaba ver que la causa era la CÉDULA tipeada, llevando a pensar que el sistema estaba
+   bloqueando por error a alguien realmente nuevo. Se indica la cédula de forma explícita. */
 function alertarVentanaRetorno(mensajeroId, conflicto) {
+  var m = getMensajero(mensajeroId);
   var horaPermitidaDT = new Date(parseDT(conflicto.fecha, conflicto.hora).getTime() + VENTANA_RETORNO_MINUTOS * 60000);
   toast('warn', 'Ventana de retorno no cumplida',
-    getMensajero(mensajeroId).nombre + ' ya está programado a las ' + fmtTime12(conflicto.hora) + '. Por tiempo de operación y retorno (4 hrs mínimas), solo puede volver a programarse a partir de las ' + fmtTime12(fmtTimeHM(horaPermitidaDT)) + '.');
+    'La cédula ' + m.cedula + ' ya se encuentra registrada con un turno activo a las ' + fmtTime12(conflicto.hora) + ' (' + m.nombre + '). Por tiempo de operación y retorno (4 hrs mínimas), solo puede volver a programarse a partir de las ' + fmtTime12(fmtTimeHM(horaPermitidaDT)) + '.');
 }
 /* Ver requerimiento "Validación de Exclusividad de Mensajeros por Fecha" + ampliación "4 Criterios de
    Identidad": un mismo mensajero (identidad real de la persona, no mensajeroId -- que es un registro
@@ -13771,7 +13796,7 @@ function cargarFlotaHabitual() {
       yaProgramados[s.detalle.cedula] = true;
     }
   });
-  var creados = 0, pendientesAprobacion = 0, solicitudes = 0;
+  var creados = 0, omitidosPorCupo = 0, solicitudes = 0;
   /* Ver nota "Supabase" junto a submitTurno(): esta carga masiva tampoco empujaba nunca a app_turnos --
      se acumulan aquí todos los turnos nuevos de esta pasada para empujarlos juntos en un solo scPushRows
      al final, en vez de depender del autoguardado periódico. */
@@ -13799,23 +13824,18 @@ function cargarFlotaHabitual() {
     var aprobacion = tipologiaNoHabilitadaFlota
       ? { requiere: true, motivo: 'tipologia', detalle: 'Solicitud de Excepción de Tipología: ' + state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(entry.vehiculo, countryForSede(entry.sede)) + ' en ' + entry.sede + '.' }
       : evaluarAprobacionCuota(entry.sede, state.user.aliado, entry.vehiculo, entry.hora, fecha);
+    /* FIX "Plantilla de Flota Recurrente satura Solicitudes y Cambios con Pendientes de Aprobación" (reporte
+       Cordiandina, aplica a cualquier Aliado): antes, un entry que excedía cupo/festivo/domingo/tipología se
+       creaba IGUAL como turno real en estado "Pendiente de Aprobación por Planner" -- cada vez que el Aliado
+       repetía "Cargar Flota Recurrente" (p. ej. tras cerrar y reabrir, o por costumbre diaria), se acumulaban
+       más y más turnos bloqueados (sin edición posible, ver openTurnoModal) esperando a Planner, saturando
+       Solicitudes y Cambios. Ahora la carga masiva por plantilla SOLO persiste lo que cabe dentro del cupo
+       configurado -- el excedente se omite por completo (ni turno ni mensajero nuevo), y se informa al
+       Aliado cuántos quedaron fuera para que los gestione manualmente vía "+ Nuevo Turno" si corresponde
+       (ese camino individual sigue yendo a Pendiente de Aprobación, sin cambios -- Planner sigue pudiendo
+       revisarlos ahí, uno por uno, en vez de recibir un lote masivo). */
     if (aprobacion.requiere) {
-      var mensajeroIdPend = resolverMensajero(payload);
-      var turnoPendienteAprobacion = {
-        id: nextTurnoId(), sede: entry.sede, fecha: fecha, mensajeroId: mensajeroIdPend, vehiculo: entry.vehiculo, hora: entry.hora,
-        llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: false,
-        pendienteAprobacionPlanner: true, pendienteAprobacionMotivo: aprobacion.motivo, pendienteAprobacionDetalle: aprobacion.detalle,
-        pendienteAprobacionSolicitadoPor: state.user.nombre, pendienteAprobacionSolicitadoEn: fmtClock(state.now),
-      };
-      state.turnos.push(turnoPendienteAprobacion);
-      registrarCreacionTurno(turnoPendienteAprobacion, state.user.nombre);
-      registrarHistorialCambio(turnoPendienteAprobacion, {
-        tipo: 'aprobacion_cuota', accion: 'solicitado',
-        motivo: (aprobacion.motivo === 'festivo' ? 'Programación en día festivo' : aprobacion.motivo === 'domingo' ? 'Programación como Recurso Adicional (domingo)' : aprobacion.motivo === 'tipologia' ? 'Excepción de Tipología' : 'Cupo excedido') + ': ' + aprobacion.detalle + ' (carga rápida de Flota Habitual).',
-        horaAnterior: null, horaPropuesta: null, por: state.user.nombre
-      });
-      turnosNuevos.push(turnoPendienteAprobacion);
-      creados++; pendientesAprobacion++;
+      omitidosPorCupo++;
       return;
     }
     var ws = progEditWindowState();
@@ -13849,13 +13869,17 @@ function cargarFlotaHabitual() {
     }
   });
   if (!creados) {
-    toast('warn', 'Flota Recurrente', 'Todos los mensajeros de tu flota recurrente ya estaban programados para mañana.');
+    if (omitidosPorCupo) {
+      toast('warn', 'Flota Recurrente', 'Ningún turno se cargó: ' + (omitidosPorCupo === 1 ? 'el único mensajero' : 'los ' + omitidosPorCupo + ' mensajeros') + ' de tu flota recurrente para mañana exced' + (omitidosPorCupo === 1 ? 'e' : 'en') + ' el cupo configurado (o cae' + (omitidosPorCupo === 1 ? '' : 'n') + ' en festivo/domingo/tipología no habilitada). Prográma' + (omitidosPorCupo === 1 ? 'lo' : 'los') + ' manualmente vía "+ Nuevo Turno" si necesitas pedir autorización a Planner.');
+    } else {
+      toast('warn', 'Flota Recurrente', 'Todos los mensajeros de tu flota recurrente ya estaban programados para mañana.');
+    }
     btnCargarFlota.disabled = false;
     return;
   }
-  var msg = 'Se cargaron ' + creados + ' turno' + (creados === 1 ? '' : 's') + ' de la flota recurrente correctamente.';
+  var msg = 'Se cargaron ' + creados + ' turno' + (creados === 1 ? '' : 's') + ' dentro de la cuota disponible.';
   var extra = [];
-  if (pendientesAprobacion) extra.push(pendientesAprobacion + ' quedaron "Pendiente de Aprobación por Planner" (cupo excedido, día festivo o domingo como Recurso Adicional).');
+  if (omitidosPorCupo) extra.push((omitidosPorCupo === 1 ? 'El turno adicional fue omitido' : 'Los ' + omitidosPorCupo + ' turnos adicionales fueron omitidos') + ' ya que la plantilla solo permite programar dentro del cupo configurado.');
   if (solicitudes) extra.push(solicitudes + ' se enviaron como Solicitud de Cambio, fuera del horario de programación.');
   if (extra.length) msg += ' ' + extra.join(' ');
   toast('ok', 'Flota Recurrente cargada', msg);
