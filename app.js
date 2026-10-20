@@ -592,6 +592,19 @@ function scNotificarFalloSupabase(table) {
   scUltimoAvisoFalloEn = ahora;
   toast('warn', 'Sin conexión con Supabase', 'No se pudo confirmar el guardado en la nube (tabla ' + table + '). El cambio quedó solo en este navegador — evita cerrar la pestaña o borrar la caché hasta reconectar y volver a intentar.');
 }
+/* FIX "Ruta desaparece y reaparece sola tras agregar un mensajero" (reporte Cabify, aplica a cualquier
+   Aliado/sede): scTablasConBorradoEnVuelo (ver scDeleteRows más abajo) ya protege el camino de BORRADO --
+   un pull de foco/visibilitychange que gane la carrera contra un DELETE todavía sin confirmar no resucita
+   la fila recién eliminada. Nunca existió el equivalente para el camino de ALTA/EDICIÓN: scPullAll()
+   reemplaza state.mensajeros/state.turnos POR COMPLETO con lo que traiga el pull (ver esa función) -- si el
+   Aliado agrega un mensajero/turno nuevo (optimista, visible de inmediato) y, ANTES de que su propio
+   scPushRows() termine de confirmarse en Supabase, cualquier otra causa dispara scPullAll() (cambiar de
+   pestaña y volver, el autoguardado periódico de 30 ticks), ese pull todavía no incluye la fila nueva --
+   el reemplazo en bloque la borra de la pantalla, hasta que el SIGUIENTE pull (ya con el push real
+   confirmado) la trae de vuelta. Mismo patrón que scTablasConBorradoEnVuelo, en la dirección opuesta: se
+   registra, por tabla, el set de ids con un scPushRows() todavía sin resolver -- scPullAll() los preserva
+   (en vez de dejar que el reemplazo en bloque los descarte) si el pull remoto todavía no los trae. */
+var scTablasConAltaEnVuelo = {};
 /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Paso de Reconexión: mismo criterio que
    scPullTable -- clienteParaTabla(table) decide el cliente solo. `clienteAuthOverride` es opcional y SOLO
    lo pasa scPushAll() (ver esa función) para evitar la carrera de logout() con supabaseAuthClient = null;
@@ -599,6 +612,9 @@ function scNotificarFalloSupabase(table) {
 function scPushRows(table, rows, clienteAuthOverride) {
   var client = clienteParaTabla(table, clienteAuthOverride);
   if (!client || !rows || !rows.length) return Promise.resolve({ ok: true });
+  var pendientesAlta = scTablasConAltaEnVuelo[table] || (scTablasConAltaEnVuelo[table] = {});
+  rows.forEach(function (r) { pendientesAlta[r.id] = true; });
+  function liberarAlta() { rows.forEach(function (r) { delete pendientesAlta[r.id]; }); }
   /* Ver requerimiento "Fallo crítico de arquitectura: contraseña revertida a la genérica tras redeploy":
      .role (exclusivo de app_users) es EFÍMERO de sesión -- nunca debe aterrizar en Supabase, sea cual sea
      la carrera que dispare el push (nunca se lee de vuelta, scPullAll/startSession siempre lo recalculan
@@ -616,14 +632,17 @@ function scPushRows(table, rows, clienteAuthOverride) {
   } catch (e) {
     console.warn('Supabase: excepción al preparar guardado de ' + table + ':', e);
     scNotificarFalloSupabase(table);
+    liberarAlta();
     return Promise.resolve({ ok: false, error: e });
   }
   var timeoutPromise = new Promise(function (resolve) { setTimeout(function () { resolve({ timedOut: true }); }, SC_PUSH_TIMEOUT_MS); });
   return Promise.race([upsertPromise, timeoutPromise]).then(function (res) {
+    liberarAlta();
     if (res && res.timedOut) { console.warn('Supabase: tiempo de espera agotado al guardar ' + table); scNotificarFalloSupabase(table); return { ok: false, error: 'timeout' }; }
     if (res.error) { console.warn('Supabase: fallo al guardar ' + table + ':', res.error.message); scNotificarFalloSupabase(table); return { ok: false, error: res.error }; }
     return { ok: true };
   }, function (e) {
+    liberarAlta();
     console.warn('Supabase: fallo al guardar ' + table + ':', e);
     scNotificarFalloSupabase(table);
     return { ok: false, error: e };
@@ -811,13 +830,33 @@ function scPullAll() {
         if (userFresco) { userFresco.role = state.user.role; state.user = userFresco; }
       }
     }
-    if (mensajeros && mensajeros.length) { state.mensajeros = mensajeros.map(function (row) { return row.value; }); changed = true; }
+    if (mensajeros && mensajeros.length) {
+      /* Ver scPushRows/scTablasConAltaEnVuelo (FIX "Ruta desaparece y reaparece sola tras agregar un
+         mensajero", reporte Cabify): preserva cualquier mensajero creado/editado EN ESTA pestaña cuyo
+         scPushRows() todavía no se haya confirmado y que el pull remoto todavía no traiga -- sin esto, el
+         reemplazo en bloque de abajo lo hacía desaparecer hasta el siguiente pull. */
+      var mensajerosRemotos = mensajeros.map(function (row) { return row.value; });
+      var idsMensajerosRemotos = {};
+      mensajerosRemotos.forEach(function (m) { idsMensajerosRemotos[m.id] = true; });
+      var altaMensajerosEnVuelo = scTablasConAltaEnVuelo['app_mensajeros'] || {};
+      var mensajerosLocalesEnVuelo = state.mensajeros.filter(function (m) { return altaMensajerosEnVuelo[m.id] && !idsMensajerosRemotos[m.id]; });
+      state.mensajeros = mensajerosRemotos.concat(mensajerosLocalesEnVuelo);
+      changed = true;
+    }
     if (turnos && turnos.length) {
       /* Ver scDeleteRows/scTablasConBorradoEnVuelo: excluye cualquier turno cuyo DELETE siga en vuelo en este
          mismo instante -- sin esto, un pull de foco/visibilitychange que gane la carrera contra un
          scDeleteRows() todavía sin confirmar resucita la fila que el usuario acaba de eliminar. */
       var turnosBorrandose = scTablasConBorradoEnVuelo['app_turnos'] || {};
-      state.turnos = deduplicarTurnosPorAsignacion(turnos).filter(function (t) { return !turnosBorrandose[t.id]; });
+      var turnosRemotos = deduplicarTurnosPorAsignacion(turnos).filter(function (t) { return !turnosBorrandose[t.id]; });
+      /* Ver scPushRows/scTablasConAltaEnVuelo (mismo FIX de Cabify): preserva cualquier turno creado/
+         editado EN ESTA pestaña cuyo scPushRows() todavía no se haya confirmado y que el pull remoto
+         todavía no traiga. */
+      var idsTurnosRemotos = {};
+      turnosRemotos.forEach(function (t) { idsTurnosRemotos[t.id] = true; });
+      var altaTurnosEnVuelo = scTablasConAltaEnVuelo['app_turnos'] || {};
+      var turnosLocalesEnVuelo = state.turnos.filter(function (t) { return altaTurnosEnVuelo[t.id] && !idsTurnosRemotos[t.id]; });
+      state.turnos = turnosRemotos.concat(turnosLocalesEnVuelo);
       changed = true;
     }
     if (solicitudesGenerales && solicitudesGenerales.length) { state.solicitudesGenerales = solicitudesGenerales.map(function (row) { return row.value; }); changed = true; }
