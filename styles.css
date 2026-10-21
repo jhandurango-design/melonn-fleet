@@ -325,6 +325,7 @@ a{color:inherit;}
 .cuotas-resumen-desglose-header{display:flex;justify-content:flex-end;}
 .cuotas-resumen-desglose ul{margin:0;padding:0;list-style:none;display:flex;flex-wrap:wrap;gap:4px 14px;}
 .cuotas-resumen-desglose li.descalce-franja-item{color:#B45309;font-weight:700;}
+.cuotas-resumen-desglose li.vacio-franja-item{color:#C03048;font-weight:700;}
 .cuotas-desglose-cerrar{border:none;background:none;color:var(--text-secondary);cursor:pointer;font-size:13px;line-height:1;padding:2px 4px;}
 .cuotas-desglose-cerrar:hover{color:var(--text-primary);}
 /* Ver requerimiento "Agrupación Dinámica en Avance y Carga T+1 (Bodega → Aliado)": mismo patrón visual de

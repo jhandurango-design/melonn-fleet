@@ -3140,12 +3140,18 @@ function computeCancelPenalty(route) {
   var esVan = isVanCategory(route.vehiculo);
   var th = cancelacionThresholds();
   var sinPenalizacion = esVan ? (horasAntes >= th.vanMin && horasAntes <= th.vanMax) : (horasAntes >= th.moto);
+  /* Ver requerimiento "Exclusión de Penalizaciones" para Recursos Adicionales (ver esTurnoAdicionalExento):
+     un turno creado por encima de la cuota base contratada (causal 'cupo'/'domingo') nunca genera multa
+     económica por cancelación, sin importar la antelación -- solo la cuota base es objeto de penalización. */
+  var esAdicional = esTurnoAdicionalExento(route);
   return {
     categoria: route.vehiculo,
     tipo: esVan ? 'van' : 'moto',
     horasAntesCargue: Math.round(horasAntes * 10) / 10,
-    aplicaPenalizacion: !sinPenalizacion,
-    regla: esVan ? ('Vans: sin penalización entre ' + th.vanMin + ' y ' + th.vanMax + ' horas antes del cargue.') : ('Motos: sin penalización hasta ' + th.moto + ' hora(s) antes del cargue.')
+    aplicaPenalizacion: !sinPenalizacion && !esAdicional,
+    regla: esAdicional
+      ? 'Recurso Adicional (fuera de la cuota base contratada): exento de penalización por cancelación.'
+      : (esVan ? ('Vans: sin penalización entre ' + th.vanMin + ' y ' + th.vanMax + ' horas antes del cargue.') : ('Motos: sin penalización hasta ' + th.moto + ' hora(s) antes del cargue.'))
   };
 }
 /* Clasificación de antelación de una solicitud de Reprogramación enviada por el Aliado (ver
@@ -3213,6 +3219,35 @@ function turnosPendientesAprobacionCount(sede, aliado, fecha, franja, vehiculo) 
 /* Interruptor del módulo de Cuotas, independiente por país (ver Configuración/Cuotas de Flota — Admin
    controla Colombia y México por separado; ej. CO con cuotas activas mientras MX opera libre). */
 function cuotasActivoPais(country) { return country === 'MX' ? !!state.configSettings.cuotasActivoMX : !!state.configSettings.cuotasActivoCO; }
+/* Ver requerimiento "Diferenciación y Lógica de Recursos Adicionales": un turno es "Adicional" cuando se creó
+   por encima de la cuota BASE contratada (causal 'cupo', ver evaluarAprobacionCuota/checkCuotaGlobalExceso) o
+   como recurso sin cuota operativa de Domingo (causal 'domingo') -- NO festivo/tipología, que son excepciones
+   de un tipo distinto (día/vehículo), no de cantidad. route.pendienteAprobacionMotivo nunca se borra tras
+   aprobar/rechazar (ver aprobarCuotaPlanner/rechazarCuotaPlanner) -- queda como marca permanente, así que este
+   predicado sigue siendo válido durante todo el ciclo de vida del turno, aprobado o no. */
+function esTurnoAdicionalExento(route) {
+  return route.pendienteAprobacionMotivo === 'cupo' || route.pendienteAprobacionMotivo === 'domingo';
+}
+/* Ver requerimiento "Diferenciación y Lógica de Recursos Adicionales", punto de identificación visual: badge
+   "+1 Adicional" en la propia fila del turno (Programar Flota/Consolidado), reutilizando el mismo estilo
+   .badge-sobrecupo que ya usa el widget agregado de Avance de Cuotas (ver cuotasSobrecupoBadgeHtml). */
+function turnoAdicionalRowBadgeHtml(route) {
+  if (!esTurnoAdicionalExento(route)) return '';
+  var causaTxt = route.pendienteAprobacionMotivo === 'domingo' ? 'Recurso Adicional de Domingo' : 'Cupo Excedido';
+  return ' <span class="badge-sobrecupo" data-tip="Turno fuera de la cuota base contratada (' + causaTxt + '); no genera penalización ni afecta el cumplimiento del aliado.">+1 Adicional</span>';
+}
+/* Único punto de "¿este turno cuenta como Incumplimiento Confirmado para Cumplimiento y Calidad?" -- mismo
+   criterio que ya usaban por separado aliadoMetricas/renderCumplimientoBodegaTab/gatherSolicitudesHistorial
+   (afectacion_confirmada/sin_reemplazo/sinReemplazoAusencia), ahora con la exención de Recursos Adicionales
+   (ver esTurnoAdicionalExento) aplicada en un solo lugar: un turno Adicional cancelado/sin cubrir NO debe
+   penalizar al aliado ni afectar su score de SLA, aunque su badge de estado siga mostrando el mismo código
+   FSM de siempre (afectacion_confirmada/sin_reemplazo) -- esto es deliberado, para no alterar ninguna de las
+   ~15 comprobaciones existentes de "¿este turno ya cerró/está bloqueado para edición?" en toda la plataforma. */
+function esIncumplimientoConfirmado(route) {
+  if (esTurnoAdicionalExento(route)) return false;
+  var c = computeEstado(route).code;
+  return c === 'sin_reemplazo' || c === 'afectacion_confirmada' || !!route.sinReemplazoAusencia;
+}
 /* Único punto de control de excesos de cupo (ver evaluarAprobacionCuota/submitTurno) — sin cuota asignada
    para la combinación (cantidad=0) se interpreta como "sin control", no como "cupo cero"; evita bloquear
    combinaciones que Admin aún no parametrizó. Flota Propia nunca se evalúa (ver requerimiento — no requiere
@@ -3655,6 +3690,64 @@ function cierreJornadaSweep() {
       }
     }
   });
+}
+/* ---------------- Cierre Automático Nocturno de Cuotas (Pendientes del Sistema) ----------------
+   Ver requerimiento "Lógica Condicional de 'Pendientes' según Estado de Cuotas (Prendidas/Apagadas)": al
+   llegar la hora límite (00:00h, mismo cruce de medianoche real que ya usa cierreJornadaSweep -- las
+   prórrogas de la ventana de Programación de Flota, ver progWindowState, NUNCA se extienden más allá de
+   progMidnightDT, así que "fin de prórroga activa" coincide siempre con este mismo instante), el Sistema
+   completa automáticamente, SOLO para sede+aliado con Cuotas ACTIVAS para su país (nunca Flota Propia), el
+   déficit entre la cuota BASE GLOBAL contratada de TOMORROW_STR (el día que está por comenzar) y lo que el
+   Aliado ya programó (mensajeros reales + pendientes manuales ya cuentan, ver turnosProgramadosGlobalCount) --
+   generando un turno "Pendiente / Por Confirmar" por cada plaza faltante, igual que si el Aliado hubiera usado
+   el atajo "Faltan X — Completar con Pendiente/Por Confirmar" manualmente. Reutiliza cuotaGlobalAsignada/
+   turnosProgramadosGlobalCount (mismo total CONTRATADO que ya gobierna checkCuotaGlobalExceso/
+   evaluarAprobacionCuota) para no duplicar ningún criterio de cuota -- por construcción, nunca genera más
+   plazas que el déficit exacto, así que estos pendientes nunca califican como "Adicional" (ver
+   esTurnoAdicionalExento). Idempotencia: state.cierreCuotasNocturnoHecho, mismo patrón que
+   state.jornadaCerrada -- corre una sola vez por cruce de medianoche real. */
+function cierreCuotasNocturnoSweep() {
+  if (state.cierreCuotasNocturnoHecho || state.now < progMidnightDT()) return;
+  state.cierreCuotasNocturnoHecho = true;
+  var dia = diaSemanaKey(TOMORROW_STR);
+  if (!dia) return;
+  var pendientesCreados = [];
+  var vistos = {};
+  state.cuotasMatriz.forEach(function (c) {
+    if (c.dia !== dia || c.cantidad <= 0) return;
+    if (!cuotasActivoPais(countryForSede(c.sede))) return;
+    if (esFlotaPropia(c.aliado)) return;
+    var key = c.sede + '|' + c.aliado;
+    if (vistos[key]) return;
+    vistos[key] = true;
+    var cuotaTotal = cuotaGlobalAsignada(c.sede, c.aliado, TOMORROW_STR);
+    if (cuotaTotal <= 0) return;
+    var actuales = turnosProgramadosGlobalCount(c.sede, c.aliado, TOMORROW_STR);
+    var faltan = cuotaTotal - actuales;
+    if (faltan <= 0) return;
+    /* Hora/vehículo de los pendientes generados por el Sistema: se reutiliza la primera franja/tipología
+       configurada de este sede+aliado+día (sin ninguna preferencia real del Aliado que leer) -- el Aliado
+       puede luego usar "Confirmar recurso" para corregir vehículo/hora al asignar su mensajero real. */
+    var primeraFranja = state.cuotasMatriz.filter(function (x) { return x.sede === c.sede && x.aliado === c.aliado && x.dia === dia && x.cantidad > 0; })
+      .sort(function (a, b) { return a.franja < b.franja ? -1 : 1; })[0];
+    if (!primeraFranja) return;
+    for (var i = 0; i < faltan; i++) {
+      var mensajeroPendienteId = crearMensajeroPendiente({ sede: c.sede, vehiculo: primeraFranja.vehiculo }, c.aliado);
+      var nuevoTurnoSistema = {
+        id: nextTurnoId(), sede: c.sede, fecha: TOMORROW_STR, mensajeroId: mensajeroPendienteId, vehiculo: primeraFranja.vehiculo,
+        hora: primeraFranja.franja, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: true
+      };
+      state.turnos.push(nuevoTurnoSistema);
+      registrarCreacionTurno(nuevoTurnoSistema, 'Sistema Gravity');
+      registrarHistorialCambio(nuevoTurnoSistema, {
+        tipo: 'cierre_cuotas_nocturno', accion: 'generado_automaticamente',
+        motivo: 'Cierre Automático Nocturno (00:00) — el Aliado no completó la cuota base contratada de ' + c.sede + '; el Sistema generó esta plaza "Pendiente / Por Confirmar" para no dejarla descubierta.',
+        horaAnterior: null, horaPropuesta: null, por: 'Sistema Gravity', rol: 'SYSTEM'
+      });
+      pendientesCreados.push(nuevoTurnoSistema);
+    }
+  });
+  if (pendientesCreados.length) scPushRows('app_turnos', pendientesCreados);
 }
 /* ---------------- Regularización Obligatoria de Demora en Despacho (Jornada Anterior) ----------------
    Ver requerimiento "Auditoría Integral de Alertas, Cierre Nocturno y Regularización Obligatoria de Demora en
@@ -4306,7 +4399,9 @@ function noUbicaRecurso(routeId, motivo) {
     origen: 'aliado', penalizacion: penal
   };
   route.pendienteAsignacion = false;
-  route.sinReemplazoAusencia = true;
+  /* Ver requerimiento "Exclusión de Penalizaciones" (esTurnoAdicionalExento): un cupo Adicional sin cubrir
+     nunca debe sumar a "Incumplimientos Confirmados" (ver esIncumplimientoConfirmado). */
+  route.sinReemplazoAusencia = !esTurnoAdicionalExento(route);
   registrarHistorialCambio(route, { tipo: 'cancelacion', accion: 'aprobada', motivo: motivoFinal, horaAnterior: route.hora, horaPropuesta: null, por: state.user.nombre });
   toast('warn', 'Turno cerrado sin recurso', route.id + ' quedó cancelado por falta de mensajero disponible.');
   syncAndRender(true);
@@ -4887,6 +4982,10 @@ function scanRoutes(silent) {
      antes de recalcular el resto del ciclo -- así ningún rol ve, ni por un instante, una alerta/solicitud de
      "ayer" todavía activa tras la medianoche. */
   cierreJornadaSweep();
+  /* Ver requerimiento "Lógica Condicional de 'Pendientes' según Estado de Cuotas": mismo cruce de medianoche
+     real que cierreJornadaSweep, pero sobre TOMORROW_STR (el día que empieza) en vez de TODAY_STR (el que
+     cierra) -- ver cierreCuotasNocturnoSweep. */
+  cierreCuotasNocturnoSweep();
   /* Ver requerimiento "Ajuste Matriz de SLA y Ciclos de Vida Diferenciados...": a diferencia de
      cierreJornadaSweep (respaldo final de medianoche, una sola vez), este chequeo corre en CADA tick -- las
      solicitudes operativas en caliente vencen a la 1h, mucho antes de que llegue la medianoche. */
@@ -7395,7 +7494,7 @@ function rowHtmlConsolidado(route) {
       '</div></td>' +
     '<td>' + route.vehiculo + '</td>' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td><div class="row-actions">' + actions + '</div></td>' +
     '</tr>';
 }
@@ -7914,7 +8013,7 @@ function rowHtmlDespacho(route) {
     '<td>' + fmtTime12(route.salida) + '</td>' +
     '<td>' + maletaCell + '</td>' +
     '<td>' + celularCell + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + demoraPreviaTagHtml + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + demoraPreviaTagHtml + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td class="courier-sub">' + observacionesDespachoCellHtml(route, puedeGestionar && !route.salida) + '</td>' +
     '<td><div class="row-actions">' + actions + '</div></td>' +
     '</tr>';
@@ -8672,7 +8771,7 @@ function rowHtmlSeguimiento(route) {
     '<td>' + m.nombre + '</td>' +
     '<td>' + route.vehiculo + ' · ' + m.placa + '</td>' +
     '<td>' + route.sede + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td><div class="row-actions">' + accion + '</div></td>' +
     '</tr>';
 }
@@ -8862,9 +8961,10 @@ function rowHtmlProg(route) {
        Etiqueta "Eliminar mensajero" (ver requerimiento "Ajustes de Copies y Lógica de Eliminación de Turnos
        según Modelo de Cuotas / Programación Libre", antes "Borrar Mensajero"; minúscula normalizada por
        "Estandarización de Botones en Programar Flota (Pestaña Mañana)" para que coincida EXACTO con el botón
-       de borrado del turno 'Pendiente / Por Confirmar' arriba) -- el efecto real (desasignarMensajero)
-       distingue Programación Libre/cupo excedente (elimina el turno por completo) de cupo obligatorio (deja
-       la plaza "Pendiente / Por Confirmar"), ver turnoEsExcedenteDeCuota. */
+       de borrado del turno 'Pendiente / Por Confirmar' arriba) -- el efecto real (desasignarMensajero) siempre
+       elimina el turno por completo (ver requerimiento "Explicación de Borrado Limpio y Retención de Cuota");
+       la cuota obligatoria se protege aparte, vía el banner de Avance de Cuotas y el Cierre Automático
+       Nocturno (cierreCuotasNocturnoSweep). */
     if (state.progDay === 'tomorrow') {
       var wsDes = progWindowState();
       var directoDes = wsDes === 'open' || wsDes === 'alert' || wsDes === 'closed_extended_active';
@@ -8879,7 +8979,7 @@ function rowHtmlProg(route) {
     '<td>' + route.vehiculo + '</td>' +
     '<td>' + route.sede + '</td>' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span></td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + '</td>' +
     '<td><div class="row-actions">' + actions + '</div></td>' +
     '</tr>';
 }
@@ -10740,7 +10840,7 @@ function aliadoMetricas(aliadoNombre, rango, bodegaScope, mensajeroScope) {
   var conLlegada = routes.filter(function (r) { return !!r.llegada; });
   var tarde = conLlegada.filter(isLlegadaTarde);
   var pctPuntualidad = conLlegada.length ? Math.round(((conLlegada.length - tarde.length) / conLlegada.length) * 100) : 0;
-  var incumplimientosConfirmados = routes.filter(function (r) { var c = computeEstado(r).code; return c === 'sin_reemplazo' || c === 'afectacion_confirmada' || r.sinReemplazoAusencia; }).length;
+  var incumplimientosConfirmados = routes.filter(esIncumplimientoConfirmado).length;
   var ausentismoHistoricoCount = routes.reduce(function (s, r) { return s + (r.ausentismoHistorico ? r.ausentismoHistorico.length : 0); }, 0);
   var ausentismoTotal = incumplimientosConfirmados + ausentismoHistoricoCount;
   var totalRutas = routes.length;
@@ -10834,7 +10934,7 @@ function mensajeroMetricas(m, rango) {
   var routes = state.turnos.filter(function (r) { return r.mensajeroId === m.id && r.fecha >= rango.desde && r.fecha <= rango.hasta; });
   var conLlegada = routes.filter(function (r) { return !!r.llegada; });
   var tarde = conLlegada.filter(isLlegadaTarde).length;
-  var routesIncumplimiento = routes.filter(function (r) { var c = computeEstado(r).code; return c === 'sin_reemplazo' || c === 'afectacion_confirmada' || r.sinReemplazoAusencia; });
+  var routesIncumplimiento = routes.filter(esIncumplimientoConfirmado);
   var incumplimientosConfirmados = routesIncumplimiento.length;
   var historicoPropio = [];
   state.turnos.forEach(function (r) {
@@ -11507,7 +11607,7 @@ function turnosNovedadParaMensajeros(mensajeroIds, rango) {
         eventos.push({ route: r, mensajeroId: r.mensajeroId, categoria: 'tarde', horaCitacion: r.hora, llegadaReal: r.llegada, bodega: r.sede, motivo: 'Llegada tarde' });
       }
       var codeR = computeEstado(r).code;
-      if (codeR === 'sin_reemplazo' || codeR === 'afectacion_confirmada' || r.sinReemplazoAusencia) {
+      if (esIncumplimientoConfirmado(r)) {
         eventos.push({ route: r, mensajeroId: r.mensajeroId, categoria: 'incumplimiento', horaCitacion: r.hora, llegadaReal: null, bodega: r.sede, motivo: codeR === 'sin_reemplazo' ? 'Sin reemplazo confirmado' : (r.sinReemplazoAusencia ? 'Sin recurso disponible' : 'Incumplimiento confirmado') });
       }
     }
@@ -12762,8 +12862,14 @@ function refreshNsFieldsForTipo() {
      control... is not focusable", sin toast ni mensaje visible). Corregido con el mismo patrón ya usado para
      nsNuevaHora/nsRuta en este archivo -- cero cambios de comportamiento para el tipo "Nuevo Turno" en sí. */
   document.getElementById('nsNtHora').required = esNuevoTurno;
-  document.getElementById('nsNtPendienteField').hidden = !esNuevoTurno;
-  document.getElementById('nsNtDatosMensajero').hidden = !esNuevoTurno || document.getElementById('nsNtPendiente').checked;
+  /* Ver requerimiento "Lógica Condicional de 'Pendientes' según Estado de Cuotas": mismo criterio que
+     openTurnoModal -- con Cuotas ACTIVAS para el país del Aliado se oculta el checkbox (y se fuerza
+     desmarcado, para no dejar "Datos del mensajero" oculto por un valor residual de una apertura anterior). */
+  var cuotasActivasNt = cuotasActivoPais(countryForAliado(state.user.aliado));
+  var pendienteCbNt = document.getElementById('nsNtPendiente');
+  document.getElementById('nsNtPendienteField').hidden = !esNuevoTurno || cuotasActivasNt;
+  if (cuotasActivasNt) pendienteCbNt.checked = false;
+  document.getElementById('nsNtDatosMensajero').hidden = !esNuevoTurno || pendienteCbNt.checked;
   if (esEnroque) {
     var origenId = document.getElementById('nsRuta').value;
     var bodega = document.getElementById('nsBodega').value;
@@ -13276,7 +13382,12 @@ function openTurnoModal(mode, routeId) {
   pendienteCb.dispatchEvent(new Event('change'));
 
   if (mode === 'create') {
-    pendienteField.hidden = false;
+    /* Ver requerimiento "Lógica Condicional de 'Pendientes' según Estado de Cuotas (Prendidas/Apagadas)": con
+       Cuotas ACTIVAS, el checkbox se oculta -- el cupo faltante ya se completa vía el atajo "Faltan X" del
+       Avance de Cuotas y el Cierre Automático Nocturno (ver cierreCuotasNocturnoSweep), así que ofrecerlo aquí
+       sería redundante. Con Cuotas INACTIVAS (sin meta numérica que controlar) se muestra y habilita, para que
+       el Aliado pueda reservar manualmente una franja sin datos de mensajero. */
+    pendienteField.hidden = cuotasActivoPais(myCountry);
     sedeSel.disabled = false;
     sedeSel.value = sedesAliado[0];
     vehSel.value = vehiculosAliado[0];
@@ -13701,7 +13812,14 @@ function submitTurno(e) {
           horaAnterior: null, horaPropuesta: null, por: state.user.nombre
         });
       }
-      toast('ok', pendiente ? 'Turno pendiente creado' : 'Turno creado', 'Se agregó a la Programación de Flota de ' + (state.progDay === 'tomorrow' ? 'mañana' : 'hoy') + '.');
+      /* Ver requerimiento "Claridad en Alerta de Sobrecupo de Franja": el turno SÍ se registra igual (nunca
+         bloquea, ver evaluarAprobacionCuota -- la cuota GLOBAL sigue con espacio), pero el aviso deja explícito
+         que esta franja puntual ya tenía su cupo completo antes de este registro. */
+      toast(aprobacion && aprobacion.descalceFranja ? 'warn' : 'ok',
+        aprobacion && aprobacion.descalceFranja ? 'Franja sin cupo base' : (pendiente ? 'Turno pendiente creado' : 'Turno creado'),
+        aprobacion && aprobacion.descalceFranja
+          ? 'Para esta franja ya tienes la cantidad total de recursos programados. Si deseas programar un recurso adicional para esta franja, continúa con el registro; de lo contrario, por favor verifica las cuotas asignadas.'
+          : 'Se agregó a la Programación de Flota de ' + (state.progDay === 'tomorrow' ? 'mañana' : 'hoy') + '.');
       turnoAfectado = nuevoTurnoDirecto;
     } else {
       var route = state.turnos.find(function (r) { return r.id === routeId; });
@@ -14101,31 +14219,6 @@ function ejecutarCargaFlotaHabitual(plantilla) {
    de Cambio (mismo mecanismo 'edicion_turno' que ya usa una edición completa fuera de horario — ver
    aplicarSolicitudGeneral, rama detalle.pendiente) y requiere aprobación de Bodega/Planner antes de aplicarse.
    Exclusivo de la vista "Mañana": Hoy nunca admite edición libre (ver progEditWindowState). */
-/* Determina cómo debe resolver "Eliminar Mensajero" según el modelo de cuotas de la bodega del turno (ver
-   requerimiento "Ajustes de Copies y Lógica de Eliminación de Turnos según Modelo de Cuotas / Programación
-   Libre") -- NO crea reglas nuevas, reutiliza exactamente el mismo criterio de cuotasActivoPais/esFlotaPropia/
-   cuotaAsignada/turnosProgramadosCount que ya gobierna checkCuotaExceso/evaluarAprobacionCuota en toda la
-   plataforma. Devuelve:
-   - null  -> "Programación Libre": sin cuotas activas para el país de la bodega (o Flota Propia, que nunca se
-     evalúa contra cuota), o sin una cuota asignada para esa combinación puntual ("sin control", mismo criterio
-     que checkCuotaExceso) -> el turno se elimina por completo.
-   - true  -> "Excedente": los turnos actualmente programados para esa combinación (sede/aliado/franja/vehículo)
-     superan la cuota asignada -> el turno se elimina por completo, sin dejar plaza vacante (la cuota obligatoria
-     sigue cubierta por los que quedan).
-   - false -> "Cuota obligatoria": los turnos actuales NO superan la cuota asignada -> este turno cubre un cupo
-     obligatorio; al quitar los datos del mensajero, la plaza debe quedar "Pendiente / Por Confirmar". */
-function turnoEsExcedenteDeCuota(route) {
-  var country = countryForSede(route.sede);
-  var aliado = getMensajero(route.mensajeroId).aliado;
-  if (!cuotasActivoPais(country) || esFlotaPropia(aliado)) return null;
-  var dia = diaSemanaKey(route.fecha);
-  var franja = franjaForHora(route.hora, country);
-  if (!dia || !franja) return null;
-  var cantidad = cuotaAsignada(route.sede, aliado, dia, franja, route.vehiculo);
-  if (cantidad <= 0) return null;
-  var actuales = turnosProgramadosCount(route.sede, aliado, route.fecha, franja, route.vehiculo);
-  return actuales > cantidad;
-}
 /* Ver requerimiento "Recalculación / Promoción Automática de Adicionales al Eliminar" (reporte de Fabian
    Meneses/Cabify): turnosProgramadosCount cuenta TODOS los turnos de un bucket sede+aliado+vehículo+franja+
    fecha por igual, estén o no "Pendiente de Aprobación por Planner" (ver su propio comentario) -- así que
@@ -14304,54 +14397,28 @@ function desasignarMensajero(routeId) {
   var ws = progWindowState();
   var directo = ws === 'open' || ws === 'alert' || ws === 'closed_extended_active';
   if (directo) {
-    var evalCuota = turnoEsExcedenteDeCuota(route);
-    /* Ver requerimiento "Fallo de Persistencia al Eliminar Turno" (reporte de Fabian Meneses/Cabify): mismo
-       criterio que eliminarTurnoPendiente más arriba -- ambas ramas de aquí abajo (deja la plaza "Pendiente"
-       o la borra por completo) quedaban SOLO en memoria si el push/borrado en Supabase fallaba, sin ningún
-       aviso ni reversión. Se guarda el estado anterior ANTES de mutar para poder restaurarlo si falla. */
-    if (evalCuota === false) {
-      var mensajeroIdAnteriorDes = route.mensajeroId;
-      route.mensajeroId = crearMensajeroPendiente({ sede: route.sede, vehiculo: route.vehiculo });
-      route.pendienteAsignacion = true;
-      registrarHistorialCambio(route, {
-        tipo: 'desasignacion', accion: 'desasignado',
-        motivo: 'El Aliado eliminó al mensajero directamente (dentro del cutoff); el turno cubre una cuota obligatoria, así que la plaza quedó Disponible / Sin Asignar dentro de su cuota, sin solicitud ni penalización.',
-        horaAnterior: null, horaPropuesta: null, por: state.user.nombre
-      });
-      toast('ok', 'Mensajero eliminado', route.id + ' quedó "Pendiente / Por Confirmar" — la plaza sigue disponible dentro de tu cuota.');
-      /* Ver requerimiento "Recalculación / Promoción Automática de Adicionales al Eliminar": aunque ESTE
-         turno se queda convertido en "Pendiente / Por Confirmar" (sigue ocupando su propia plaza, ver
-         turnosProgramadosCount), el Adicional de este mismo bucket puede haber quedado fuera de cupo por
-         OTRA razón mientras tanto -- se recalcula igual, de forma defensiva (no-op si no corresponde). */
-      recalcularPromocionCupo(route.sede, state.user.aliado, route.vehiculo, route.hora, route.fecha);
-      cancelarSolicitudesHuerfanasFlota(mensajeroIdAnteriorDes, route.sede, route.fecha, route.hora);
-      scPushRows('app_turnos', [route]).then(function (res) {
-        if (res && res.ok === false) {
-          route.mensajeroId = mensajeroIdAnteriorDes;
-          route.pendienteAsignacion = false;
-          toast('warn', 'No se pudo confirmar en la nube', route.id + ' no se pudo actualizar en Supabase — se restauró el mensajero asignado. Revisa tu conexión e inténtalo de nuevo.');
-          syncAndRender(true);
-        }
-      });
-    } else {
-      var motivoEliminacion = evalCuota === true
-        ? 'turno excedente por encima de la cuota asignada'
-        : 'Programación Libre — sin cuotas activas para esta bodega';
-      state.turnos = state.turnos.filter(function (r) { return r.id !== routeId; });
-      toast('ok', 'Mensajero eliminado', route.id + ' fue eliminado por completo (' + motivoEliminacion + '), sin dejar plaza vacante.');
-      /* Ver requerimiento "Recalculación / Promoción Automática de Adicionales al Eliminar": este turno SÍ
-         sale del conteo por completo -- si quedaba un Adicional pendiente en este mismo bucket, esta es
-         justo la plaza que lo saca de cupo excedido. */
-      recalcularPromocionCupo(route.sede, state.user.aliado, route.vehiculo, route.hora, route.fecha);
-      cancelarSolicitudesHuerfanasFlota(route.mensajeroId, route.sede, route.fecha, route.hora);
-      scDeleteRows('app_turnos', [routeId]).then(function (res) {
-        if (res && res.ok === false) {
-          state.turnos.push(route);
-          toast('warn', 'No se pudo eliminar en la nube', route.id + ' no se pudo borrar en Supabase — se restauró en tu Programación de Flota. Revisa tu conexión e inténtalo de nuevo.');
-          syncAndRender(true);
-        }
-      });
-    }
+    /* Ver requerimiento "Explicación de Borrado Limpio y Retención de Cuota": la cuota contratada ya no se
+       protege dejando filas "Pendiente / Por Confirmar" fantasma en la tabla -- se garantiza con el banner de
+       Avance de Cuotas ("Faltan X recursos") y con el Cierre Automático Nocturno (ver cierreCuotasNocturnoSweep),
+       que genera los pendientes que falten al llegar la hora límite. Por eso esta acción ahora SIEMPRE borra la
+       fila por completo, sin importar si el turno cubría cuota obligatoria o era excedente (antes distinguido
+       por turnoEsExcedenteDeCuota, retirado por este mismo requerimiento). Mismo criterio de verificación de
+       persistencia que ya usaba esta función (ver "Fallo de Persistencia al Eliminar Turno", Fabian Meneses/
+       Cabify): se restaura la fila en memoria si el borrado en Supabase falla. */
+    state.turnos = state.turnos.filter(function (r) { return r.id !== routeId; });
+    toast('ok', 'Mensajero eliminado', route.id + ' fue eliminado por completo de la Programación de Flota.');
+    /* Ver requerimiento "Recalculación / Promoción Automática de Adicionales al Eliminar": esta plaza recién
+       liberada puede ser justo la que faltaba para que un turno "Adicional" de este mismo bucket deje de
+       superar la cuota. */
+    recalcularPromocionCupo(route.sede, state.user.aliado, route.vehiculo, route.hora, route.fecha);
+    cancelarSolicitudesHuerfanasFlota(route.mensajeroId, route.sede, route.fecha, route.hora);
+    scDeleteRows('app_turnos', [routeId]).then(function (res) {
+      if (res && res.ok === false) {
+        state.turnos.push(route);
+        toast('warn', 'No se pudo eliminar en la nube', route.id + ' no se pudo borrar en Supabase — se restauró en tu Programación de Flota. Revisa tu conexión e inténtalo de nuevo.');
+        syncAndRender(true);
+      }
+    });
   } else {
     var solDesasignar = {
       id: nextSolicitudGeneralId(), tipo: 'edicion_turno', estado: 'pendiente', aliado: state.user.aliado,
@@ -17098,8 +17165,12 @@ function cuotasDesgloseHtml(key, sede, franjas) {
   var panel = '<div class="cuotas-resumen-desglose">' +
     '<div class="cuotas-resumen-desglose-header"><button type="button" class="cuotas-desglose-cerrar" data-act="cerrar-cuotas-desglose" data-key="' + key + '" data-tip="Cerrar desglose">✕</button></div>' +
     '<ul>' + franjas.map(function (f) {
-      var fCubierto = f.actuales >= f.cuota;
-      return '<li' + (fCubierto ? '' : ' class="descalce-franja-item"') + '>' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(sede))) + ': ' + f.actuales + '/' + f.cuota + cuotasSobrecupoBadgeHtml(f.actuales, f.cuota) + '</li>';
+      /* Ver requerimiento "Semaforización Visual por Estado": mismo criterio de 3 colores que el resto del
+         widget (cuotasEstadoManana) -- Completo (verde, sin clase extra, color por defecto del <li>),
+         Incompleto/A medias (ámbar, descalce-franja-item) o Sin iniciar/cero recursos (rojo, vacio-franja-item). */
+      var estadoFranja = cuotasEstadoManana(f.actuales, f.cuota);
+      var claseFranja = estadoFranja === 'vacio' ? ' class="vacio-franja-item"' : (estadoFranja === 'pendiente' ? ' class="descalce-franja-item"' : '');
+      return '<li' + claseFranja + '>' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(sede))) + ': ' + f.actuales + '/' + f.cuota + cuotasSobrecupoBadgeHtml(f.actuales, f.cuota) + '</li>';
     }).join('') + '</ul></div>';
   return '<div class="cuotas-resumen-desglose-wrap">' + boton + panel + '</div>';
 }
@@ -17124,7 +17195,11 @@ function renderProgCuotasResumen() {
          con al menos un recurso fuera de su franja base -- badge ámbar en vez de verde, con el mismo total
          pero la etiqueta "(Descalce de Franja)" y un tooltip explicativo (ver descalceFranjaAlerta). */
       var descalce = cubierto && p.descalce;
-      var claseChip = descalce ? 'descalce' : (cubierto ? 'ok' : 'pendiente');
+      /* Ver requerimiento "Semaforización Visual por Estado": antes solo distinguía cubierto/no-cubierto
+         (binario) -- ahora reutiliza el mismo criterio de 3 colores ya usado en Consolidado/Planner
+         (cuotasEstadoManana: Completo/A medias/Sin iniciar) para que 0/3 (rojo) se distinga visualmente de
+         1/3 o 2/3 (ámbar), y no se vean como el mismo estado "pendiente". */
+      var claseChip = descalce ? 'descalce' : cuotasEstadoManana(p.actuales, p.cuota);
       var tipDescalce = descalce ? ' data-tip="Cuota global cubierta, pero existen recursos programados fuera de las franjas base asignadas."' : '';
       var etiqueta = p.actuales + '/' + p.cuota + ' recursos' + (descalce ? ' (Descalce de Franja)' : '');
       var desglose = cuotasDesgloseHtml('aliado:' + p.sede, p.sede, p.franjas);
@@ -17136,9 +17211,15 @@ function renderProgCuotasResumen() {
     }).join('') + '</div>';
 }
 function cuotasComplianceRowHtml(rec) {
-  var estado = rec.actuales >= rec.cantidad
+  /* Ver requerimiento "Semaforización Visual por Estado", aplicado también al badge de franja de esta tabla
+     (antes binario Cubierto/Pendiente): Completo (verde), A medias -- al menos 1 recurso pero incompleto
+     (ámbar), Sin iniciar -- cero recursos (rojo, badge-critical). */
+  var estadoFranjaRec = cuotasEstadoManana(rec.actuales, rec.cantidad);
+  var estado = estadoFranjaRec === 'ok'
     ? '<span class="badge badge-dispatched"><i></i>Cubierto</span>'
-    : '<span class="badge badge-pending"><i></i>Pendiente por Programar (' + (rec.cantidad - rec.actuales) + ')</span>';
+    : estadoFranjaRec === 'vacio'
+      ? '<span class="badge badge-critical"><i></i>Sin iniciar (' + rec.cantidad + ')</span>'
+      : '<span class="badge badge-pending"><i></i>Pendiente por Programar (' + (rec.cantidad - rec.actuales) + ')</span>';
   var vehiculoLabel = cuotasVehiculoLabel(rec.vehiculo, countryForSede(rec.sede));
   return '<tr><td>' + rec.sede + '</td><td>' + rec.aliado + '</td><td>' + escapeHtml(vehiculoLabel) + '</td><td>' + fmtTime12(rec.franja) + '</td><td>' + rec.cantidad + '</td><td>' + rec.actuales + '</td><td>' + estado + '</td></tr>';
 }
