@@ -10320,6 +10320,7 @@ function revertirEstado(routeId, motivo) {
   registrarHistorialCambio(route, { tipo: 'reversion', accion: 'revertido', motivo: 'Reversión de estado: ' + motivo, horaAnterior: null, horaPropuesta: null, por: state.user.nombre });
   toast('warn', 'Estado revertido', route.id + ' volvió a "' + estadoNuevo + '".');
   syncAndRender(true);
+  pushRouteConAviso(route, 'Reversión no confirmada en la nube');
 }
 /* Tablero "Aprobaciones de Cuotas y Festivos" (Solicitudes y Cambios) — resuelve un turno creado por
    evaluarAprobacionCuota (cupo excedido o día festivo) mientras el módulo de Cuotas está activo para ese
@@ -10439,6 +10440,7 @@ function resolverAlertaConMotivo(routeId, code, motivoTipo, reemplazoData) {
   toast('ok', 'Incumplimiento exonerado', routeId + ' pasó a "Exonerado / Justificado" — ' + motivoLabel + '. No se contabiliza como incumplimiento en Cumplimiento y Calidad.');
   closeModal();
   syncAndRender(true);
+  pushRouteConAviso(route, 'Exoneración no confirmada en la nube');
 }
 function reasignarAlerta(routeId, code) {
   if (canDo('schedule.aliado.manage')) {
