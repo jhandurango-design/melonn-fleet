@@ -8080,11 +8080,23 @@ function rowHtmlDespacho(route) {
       }
     }
   }
-  /* "Revertir Estado": exclusivo del Rol Planner en Programación (ver puedeRevertirEstado/revertirEstado).
-     El botón "Exonerar" se removió de esta vista — su lugar oficial es únicamente el Consolidado. Siempre va
-     al menú "Acciones •••" (no cuenta para la regla de 1-2 vs 3+ de abajo: es un poder administrativo raro,
-     no una acción operativa del ciclo normal del turno). */
+  /* Ver verificación "Botón Acciones desaparecido en Incumplimiento": Exonerar se había retirado de esta
+     vista a propósito ("su lugar oficial es únicamente el Consolidado", ver historial de este comentario) --
+     pero para PLANNER, que aquí solo mira esta tabla en modo espejo (sin despacho.manage, ver puedeGestionar),
+     un turno 'critical'/Incumplimiento (todavía sin llegada/salida -- puedeRevertirEstado no aplica aún,
+     nada que revertir) se quedaba sin NINGUNA acción real: ni los botones de Bodega (no tiene el permiso),
+     ni Revertir Estado (nada que revertir todavía), ni Exonerar (vivía solo en Consolidado) -- "Acciones •••"
+     desaparecía por completo (rowMenuToggleHtml regresa '' si no hay nada que agrupar), dejando SOLO el ícono
+     de Ver Historial, sin ninguna pista de que la acción real vive en Consolidado. Se agrega aquí también,
+     mismo criterio/tooltip exacto que rowHtmlConsolidado (esExonerable/RESOLVER_ALERTA_TOOLTIP_TEXT) -- BODEGA
+     y AUDITOR no tienen consolidado.manage, así que esto no les agrega nada, solo cierra el hueco de Planner. */
   var secondary = '';
+  if (!esHistorico && canDo('consolidado.manage') && esExonerable(est.code)) {
+    secondary += '<button data-act="alerta-resolver-modal" data-id="' + route.id + '" data-code="' + est.code + '" data-tip="' + RESOLVER_ALERTA_TOOLTIP_TEXT + '">Exonerar</button>';
+  }
+  /* "Revertir Estado": exclusivo del Rol Planner en Programación (ver puedeRevertirEstado/revertirEstado).
+     Siempre va al menú "Acciones •••" (no cuenta para la regla de 1-2 vs 3+ de abajo: es un poder
+     administrativo raro, no una acción operativa del ciclo normal del turno). */
   if (!esHistorico && puedeRevertirEstado(route)) {
     secondary += '<button data-act="revertir-estado" data-id="' + route.id + '" class="danger" data-tip="Revertir estado">' + ICONS.undo + ' Revertir estado</button>';
   }
