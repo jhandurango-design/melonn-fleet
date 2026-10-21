@@ -13972,6 +13972,46 @@ function submitTurno(e) {
      (ver evaluarAprobacionCuota/computeEstado) hasta que Planner/Admin la apruebe o rechace desde
      "Aprobaciones de Cuotas y Festivos" en Solicitudes y Cambios (ver aprobarCuotaPlanner/rechazarCuotaPlanner). */
   if (modo === 'create') {
+    /* Ver requerimiento "Control de Cuotas Base vs. Adicionales", Regla 2 (Hoy): se evalúa como lo PRIMERO
+       dentro de 'create' -- ANTES de tipología/cuota -- porque un alta de hoy que también dispare
+       aprobación de Planner (cupo ya excedido, festivo, tipología no habilitada) termina siempre en un
+       `return` dentro de ese mismo bloque 'create' (ver más abajo) y jamás llegaría a caer al bloque
+       `else` de Solicitud donde antes vivía este chequeo -- en la práctica, cualquier día ya con el cupo
+       global cubierto (el caso típico tras varias horas de operación) dejaba la Regla 2 inalcanzable.
+       Un cupo "Pendiente / Por Confirmar" ya sembrado para esta sede+aliado+hoy (ver
+       cierreCuotasNocturnoSweep) debe ofrecerse primero sin importar esa otra causal -- confirmado con el
+       Planner: si hay varios, se recomienda el cronológicamente más temprano aún sin cubrir. Exclusivo de
+       Hoy (ws==='today_solicitud') y de un alta con mensajero real (!pendiente -- el checkbox "Pendiente/
+       Por Confirmar" no tiene con qué llenar el cupo existente). state._cupoPendienteDecisionTomada sigue
+       el mismo patrón exacto que state._tipologiaExcepcionConfirmada (unas líneas más abajo) -- evita
+       volver a mostrar el modal en la reinvocación de submitTurno(e) tras la decisión. Reescribir
+       #turnoModo/#turnoRouteId para "Asignar a Cupo Pendiente" hace que la segunda pasada entre con
+       modo='confirm' (ya no pasa por este bloque 'create' en absoluto), reusando 100% el camino YA
+       EXISTENTE y validado de detalle.modoOriginal='confirm' (ver bloque `else` de Solicitud) -- sin
+       lógica de backend nueva. "Registrar como Adicional" reinvoca con el mismo modo='create', dejando
+       que tipología/cuota de abajo se evalúen con normalidad para ESTA alta nueva. */
+    if (!pendiente && ws === 'today_solicitud' && !state._cupoPendienteDecisionTomada) {
+      var pendientesHoy = routesInScope('today')
+        .filter(function (r) { return r.pendienteAsignacion && r.sede === sede; })
+        .sort(function (a, b) { return a.hora.localeCompare(b.hora); });
+      if (pendientesHoy.length) {
+        reactivarBotonGuardar();
+        openCupoPendienteDecisionModal(pendientesHoy,
+          function () {
+            state._cupoPendienteDecisionTomada = true;
+            document.getElementById('turnoModo').value = 'confirm';
+            document.getElementById('turnoRouteId').value = pendientesHoy[0].id;
+            submitTurno(e);
+            state._cupoPendienteDecisionTomada = false;
+          },
+          function () {
+            state._cupoPendienteDecisionTomada = true;
+            submitTurno(e);
+            state._cupoPendienteDecisionTomada = false;
+          });
+        return;
+      }
+    }
     var tipologiaNoHabilitadaCreate = !pendiente && cuotasActivoPais(countryForSede(sede)) && !esFlotaPropia(state.user.aliado) && !tipologiaHabilitada(sede, state.user.aliado, vehiculo);
     var aprobacion = tipologiaNoHabilitadaCreate
       ? { requiere: true, motivo: 'tipologia', detalle: 'Solicitud de Excepción de Tipología: ' + state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(vehiculo, countryForSede(sede)) + ' en ' + sede + '.' }
@@ -14151,39 +14191,11 @@ function submitTurno(e) {
     }
   } else {
     var tipoSol = modo === 'create' ? 'nuevo_turno' : 'edicion_turno';
-    /* Ver requerimiento "Control de Cuotas Base vs. Adicionales", Regla 2 (Hoy): antes de encolar un alta
-       nueva de hoy como Solicitud 'nuevo_turno' (que terminará como "+1 Adicional" si la cuota ya está
-       cubierta, ver evaluarAprobacionCuota dentro de aplicarSolicitudGeneral), se ofrece primero asignar el
-       mensajero a un cupo "Pendiente / Por Confirmar" ya sembrado para esta sede+aliado+hoy (ver
-       cierreCuotasNocturnoSweep) -- confirmado con el Planner: si hay varios, se recomienda el
-       cronológicamente más temprano aún sin cubrir. state._cupoPendienteDecisionTomada sigue el mismo
-       patrón exacto que state._tipologiaExcepcionConfirmada (unas líneas más abajo en este archivo) --
-       evita volver a mostrar el modal en la reinvocación de submitTurno(e) tras la decisión. Reescribir
-       #turnoModo/#turnoRouteId para "Asignar a Cupo Pendiente" hace que la segunda pasada entre a este
-       mismo bloque con modo='confirm' (tipoSol='edicion_turno'), reusando 100% el camino YA EXISTENTE y
-       validado de detalle.modoOriginal='confirm' (ver más abajo) -- sin lógica de backend nueva. */
-    if (tipoSol === 'nuevo_turno' && ws === 'today_solicitud' && !state._cupoPendienteDecisionTomada) {
-      var pendientesHoy = routesInScope('today')
-        .filter(function (r) { return r.pendienteAsignacion && r.sede === sede; })
-        .sort(function (a, b) { return a.hora.localeCompare(b.hora); });
-      if (pendientesHoy.length) {
-        reactivarBotonGuardar();
-        openCupoPendienteDecisionModal(pendientesHoy,
-          function () {
-            state._cupoPendienteDecisionTomada = true;
-            document.getElementById('turnoModo').value = 'confirm';
-            document.getElementById('turnoRouteId').value = pendientesHoy[0].id;
-            submitTurno(e);
-            state._cupoPendienteDecisionTomada = false;
-          },
-          function () {
-            state._cupoPendienteDecisionTomada = true;
-            submitTurno(e);
-            state._cupoPendienteDecisionTomada = false;
-          });
-        return;
-      }
-    }
+    /* Ver requerimiento "Control de Cuotas Base vs. Adicionales", Regla 2 (Hoy): el chequeo de cupo
+       pendiente se movió al INICIO del bloque `if (modo === 'create')` más arriba -- ver el comentario ahí
+       -- para que se evalúe también cuando el alta además requeriría aprobación de Planner (esa rama
+       retorna antes de llegar aquí). Este bloque `else` solo se alcanza ya sin ningún pendiente por cubrir
+       en esta sede+aliado+hoy (o viniendo de modo='confirm'/'edit'). */
     var detalle = payload;
     if (modo !== 'create') { detalle.routeId = routeId; detalle.modoOriginal = modo; }
     var motivoSol = tipoSol === 'nuevo_turno'
