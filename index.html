@@ -2828,6 +2828,23 @@
     </div>
   </div>
 
+  <!-- Ver requerimiento "Control de Cuotas Base vs. Adicionales": Regla 2 (Hoy) -- cuando el Aliado da de
+       alta un mensajero nuevo y ya existen cupos "Pendiente / Por Confirmar" sin cubrir en esa sede ese
+       mismo día, se le ofrece elegir entre asignarlo a uno de esos cupos (recomendado) o registrarlo como
+       Adicional (+1) -- mismo patrón que modalConfirmGenerico (título/mensaje se rellenan en JS, ver
+       openCupoPendienteDecisionModal), pero con 2 botones de acción real en vez de Confirmar/Cancelar. -->
+  <div class="modal" id="modalCupoPendienteDecision">
+    <div class="modal-head"><h3>Cupo Pendiente Disponible</h3><button class="modal-close" data-close>&times;</button></div>
+    <div class="modal-body">
+      <p class="modal-note" id="cupoPendienteDecisionMensaje"></p>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+        <button type="button" class="btn btn-ghost" id="btnCupoPendienteAdicional">Registrar como Adicional (+1)</button>
+        <button type="button" class="btn btn-primary" id="btnCupoPendienteAsignar">Asignar a Cupo Pendiente</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Ver requerimiento "Corrección de Alineación en Filtros y Estandarización de Modales Custom...", Parte
        2: modal custom de "Revertir Estado" (antes window.confirm nativo) -- bloques de resumen (Turno y
        Ruta / Cambio de Estado), motivo OBLIGATORIO (trazabilidad) y nota aclaratoria, mismo lenguaje visual

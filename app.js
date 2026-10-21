@@ -13444,6 +13444,24 @@ function openConfirmModal(opts) {
   confirmModalPendingAction = opts.onConfirm || null;
   openModal('modalConfirmGenerico');
 }
+/* Ver requerimiento "Control de Cuotas Base vs. Adicionales", Regla 2 (Hoy): mismo patrón exacto que
+   openConfirmModal (variable módulo + listener fijo), pero con 2 acciones reales en vez de 1 Confirmar/
+   Cancelar -- "Asignar a Cupo Pendiente" (recomendado, el cupo "Pendiente / Por Confirmar" cronológicamente
+   más temprano aún sin cubrir, ver pendientesHoy en submitTurno) vs "Registrar como Adicional (+1)" (sigue
+   el flujo normal de nuevo_turno). "Cancelar"/(x) no ejecutan ninguna acción -- el formulario de Nuevo
+   Turno queda abierto tal cual, con los datos ya escritos, para que el Aliado decida con calma. */
+var cupoPendienteDecisionAsignar = null, cupoPendienteDecisionAdicional = null;
+function openCupoPendienteDecisionModal(pendientesHoy, onAsignar, onAdicional) {
+  var primero = pendientesHoy[0];
+  document.getElementById('cupoPendienteDecisionMensaje').textContent =
+    'Tienes ' + pendientesHoy.length + ' cupo' + (pendientesHoy.length === 1 ? '' : 's') +
+    ' pendiente' + (pendientesHoy.length === 1 ? '' : 's') + ' por cubrir en tu cuota base de hoy. ' +
+    '¿Deseas asignar este mensajero al cupo pendiente de las ' + fmtTime12(primero.hora) +
+    ' (Recomendado) o registrarlo como Adicional (+1)?';
+  cupoPendienteDecisionAsignar = onAsignar;
+  cupoPendienteDecisionAdicional = onAdicional;
+  openModal('modalCupoPendienteDecision');
+}
 
 function setSvgHidden(id, hide) {
   var el = document.getElementById(id);
@@ -13958,6 +13976,26 @@ function submitTurno(e) {
     var aprobacion = tipologiaNoHabilitadaCreate
       ? { requiere: true, motivo: 'tipologia', detalle: 'Solicitud de Excepción de Tipología: ' + state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(vehiculo, countryForSede(sede)) + ' en ' + sede + '.' }
       : evaluarAprobacionCuota(sede, state.user.aliado, vehiculo, hora, fecha);
+    /* Ver requerimiento "Control de Cuotas Base vs. Adicionales", Regla 1 (Mañana en adelante): un alta que
+       excede la cuota GLOBAL contratada (causal 'cupo') no debe poder registrarse como "+1 Adicional"
+       mientras exista CUALQUIER franja/vehículo de esa sede+aliado+día con cuota base todavía sin llenar
+       -- alcance confirmado con el Planner: el DÍA COMPLETO, no solo la franja puntual que se está
+       registrando ahora ("no podrá registrar cupos extra en franjas tempranas si aún tiene vacantes sin
+       cubrir en las franjas de la tarde"). Exclusivo de 'mañana' (TOMORROW_STR) -- Hoy sigue su propia
+       Regla 2 (ver más abajo, bloque de Solicitud). cuotasProgresoPorSede ya filtra cuotasActivoPais/
+       esFlotaPropia internamente (misma fuente que evaluarAprobacionCuota), así que no hace falta repetir
+       esas guardas aquí. Si por algún motivo no hubiera una entrada de progreso para esta sede (no debería
+       ocurrir con causal 'cupo' ya confirmada), se deja pasar como hasta ahora -- nunca un callejón sin
+       salida por un caso no verificado en vivo. */
+    if (aprobacion.requiere && aprobacion.motivo === 'cupo' && fecha === TOMORROW_STR) {
+      var progresoSedeBloqueo = cuotasProgresoPorSede(state.user.aliado, fecha).find(function (p) { return p.sede === sede; });
+      if (progresoSedeBloqueo && progresoSedeBloqueo.franjas.some(function (f) { return f.actuales < f.cuota; })) {
+        toast('warn', 'Completa tu Cuota Base primero',
+          'Debes completar el 100% de tu cuota base requerida (' + progresoSedeBloqueo.actuales + '/' + progresoSedeBloqueo.cuota + ' cargados) antes de poder registrar o solicitar cupos adicionales.');
+        reactivarBotonGuardar();
+        return;
+      }
+    }
     if (aprobacion.requiere) {
       var turnoPendienteAprobacion = {
         id: nextTurnoId(), sede: sede, fecha: fecha, mensajeroId: mensajeroIdCreate, vehiculo: vehiculo, hora: hora,
@@ -14113,6 +14151,39 @@ function submitTurno(e) {
     }
   } else {
     var tipoSol = modo === 'create' ? 'nuevo_turno' : 'edicion_turno';
+    /* Ver requerimiento "Control de Cuotas Base vs. Adicionales", Regla 2 (Hoy): antes de encolar un alta
+       nueva de hoy como Solicitud 'nuevo_turno' (que terminará como "+1 Adicional" si la cuota ya está
+       cubierta, ver evaluarAprobacionCuota dentro de aplicarSolicitudGeneral), se ofrece primero asignar el
+       mensajero a un cupo "Pendiente / Por Confirmar" ya sembrado para esta sede+aliado+hoy (ver
+       cierreCuotasNocturnoSweep) -- confirmado con el Planner: si hay varios, se recomienda el
+       cronológicamente más temprano aún sin cubrir. state._cupoPendienteDecisionTomada sigue el mismo
+       patrón exacto que state._tipologiaExcepcionConfirmada (unas líneas más abajo en este archivo) --
+       evita volver a mostrar el modal en la reinvocación de submitTurno(e) tras la decisión. Reescribir
+       #turnoModo/#turnoRouteId para "Asignar a Cupo Pendiente" hace que la segunda pasada entre a este
+       mismo bloque con modo='confirm' (tipoSol='edicion_turno'), reusando 100% el camino YA EXISTENTE y
+       validado de detalle.modoOriginal='confirm' (ver más abajo) -- sin lógica de backend nueva. */
+    if (tipoSol === 'nuevo_turno' && ws === 'today_solicitud' && !state._cupoPendienteDecisionTomada) {
+      var pendientesHoy = routesInScope('today')
+        .filter(function (r) { return r.pendienteAsignacion && r.sede === sede; })
+        .sort(function (a, b) { return a.hora.localeCompare(b.hora); });
+      if (pendientesHoy.length) {
+        reactivarBotonGuardar();
+        openCupoPendienteDecisionModal(pendientesHoy,
+          function () {
+            state._cupoPendienteDecisionTomada = true;
+            document.getElementById('turnoModo').value = 'confirm';
+            document.getElementById('turnoRouteId').value = pendientesHoy[0].id;
+            submitTurno(e);
+            state._cupoPendienteDecisionTomada = false;
+          },
+          function () {
+            state._cupoPendienteDecisionTomada = true;
+            submitTurno(e);
+            state._cupoPendienteDecisionTomada = false;
+          });
+        return;
+      }
+    }
     var detalle = payload;
     if (modo !== 'create') { detalle.routeId = routeId; detalle.modoOriginal = modo; }
     var motivoSol = tipoSol === 'nuevo_turno'
@@ -20583,6 +20654,20 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('btnConfirmGenericoAceptar').addEventListener('click', function () {
     var accion = confirmModalPendingAction;
     confirmModalPendingAction = null;
+    closeModal();
+    if (accion) accion();
+  });
+  /* Ver requerimiento "Control de Cuotas Base vs. Adicionales", Regla 2 (Hoy): mismo patrón que el
+     listener de btnConfirmGenericoAceptar de arriba, uno por cada acción real del modal de decisión. */
+  document.getElementById('btnCupoPendienteAsignar').addEventListener('click', function () {
+    var accion = cupoPendienteDecisionAsignar;
+    cupoPendienteDecisionAsignar = null; cupoPendienteDecisionAdicional = null;
+    closeModal();
+    if (accion) accion();
+  });
+  document.getElementById('btnCupoPendienteAdicional').addEventListener('click', function () {
+    var accion = cupoPendienteDecisionAdicional;
+    cupoPendienteDecisionAsignar = null; cupoPendienteDecisionAdicional = null;
     closeModal();
     if (accion) accion();
   });
