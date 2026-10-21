@@ -4365,19 +4365,37 @@ function resolverSolicitudGeneral(id, aceptar) {
      app_mensajeros (ver migración 20261017080000). Sin esto, el turno se rechazaba por RLS mientras la
      propia solicitud sí quedaba 'aceptada' -- una desincronización silenciosa entre ambas tablas. */
   var pushMensajerosSolicitud = mensajerosParaPush.length ? scPushRows('app_mensajeros', mensajerosParaPush) : Promise.resolve({ ok: true });
-  pushMensajerosSolicitud.then(function () {
+  pushMensajerosSolicitud.then(function (mensajeroResult) {
+    /* Ver FIX arriba: si el mensajero NUEVO no logra confirmarse (p. ej. el hueco de permisos de PLANNER
+       sobre app_mensajeros, ya corregido en la migración 20261020020000, o cualquier otra falla de red),
+       NO se empuja ni el turno (quedaría referenciando un mensajeroId inexistente, rechazado por RLS) ni la
+       solicitud -- evita exactamente la desincronización encontrada en producción: la solicitud marcada
+       'aceptada' mientras el turno real nunca llegó a existir. sol.estado ya se mutó localmente arriba;
+       como ninguna de las 2 tablas se empuja aquí, el siguiente syncAndRender(true) la revierte sola a lo
+       que Supabase todavía tiene (pendiente), sin dejar ningún residuo a medias. */
+    if (mensajeroResult && mensajeroResult.ok === false) {
+      toast('warn', 'No se pudo confirmar en la nube', 'La aprobación no se guardó — revisa tu conexión e inténtalo de nuevo.');
+      syncAndRender(true);
+      return;
+    }
     /* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota": ningún
        tipo de Solicitud General (alta de turno, edición, reemplazo por alerta/cancelación, reprogramación
        masiva) empujaba nunca los turnos afectados a Supabase. */
-    if (turnosParaPush.length) scPushRows('app_turnos', turnosParaPush);
+    var pushesSolicitudFinal = [];
+    if (turnosParaPush.length) pushesSolicitudFinal.push(scPushRows('app_turnos', turnosParaPush));
     /* Ver requerimiento "Persistencia Crítica: Aprobar Prolongación de Tiempo en Supabase": la solicitud
        general resuelta (sol.estado/resueltoPor/resueltoEn/...) tampoco se empujaba nunca -- state.solicitudesGenerales
        no tenía NINGUNA tabla espejo en Supabase (a diferencia de app_users/app_mensajeros/app_turnos), así que
        cualquier Aceptar/Rechazar (prolongación, nuevo turno, cupo adicional, reemplazo, reprogramación masiva)
        se perdía al recargar o al llegar el próximo scPullAll (login/foco/logout) desde otra sesión. */
-    scPushRows('app_solicitudes_generales', [sol]);
+    pushesSolicitudFinal.push(scPushRows('app_solicitudes_generales', [sol]));
+    Promise.all(pushesSolicitudFinal).then(function (results) {
+      if (results.some(function (r) { return r && r.ok === false; })) {
+        toast('warn', 'No se pudo confirmar en la nube', 'La aprobación no se guardó por completo — revisa tu conexión e inténtalo de nuevo.');
+      }
+      syncAndRender(true);
+    });
   });
-  syncAndRender(true);
 }
 /* Ver requerimiento "Addendum de Funcionalidad: Botón 'Cancelar Solicitud' en 'Mis Solicitudes Enviadas'
    (Todos los Roles)": el EMISOR de una solicitud pendiente puede retractarse antes de que el revisor la
