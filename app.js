@@ -4176,9 +4176,31 @@ function aplicarSolicitudGeneral(sol) {
   if (sol.tipo === 'nuevo_turno' || sol.tipo === 'cupo_adicional') {
     var mensajeroId = sol.detalle.pendiente ? crearMensajeroPendiente(sol.detalle, sol.aliado) : findOrCreateMensajeroParaAliado(sol.aliado, sol.detalle);
     var nuevoTurno = { id: nextTurnoId(), sede: sol.detalle.sede, fecha: sol.detalle.fecha, mensajeroId: mensajeroId, vehiculo: sol.detalle.vehiculo, hora: sol.detalle.hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: !!sol.detalle.pendiente };
+    /* Ver aclaración de negocio "Diferenciación de Solicitudes Extemporáneas vs. Recursos Adicionales": un
+       alta fuera de la ventana horaria (post-cutoff) NO es, por sí sola, un Recurso Adicional -- solo lo es
+       si, AL MOMENTO DE APROBARSE, la cuota ya está cubierta (mismo criterio evaluarAprobacionCuota que usa
+       el alta directa en submitTurno, ver más arriba). Se evalúa aquí, al aprobar, y no al enviar la
+       solicitud -- esta pudo quedar pendiente horas/días, así que la foto de cupo vigente es la de este
+       instante, no la de cuando el Aliado la envió. Nunca se marca pendienteAprobacionPlanner=true: Planner ya
+       decidió aprobar ESTA solicitud con esta misma acción, no debe volver a quedar pendiente de una segunda
+       aprobación -- solo se fija pendienteAprobacionMotivo como marca de causal/Adicional (esTurnoAdicional),
+       igual que aprobarCuotaPlanner, que lo conserva tal cual tras resolver. */
+    var aprobacionSolGeneral = evaluarAprobacionCuota(sol.detalle.sede, sol.aliado, sol.detalle.vehiculo, sol.detalle.hora, sol.detalle.fecha);
+    if (aprobacionSolGeneral.requiere) {
+      nuevoTurno.pendienteAprobacionMotivo = aprobacionSolGeneral.motivo;
+      nuevoTurno.pendienteAprobacionDetalle = aprobacionSolGeneral.detalle;
+    }
     state.turnos.push(nuevoTurno);
     /* El creador de trazabilidad es quien originó la solicitud (el Aliado), no quien la aprueba después. */
     registrarCreacionTurno(nuevoTurno, sol.solicitadoPor || state.user.nombre);
+    if (aprobacionSolGeneral.requiere) {
+      registrarHistorialCambio(nuevoTurno, {
+        tipo: 'aprobacion_cuota', accion: 'aprobado',
+        motivo: 'Registro fuera de ventana horaria aprobado por Planner vía Solicitud General; al momento de aprobar, ' +
+          cuotaCausalFrase(aprobacionSolGeneral.motivo) + ': ' + aprobacionSolGeneral.detalle,
+        horaAnterior: null, horaPropuesta: null, por: state.user.nombre
+      });
+    }
     turnosAfectados.push(nuevoTurno);
   } else if (sol.tipo === 'edicion_turno') {
     var route = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
