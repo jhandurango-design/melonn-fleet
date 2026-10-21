@@ -8656,6 +8656,11 @@ function renderProgramacion() {
      recurrente) -- Hoy nunca aplica en vivo, así que no tiene sentido ahí (ver renderProgBanner). */
   document.getElementById('btnCargarFlotaHabitual').style.display = state.progDay === 'tomorrow' ? '' : 'none';
   document.getElementById('btnGuardarFlotaHabitual').style.display = state.progDay === 'tomorrow' ? '' : 'none';
+  /* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase", punto 2: solo tiene sentido ofrecer "Eliminar"
+     cuando ya existe una plantilla guardada para este aliado -- mismo criterio de visibilidad que los otros 2
+     botones (exclusivo de "Mañana"). */
+  var plantillaPropiaExiste = !!(state.flotaHabitual[state.user.aliado] && state.flotaHabitual[state.user.aliado].length);
+  document.getElementById('btnEliminarFlotaHabitual').style.display = (state.progDay === 'tomorrow' && plantillaPropiaExiste) ? '' : 'none';
   renderProgBanner();
   renderProgCuotasResumen();
   refreshProgFiltroBodegaOptions();
@@ -13676,6 +13681,15 @@ function submitTurno(e) {
      de un alta nueva se resuelve UNA sola vez aquí (antes se repetía esta misma línea dentro de cada rama --
      aprobación de cuota vs. directa -- con el mismo resultado), para poder validar duplicados antes de
      decidir por cuál rama seguir. */
+  /* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase" (reporte Easyway): mensajeroSupersededDirecto
+     es el registro de mensajero ANTERIOR que forkMensajeroParaEdicion marca con .superseded=true en sitio
+     (modo 'edit') -- igual que mensajeroNuevoCreado, nunca se empujaba a Supabase, solo el turno. rollbackEdicionDirecta
+     guarda el snapshot completo de la ruta ANTES de mutarla en los modos 'confirm'/'edit', para poder
+     restaurarla si la confirmación de Supabase falla (antes esta rama nunca revertía nada -- la ruta se
+     quedaba mutada en memoria mientras Supabase conservaba los datos viejos, y el siguiente scPullAll la
+     encontraba desincronizada -- ver más abajo el bloque de rollback). */
+  var mensajeroSupersededDirecto = null;
+  var rollbackEdicionDirecta = null;
   var mensajeroIdCreate;
   var mensajeroNuevoCreado = null;
   if (modo === 'create') {
@@ -13832,6 +13846,11 @@ function submitTurno(e) {
            de route.sede si algo más repoblaba el <select> entre abrir el modal y enviar. Se fuerza aquí a
            la fuente autoritativa real (route.sede), eliminando esa dependencia por completo. */
         payload.sede = route.sede;
+        /* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase": snapshot de ids ANTES de resolver el
+           mensajero -- mismo criterio ya usado en modo 'create' (ver mensajerosIdsAntes/mensajeroNuevoCreado
+           arriba) para detectar si esta llamada ACABA de crear un registro nuevo, y así poder empujarlo a
+           Supabase junto con el turno (nunca dejarlo solo a merced del autoguardado periódico). */
+        var mensajerosIdsAntesDirecto = state.mensajeros.map(function (m) { return m.id; });
         /* Ver requerimiento "Validación Dinámica de Ventana de Retorno": para 'confirm' se resuelve el
            mensajero (por cédula, reutilizable) ANTES de mutar nada, para poder validar primero -- se
            reutiliza el mismo resultado abajo, sin volver a llamar findOrCreateMensajero(). Para 'edit' se
@@ -13845,14 +13864,35 @@ function submitTurno(e) {
            mensajero, vehículo, placa o tipo de flota): esta edición directa (fuera del flujo formal de
            Solicitudes) no dejaba NINGÚN rastro en route.historialCambios -- se captura el snapshot ANTES de
            mutar para loguear exactamente qué cambió. */
+        var mensajeroAnteriorIdDirecto = route.mensajeroId;
         var mensajeroAnteriorNombre = getMensajero(route.mensajeroId).nombre;
         var vehiculoAnteriorDirecto = route.vehiculo, horaAnteriorDirecto = route.hora;
+        /* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase": snapshot completo de la ruta ANTES de
+           mutarla -- único punto de rollback si la confirmación de Supabase falla más abajo. */
+        rollbackEdicionDirecta = { mensajeroId: route.mensajeroId, vehiculo: route.vehiculo, hora: route.hora, pendienteAsignacion: route.pendienteAsignacion };
         /* 'confirm' asigna un mensajero recurrente (reutiliza por cédula); 'edit' modifica un turno ya
            confirmado y SIEMPRE crea su propio snapshot — ver forkMensajeroParaEdicion (Hallazgo de
            Auditoría #1, item 4: ningún otro turno debe verse afectado por esta edición). */
         route.mensajeroId = modo === 'confirm' ? mensajeroIdDirecto : forkMensajeroParaEdicion(payload, undefined, route.mensajeroId);
         route.vehiculo = vehiculo; route.hora = hora;
         if (modo === 'confirm') route.pendienteAsignacion = false;
+        /* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase" (reporte Easyway): ambos modos pueden
+           dejar un registro de mensajero NUEVO sin empujar -- 'confirm' vía findOrCreateMensajero (primera
+           asignación real de datos sobre una plaza "Pendiente/Por Confirmar", igual que el FIX de modo
+           'create' arriba), 'edit' SIEMPRE (forkMensajeroParaEdicion crea un snapshot propio en cada edición,
+           sin excepción). Sin este push, el turno quedaba referenciando un mensajeroId que nunca llegó a
+           existir en Supabase -- la política RLS de app_turnos (ver migración 20261017080000, WITH CHECK con
+           EXISTS contra app_mensajeros) rechazaba el UPDATE por esa causa, nunca por un problema real de
+           conexión, pese al toast genérico "Sin conexión con Supabase". También se empuja el registro
+           ANTERIOR (mensajeroSupersededDirecto): forkMensajeroParaEdicion le marca .superseded=true en sitio,
+           y esa mutación tampoco se sincronizaba -- un pull posterior lo revertía a "activo", pudiendo
+           duplicar su aparición en búsquedas por cédula. */
+        if (modo === 'confirm') {
+          if (mensajerosIdsAntesDirecto.indexOf(mensajeroIdDirecto) === -1) mensajeroNuevoCreado = getMensajero(mensajeroIdDirecto);
+        } else {
+          mensajeroNuevoCreado = getMensajero(route.mensajeroId);
+          mensajeroSupersededDirecto = getMensajero(mensajeroAnteriorIdDirecto);
+        }
         var mensajeroNuevoNombre = getMensajero(route.mensajeroId).nombre;
         var cambiosDirecto = [];
         if (mensajeroAnteriorNombre !== mensajeroNuevoNombre) cambiosDirecto.push('Mensajero: ' + mensajeroAnteriorNombre + ' → ' + mensajeroNuevoNombre);
@@ -13913,8 +13953,15 @@ function submitTurno(e) {
      supabase/migrations/20261017080000_app_turnos_authenticated_rls.sql); si el turno llegara antes de que
      el INSERT del mensajero nuevo haya comprometido su propia transacción, ese EXISTS podría evaluarse en
      falso y bloquear el turno por una carrera, no por un permiso real. */
-  var pushMensajeroSubmitTurno = mensajeroNuevoCreado ? scPushRows('app_mensajeros', [mensajeroNuevoCreado]) : Promise.resolve({ ok: true });
-  var hayAlgoQueEmpujarSubmitTurno = !!(turnoAfectado || solGeneralCreada || mensajeroNuevoCreado);
+  /* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase": mensajeroSupersededDirecto (el registro
+     ANTERIOR marcado .superseded=true por forkMensajeroParaEdicion, modo 'edit') viaja en el MISMO upsert que
+     mensajeroNuevoCreado -- ambos deben quedar confirmados en Supabase antes de que el turno que referencia
+     al nuevo se empuje (mismo criterio de secuencia ya documentado arriba para el EXISTS de app_turnos). */
+  var mensajerosAPushSubmitTurno = [];
+  if (mensajeroNuevoCreado) mensajerosAPushSubmitTurno.push(mensajeroNuevoCreado);
+  if (mensajeroSupersededDirecto) mensajerosAPushSubmitTurno.push(mensajeroSupersededDirecto);
+  var pushMensajeroSubmitTurno = mensajerosAPushSubmitTurno.length ? scPushRows('app_mensajeros', mensajerosAPushSubmitTurno) : Promise.resolve({ ok: true });
+  var hayAlgoQueEmpujarSubmitTurno = !!(turnoAfectado || solGeneralCreada || mensajeroNuevoCreado || mensajeroSupersededDirecto);
   if (hayAlgoQueEmpujarSubmitTurno) {
     /* Ver requerimiento "Corrección de Feedback Visual al Crear Mensajero" (reporte de Fabian Meneses/
        Cabify): mismo criterio que la rama de Cuotas más arriba -- el botón queda deshabilitado con un
@@ -13929,11 +13976,22 @@ function submitTurno(e) {
       if (solGeneralCreada) pushesSubmitTurno.push(scPushRows('app_solicitudes_generales', [solGeneralCreada]));
       Promise.all(pushesSubmitTurno).then(function (results) {
         if (results.some(function (r) { return r && r.ok === false; })) {
-          /* Deshace SOLO lo que esta llamada acaba de crear -- turnoAfectado solo se revierte si es un alta
-             nueva (modo === 'create'); en 'confirm'/'edit' es una ruta YA EXISTENTE antes de esta llamada, así
-             que removerla de state.turnos borraría un registro real que no se creó aquí. */
+          /* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase": antes, en 'confirm'/'edit', esta
+             rama de fallo solo deshacía mensajeroNuevoCreado/solGeneralCreada -- la ruta YA MUTADA
+             (mensajeroId/vehiculo/hora, ver rollbackEdicionDirecta) se quedaba con los datos nuevos en
+             memoria aunque Supabase conservara los viejos, desincronizada hasta el siguiente pull (momento en
+             el que el mensajeroId forkeado, nunca persistido, dejaba de resolver -- de ahí el reporte de
+             mensajeros "borrados" o duplicados en pantalla). Ahora se restaura la ruta completa al snapshot
+             previo, y el fork de mensajero (nuevo + el anterior marcado superseded) también se revierte. */
           if (modo === 'create' && turnoAfectado) state.turnos = state.turnos.filter(function (r) { return r.id !== turnoAfectado.id; });
+          else if (rollbackEdicionDirecta && turnoAfectado) {
+            turnoAfectado.mensajeroId = rollbackEdicionDirecta.mensajeroId;
+            turnoAfectado.vehiculo = rollbackEdicionDirecta.vehiculo;
+            turnoAfectado.hora = rollbackEdicionDirecta.hora;
+            turnoAfectado.pendienteAsignacion = rollbackEdicionDirecta.pendienteAsignacion;
+          }
           if (mensajeroNuevoCreado) state.mensajeros = state.mensajeros.filter(function (m) { return m.id !== mensajeroNuevoCreado.id; });
+          if (mensajeroSupersededDirecto) mensajeroSupersededDirecto.superseded = false;
           if (solGeneralCreada) state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return s.id !== solGeneralCreada.id; });
           toast('warn', 'No se pudo confirmar en la nube', 'El cambio no se guardó — revisa tu conexión e inténtalo de nuevo.');
           turnoSubmitBtnFinal.disabled = false; turnoSubmitBtnFinal.textContent = 'Guardar turno';
@@ -14055,6 +14113,28 @@ function cargarFlotaHabitual() {
     message: '¿Deseas cargar tu Flota Recurrente guardada (' + plantilla.length + ' turno' + (plantilla.length === 1 ? '' : 's') + ') en la Programación de Flota de mañana?',
     confirmText: 'Sí, cargar', danger: false,
     onConfirm: function () { ejecutarCargaFlotaHabitual(plantilla); }
+  });
+}
+/* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase" (reporte Easyway), punto 2: reinicio explícito
+   de la plantilla propia -- borra ÚNICAMENTE state.flotaHabitual[aliado] (sede/vehículo/hora/datos de
+   contacto descriptivos, ver guardarFlotaHabitual) en localStorage y en app_flota_habitual (scPushFlotaHabitual
+   ya empuja un array vacío si el aliado no tiene plantilla, ver su propia definición). NUNCA toca
+   state.mensajeros/state.turnos -- la plantilla es solo una "foto" de referencia, no la base de datos real de
+   mensajeros/turnos ya creados, que permanecen intactos. */
+function eliminarFlotaHabitual() {
+  if (!canDo('schedule.aliado.manage')) return;
+  var plantillaActual = state.flotaHabitual[state.user.aliado];
+  if (!plantillaActual || !plantillaActual.length) return;
+  openConfirmModal({
+    title: 'Eliminar Flota Recurrente', confirmText: 'Sí, eliminar', danger: true,
+    message: '¿Deseas eliminar tu Flota Recurrente guardada (' + plantillaActual.length + ' turno' + (plantillaActual.length === 1 ? '' : 's') + ')? Esta acción no se puede deshacer y NO afecta a tus mensajeros ni a los turnos ya programados — solo borra la plantilla de referencia.',
+    onConfirm: function () {
+      delete state.flotaHabitual[state.user.aliado];
+      persistFlotaHabitual();
+      scPushFlotaHabitual(state.user.aliado);
+      toast('ok', 'Flota Recurrente eliminada', 'La plantilla guardada de ' + state.user.aliado + ' quedó vacía.');
+      syncAndRender(true);
+    }
   });
 }
 function ejecutarCargaFlotaHabitual(plantilla) {
@@ -20014,6 +20094,7 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('btnNuevoTurno').addEventListener('click', function () { openTurnoModal('create', null); });
   document.getElementById('btnCargarFlotaHabitual').addEventListener('click', cargarFlotaHabitual);
   document.getElementById('btnGuardarFlotaHabitual').addEventListener('click', guardarFlotaHabitual);
+  document.getElementById('btnEliminarFlotaHabitual').addEventListener('click', eliminarFlotaHabitual);
 
   /* Flota Propia (BODEGA, México) -- ver requerimiento "Reestructuración y Migración de Flota Propia México
      al Módulo Bodega". */

@@ -911,6 +911,14 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
               Guardar como Flota Recurrente
             </button>
+            <!-- Ver FIX "Bug Crítico de Edición y Persistencia en Supabase" (reporte Easyway), punto 2: reinicio
+                 explícito de la plantilla propia de Flota Recurrente -- solo borra state.flotaHabitual[aliado]
+                 (3 campos descriptivos por fila: sede/vehículo/hora/datos de contacto), nunca mensajeros/turnos
+                 reales. Visible únicamente cuando ya existe una plantilla guardada (ver renderProgramacion). -->
+            <button class="btn btn-danger" id="btnEliminarFlotaHabitual">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 0V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2"/></svg>
+              Eliminar Flota Recurrente
+            </button>
           </div>
         </div>
 
