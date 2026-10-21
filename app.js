@@ -4140,6 +4140,19 @@ function registrarAusentismoHistorico(route) {
    en vez de dejarlos solo en memoria hasta el autoguardado periódico. */
 function aplicarSolicitudGeneral(sol) {
   var turnosAfectados = [];
+  /* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase", extendido a la aprobación de Solicitudes
+     Generales (hallado en la prueba controlada de turno individual: la solicitud quedaba 'aceptada' pero el
+     turno/mensajero nunca llegaban a existir en Supabase): 4 de las 6 ramas de abajo ('nuevo_turno'/
+     'cupo_adicional' vía crearMensajeroPendiente/findOrCreateMensajeroParaAliado, 'edicion_turno' vía
+     findOrCreateMensajeroParaAliado/forkMensajeroParaEdicion, 'reemplazo_alerta' y 'reemplazo_cancelacion'
+     vía findOrCreateMensajeroParaAliado) pueden crear un mensajero NUEVO -- esta función solo devolvía
+     turnosAfectados, nunca ese mensajero, así que resolverSolicitudGeneral jamás lo empujaba a
+     app_mensajeros. El turno quedaba referenciando un mensajeroId inexistente en Supabase -- mismo
+     mecanismo exacto de rechazo por RLS (EXISTS contra app_mensajeros) ya corregido en submitTurno. Se
+     detecta aquí con el mismo snapshot de ids antes/después usado en el resto del archivo, en UN solo punto
+     (justo antes del return, ver abajo) en vez de instrumentar cada rama por separado. */
+  var mensajerosIdsAntesSolicitud = state.mensajeros.map(function (m) { return m.id; });
+  var mensajerosNuevosSolicitud = [];
   /* Quien aprueba (Planner) nunca tiene state.user.aliado propio — el mensajero/reemplazo siempre
      debe quedar asociado al aliado DUEÑO de la solicitud (sol.aliado), nunca al de la sesión que aprueba
      (ver findOrCreateMensajeroParaAliado/crearMensajeroPendiente). */
@@ -4152,14 +4165,21 @@ function aplicarSolicitudGeneral(sol) {
     turnosAfectados.push(nuevoTurno);
   } else if (sol.tipo === 'edicion_turno') {
     var route = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
-    if (!route) return turnosAfectados;
+    if (!route) return { turnos: turnosAfectados, mensajerosNuevos: mensajerosNuevosSolicitud };
     /* 'confirm' (asignar mensajero recurrente a un turno "Pendiente / Por Confirmar") reutiliza el registro
        compartido por cédula, igual que su equivalente directo; 'edit' (modificar un turno ya confirmado)
        SIEMPRE crea su propio snapshot vía forkMensajeroParaEdicion — ver Hallazgo de Auditoría #1, item 4. */
     if (!sol.detalle.pendiente) {
+      var mensajeroAnteriorIdSolicitud = route.mensajeroId;
       route.mensajeroId = sol.detalle.modoOriginal === 'confirm'
         ? findOrCreateMensajeroParaAliado(sol.aliado, sol.detalle)
         : forkMensajeroParaEdicion(sol.detalle, sol.aliado, route.mensajeroId);
+      /* forkMensajeroParaEdicion marca el registro ANTERIOR como .superseded=true EN SITIO (mutación, no
+         creación) -- esa mutación tampoco viajaba nunca a Supabase (ver FIX arriba). */
+      if (mensajeroAnteriorIdSolicitud !== route.mensajeroId) {
+        var mensajeroSupersededSolicitud = getMensajero(mensajeroAnteriorIdSolicitud);
+        if (mensajeroSupersededSolicitud && mensajeroSupersededSolicitud.superseded) mensajerosNuevosSolicitud.push(mensajeroSupersededSolicitud);
+      }
     }
     route.vehiculo = sol.detalle.vehiculo; route.hora = sol.detalle.hora; route.pendienteAsignacion = !!sol.detalle.pendiente;
     turnosAfectados.push(route);
@@ -4170,7 +4190,7 @@ function aplicarSolicitudGeneral(sol) {
        1/2 de la Matriz de Tiempos) y ajusta T0 cuando ya venció (ver comentario del ajuste de T0 más abajo).
        Corre en la sesión de Planner/Admin — el Aliado nunca ejecuta esta mutación directamente. */
     var routeRe = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
-    if (!routeRe) return turnosAfectados;
+    if (!routeRe) return { turnos: turnosAfectados, mensajerosNuevos: mensajerosNuevosSolicitud };
     /* Ver requerimiento "Complemento Regla de Negocio: Atribución de Responsabilidades...": a diferencia del
        Tramo 1 "Gabela" (causal Aliado) y "No Se Autoriza Despacho" (causal Aliado) -- donde SÍ corresponde
        registrar el ausentismo histórico del mensajero original, ver registrarAusentismoHistorico -- el
@@ -4218,7 +4238,7 @@ function aplicarSolicitudGeneral(sol) {
        modo "Ingresar datos de Reemplazo"): mismo motor que 'reemplazo_alerta' arriba, pero originado en una
        cancelación proactiva del Aliado desde Seguimiento, no en una alerta ya activa sobre el turno. */
     var routeCr = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
-    if (!routeCr) return turnosAfectados;
+    if (!routeCr) return { turnos: turnosAfectados, mensajerosNuevos: mensajerosNuevosSolicitud };
     registrarAusentismoHistorico(routeCr);
     routeCr.mensajeroId = findOrCreateMensajeroParaAliado(sol.aliado, {
       nombre: sol.detalle.nombre, telefono: sol.detalle.telefono, cedula: sol.detalle.cedula, placa: sol.detalle.placa,
@@ -4279,7 +4299,12 @@ function aplicarSolicitudGeneral(sol) {
       if (turnosAfectados.indexOf(routeMarcada) === -1) turnosAfectados.push(routeMarcada);
     }
   }
-  return turnosAfectados;
+  /* Ver FIX arriba: cualquier mensajero cuyo id no estuviera en el snapshot inicial es genuinamente nuevo,
+     sin importar qué rama lo creó -- se suma al (posible) registro superseded ya capturado en 'edicion_turno'. */
+  state.mensajeros.forEach(function (m) {
+    if (mensajerosIdsAntesSolicitud.indexOf(m.id) === -1 && mensajerosNuevosSolicitud.indexOf(m) === -1) mensajerosNuevosSolicitud.push(m);
+  });
+  return { turnos: turnosAfectados, mensajerosNuevos: mensajerosNuevosSolicitud };
 }
 function resolverSolicitudGeneral(id, aceptar) {
   var sol = state.solicitudesGenerales.find(function (s) { return s.id === id; });
@@ -4315,7 +4340,12 @@ function resolverSolicitudGeneral(id, aceptar) {
   sol.resueltoPor = state.user.nombre;
   sol.resueltoPorRol = state.user.role;
   var turnosParaPush = [];
-  if (aceptar && sol.tipo !== 'prolongacion') turnosParaPush = aplicarSolicitudGeneral(sol) || [];
+  var mensajerosParaPush = [];
+  if (aceptar && sol.tipo !== 'prolongacion') {
+    var resultadoAplicar = aplicarSolicitudGeneral(sol) || { turnos: [], mensajerosNuevos: [] };
+    turnosParaPush = resultadoAplicar.turnos || [];
+    mensajerosParaPush = resultadoAplicar.mensajerosNuevos || [];
+  }
   /* Rechazada: aplicarSolicitudGeneral (que limpia route.solicitudEdicionPendiente al aprobar) nunca se
      llama, así que hay que soltar la marca aquí también — el turno vuelve a ser editable de inmediato. */
   else if (!aceptar && sol.detalle && sol.detalle.routeId) {
@@ -4328,16 +4358,25 @@ function resolverSolicitudGeneral(id, aceptar) {
   } else {
     toast(aceptar ? 'ok' : 'warn', aceptar ? 'Solicitud aprobada' : 'Solicitud rechazada', tipoLabel + ' de ' + sol.aliado + (aceptar ? ' fue aprobada.' : ' fue rechazada.'));
   }
-  /* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota": ningún
-     tipo de Solicitud General (alta de turno, edición, reemplazo por alerta/cancelación, reprogramación
-     masiva) empujaba nunca los turnos afectados a Supabase. */
-  if (turnosParaPush.length) scPushRows('app_turnos', turnosParaPush);
-  /* Ver requerimiento "Persistencia Crítica: Aprobar Prolongación de Tiempo en Supabase": la solicitud
-     general resuelta (sol.estado/resueltoPor/resueltoEn/...) tampoco se empujaba nunca -- state.solicitudesGenerales
-     no tenía NINGUNA tabla espejo en Supabase (a diferencia de app_users/app_mensajeros/app_turnos), así que
-     cualquier Aceptar/Rechazar (prolongación, nuevo turno, cupo adicional, reemplazo, reprogramación masiva)
-     se perdía al recargar o al llegar el próximo scPullAll (login/foco/logout) desde otra sesión. */
-  scPushRows('app_solicitudes_generales', [sol]);
+  /* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase" (extendido a Solicitudes Generales): el
+     mensajero NUEVO (si lo hay, ver aplicarSolicitudGeneral/mensajerosParaPush) se empuja y se ESPERA
+     primero -- mismo criterio exacto que submitTurno/cargarFlotaHabitual -- antes de disparar el push de
+     app_turnos, que lo referencia por mensajeroId y cuya política RLS valida un EXISTS contra
+     app_mensajeros (ver migración 20261017080000). Sin esto, el turno se rechazaba por RLS mientras la
+     propia solicitud sí quedaba 'aceptada' -- una desincronización silenciosa entre ambas tablas. */
+  var pushMensajerosSolicitud = mensajerosParaPush.length ? scPushRows('app_mensajeros', mensajerosParaPush) : Promise.resolve({ ok: true });
+  pushMensajerosSolicitud.then(function () {
+    /* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota": ningún
+       tipo de Solicitud General (alta de turno, edición, reemplazo por alerta/cancelación, reprogramación
+       masiva) empujaba nunca los turnos afectados a Supabase. */
+    if (turnosParaPush.length) scPushRows('app_turnos', turnosParaPush);
+    /* Ver requerimiento "Persistencia Crítica: Aprobar Prolongación de Tiempo en Supabase": la solicitud
+       general resuelta (sol.estado/resueltoPor/resueltoEn/...) tampoco se empujaba nunca -- state.solicitudesGenerales
+       no tenía NINGUNA tabla espejo en Supabase (a diferencia de app_users/app_mensajeros/app_turnos), así que
+       cualquier Aceptar/Rechazar (prolongación, nuevo turno, cupo adicional, reemplazo, reprogramación masiva)
+       se perdía al recargar o al llegar el próximo scPullAll (login/foco/logout) desde otra sesión. */
+    scPushRows('app_solicitudes_generales', [sol]);
+  });
   syncAndRender(true);
 }
 /* Ver requerimiento "Addendum de Funcionalidad: Botón 'Cancelar Solicitud' en 'Mis Solicitudes Enviadas'
