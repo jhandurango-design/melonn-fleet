@@ -7639,12 +7639,12 @@ function renderConsolTable(routes) {
       var bySede = {};
       aliadoRows.forEach(function (r) { (bySede[r.sede] = bySede[r.sede] || []).push(r); });
       Object.keys(bySede).sort().forEach(function (sede) {
-        var sedeRows = bySede[sede].slice().sort(function (a, b) { return a.hora.localeCompare(b.hora); });
+        var sedeRows = bySede[sede].slice().sort(function (a, b) { return a.hora.localeCompare(b.hora) || a.id.localeCompare(b.id); });
         html += '<tr class="consol-subgroup-row"><td colspan="6">📍 ' + sede + ' <span class="consol-group-count">(' + sedeRows.length + ' rutas)</span></td></tr>';
         html += sedeRows.map(rowHtmlConsolidado).join('');
       });
     } else {
-      var rows = aliadoRows.slice().sort(function (a, b) { return a.hora.localeCompare(b.hora); });
+      var rows = aliadoRows.slice().sort(function (a, b) { return a.hora.localeCompare(b.hora) || a.id.localeCompare(b.id); });
       html += rows.map(rowHtmlConsolidado).join('');
     }
   });
@@ -7788,8 +7788,16 @@ function renderDespacho() {
      de Ordenamiento de la Tabla": la posición de cada mensajero no debe moverse sin importar cuándo
      marque llegada). Antes PLANNER usaba un criterio distinto (llegada primero, luego hora programada) que
      hacía que una fila "saltara" de posición en cuanto se registraba su llegada -- unificado con el mismo
-     criterio que ya usaba BODEGA (hora de citación, sin priorizar llegada). */
-  var routes = routesForDespacho().slice().sort(function (a, b) { return a.hora.localeCompare(b.hora); });
+     criterio que ya usaba BODEGA (hora de citación, sin priorizar llegada).
+     FIX "Parrilla que se reordena sola sin interacción" (reporte Bodega Sabaneta): el comparador solo
+     desempataba por `hora` -- dos turnos con la MISMA hora de citación quedaban con orden indefinido
+     (empate = 0). Array.prototype.sort es estable, pero el orden "antes de ordenar" depende del array
+     `state.turnos`, que se reconstruye por completo en cada scPullAll() (foco de ventana, visibilitychange,
+     tras cualquier escritura) sin ORDER BY en la consulta a Supabase -- Postgres no garantiza el mismo orden
+     de filas entre dos SELECT idénticos. Con gravityTick() re-renderizando esta vista cada 1s, cualquier
+     pull que trajera esas filas empatadas en otro orden se veía de inmediato como un "salto" visual, sin que
+     nadie tocara la pantalla. Se agrega `id` (inmutable para cada turno) como desempate determinístico. */
+  var routes = routesForDespacho().slice().sort(function (a, b) { return a.hora.localeCompare(b.hora) || a.id.localeCompare(b.id); });
   if (showAliadoMensajeroFilter) {
     state.despachoFiltroMensajero = refreshMensajeroFilterOptions('despachoFiltroMensajero', routes, state.despachoFiltroMensajero, 'Todos los mensajeros');
     if (state.despachoFiltroMensajero) routes = routes.filter(function (r) { return r.mensajeroId === state.despachoFiltroMensajero; });
@@ -7834,7 +7842,7 @@ function renderDespacho() {
     var bySede = {};
     tableRoutes.forEach(function (r) { (bySede[r.sede] = bySede[r.sede] || []).push(r); });
     despachoHtml = Object.keys(bySede).sort().map(function (sede2) {
-      var sedeRows = bySede[sede2].slice().sort(function (a, b) { return a.hora.localeCompare(b.hora); });
+      var sedeRows = bySede[sede2].slice().sort(function (a, b) { return a.hora.localeCompare(b.hora) || a.id.localeCompare(b.id); });
       return '<tr class="consol-subgroup-row"><td colspan="13">📍 ' + sede2 + ' <span class="consol-group-count">(' + sedeRows.length + ' rutas)</span></td></tr>' +
         sedeRows.map(rowHtmlDespacho).join('');
     }).join('');
@@ -8862,12 +8870,12 @@ function renderProgramacion() {
     var bySede = {};
     routes.forEach(function (r) { (bySede[r.sede] = bySede[r.sede] || []).push(r); });
     Object.keys(bySede).sort().forEach(function (sede) {
-      var rows = bySede[sede].slice().sort(function (a, b) { return a.hora.localeCompare(b.hora); });
+      var rows = bySede[sede].slice().sort(function (a, b) { return a.hora.localeCompare(b.hora) || a.id.localeCompare(b.id); });
       html += '<tr class="consol-subgroup-row"><td colspan="6">📍 ' + sede + ' <span class="consol-group-count">(' + rows.length + ' rutas)</span></td></tr>';
       html += rows.map(rowHtmlProg).join('');
     });
   } else {
-    html = routes.slice().sort(function (a, b) { return a.hora.localeCompare(b.hora); }).map(rowHtmlProg).join('');
+    html = routes.slice().sort(function (a, b) { return a.hora.localeCompare(b.hora) || a.id.localeCompare(b.id); }).map(rowHtmlProg).join('');
   }
   document.getElementById('progTbody').innerHTML = html;
   document.getElementById('progCount').textContent = routes.length;
@@ -9066,7 +9074,7 @@ function renderSeguimiento() {
     var bySedeSeg = {};
     tableRoutes.forEach(function (r) { (bySedeSeg[r.sede] = bySedeSeg[r.sede] || []).push(r); });
     seguimientoHtml = Object.keys(bySedeSeg).sort().map(function (sede) {
-      var rows = bySedeSeg[sede].slice().sort(function (a, b) { return a.hora.localeCompare(b.hora); });
+      var rows = bySedeSeg[sede].slice().sort(function (a, b) { return a.hora.localeCompare(b.hora) || a.id.localeCompare(b.id); });
       return '<tr class="consol-subgroup-row"><td colspan="6">📍 ' + sede + ' <span class="consol-group-count">(' + rows.length + ' rutas)</span></td></tr>' +
         rows.map(rowHtmlSeguimiento).join('');
     }).join('');
