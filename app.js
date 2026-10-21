@@ -854,6 +854,16 @@ function scPullAll() {
      ANTES de lanzar las consultas es la única referencia temporal correcta. */
   var altaMensajerosEnVueloFoto = Object.assign({}, scTablasConAltaEnVuelo['app_mensajeros']);
   var altaTurnosEnVueloFoto = Object.assign({}, scTablasConAltaEnVuelo['app_turnos']);
+  /* Ver FIX "Solicitudes residuales nunca llegaban a Supabase" (reporte Cordiandina, carga masiva de
+     Solicitudes Generales): app_solicitudes_generales nunca tuvo esta misma protección -- a diferencia de
+     app_mensajeros/app_turnos, el merge de abajo (línea ~913) SIEMPRE reemplazaba state.solicitudesGenerales
+     en bloque con lo que trajera el pull remoto, sin preservar ninguna solicitud recién creada en esta
+     pestaña cuyo scPushRows() todavía no se hubiera confirmado. En una carga secuencial de varias
+     solicitudes (cada envío dispara su propio scPullAll al resolver, ver #formNuevaSolicitud), el pull de
+     UN envío podía llegar antes de que el push de OTRO (anterior o posterior) hubiera comprometido su
+     transacción -- esa solicitud desaparecía de la pantalla y, si nada la reenviaba, se perdía para
+     siempre sin ningún aviso visible. Mismo criterio exacto que altaMensajerosEnVueloFoto/altaTurnosEnVueloFoto. */
+  var altaSolicitudesEnVueloFoto = Object.assign({}, scTablasConAltaEnVuelo['app_solicitudes_generales']);
   scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual'), scPullTable('app_config_settings'), scPullTable('app_security_events')]).then(function (res) {
     var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4], flotaHabitualRows = res[5], configSettingsRows = res[6], securityEventRows = res[7];
     var changed = false;
@@ -910,7 +920,14 @@ function scPullAll() {
       state.turnos = turnosRemotos.concat(turnosLocalesEnVuelo);
       changed = true;
     }
-    if (solicitudesGenerales && solicitudesGenerales.length) { state.solicitudesGenerales = solicitudesGenerales.map(function (row) { return row.value; }); changed = true; }
+    if (solicitudesGenerales && solicitudesGenerales.length) {
+      var solicitudesRemotas = solicitudesGenerales.map(function (row) { return row.value; });
+      var idsSolicitudesRemotas = {};
+      solicitudesRemotas.forEach(function (s) { idsSolicitudesRemotas[s.id] = true; });
+      var solicitudesLocalesEnVuelo = state.solicitudesGenerales.filter(function (s) { return altaSolicitudesEnVueloFoto[s.id] && !idsSolicitudesRemotas[s.id]; });
+      state.solicitudesGenerales = solicitudesRemotas.concat(solicitudesLocalesEnVuelo);
+      changed = true;
+    }
     if (cuotasConfig && cuotasConfig.length) {
       var cfg = cuotasConfig[0].value;
       if (cfg.matriz) state.cuotasMatriz = cfg.matriz;
