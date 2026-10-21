@@ -468,8 +468,8 @@ function solicitarSessionToken(email, password) {
     .then(function (r) { return r.json(); })
     .catch(function (e) { return { ok: false, error: String(e) }; });
 }
-/* FIX CRÍTICO DE PRODUCCIÓN (hallazgo en vivo durante la verificación del fix de Cabify): fijarSessionTokenConRolNoBloqueante()
-   leía localStorage.melonn_session de forma SÍNCRONA, asumiendo que el mint sin rol (disparado momentos
+/* FIX CRÍTICO DE PRODUCCIÓN (hallazgo en vivo durante la verificación del fix de Cabify): fijarSessionTokenConRol()
+   (entonces llamada fijarSessionTokenConRolNoBloqueante) leía localStorage.melonn_session de forma SÍNCRONA, asumiendo que el mint sin rol (disparado momentos
    antes, también no bloqueante) ya habría terminado de escribirlo. Cronometrado en producción: si el
    usuario elige su rol en el modal multirol ANTES de que esa respuesta llegue (confirmado: clic a los
    2025ms, respuesta del mint a los 2551ms -- una ventana real, no un caso extremo), localStorage seguía
@@ -480,7 +480,7 @@ function solicitarSessionToken(email, password) {
    cuanto existe, un token sin app_role hace que NINGUNA rama de ninguna política RLS aplique -- las
    lecturas devuelven 0 filas, vaciando Programar Flota/Despacho/etc. en pantalla para cualquier cuenta
    multirol que elija su perfil rápido. sessionTokenMintEnVuelo expone la promesa del mint sin rol mientras
-   esté en curso -- fijarSessionTokenConRolNoBloqueante() la espera SIEMPRE antes de leer localStorage, sin
+   esté en curso -- fijarSessionTokenConRol() la espera SIEMPRE antes de leer localStorage, sin
    importar qué tan rápido se dispare. Si no hay ningún mint en vuelo (sesión restaurada de una pestaña
    anterior, o cambio de rol en caliente mucho después del login), la promesa ya está resuelta -- no agrega
    ninguna espera real a esos casos. */
@@ -507,14 +507,21 @@ function fijarSessionTokenNoBloqueante(email, password) {
    NUEVO que sí lo lleva -- el servidor confirma por su cuenta (releyendo app_users con service role) que
    el rol pedido está realmente en user.roles, nunca confía en lo que el cliente afirme. Se llama en los 3
    momentos reales en que el rol activo queda decidido: login de un solo rol (startSession), selección en
-   el modal multirol de primer ingreso, y cambio de rol en caliente (ambos en confirmarSeleccionPerfil) --
-   no bloqueante, igual criterio que fijarSessionTokenNoBloqueante: si falla, la sesión en curso sigue
-   funcionando con el token sin rol (solo pierde acceso `authenticated` a tablas con scoping por rol hasta
-   que se reintente, nunca bloquea nada). */
-function fijarSessionTokenConRolNoBloqueante(user) {
-  (sessionTokenMintEnVuelo || Promise.resolve()).then(function () {
+   el modal multirol de primer ingreso, y cambio de rol en caliente (ambos en confirmarSeleccionPerfil).
+   Ver FIX "Corrección de Raíz: Propagación Síncrona del Token Multirol" (reporte Easyway, encontrado al
+   limpiar Solicitudes y Cambios como Planner inmediatamente después de cambiar de perfil): esta función
+   ANTES era no bloqueante (fijarSessionTokenConRolNoBloqueante) -- confirmarSeleccionPerfil activaba el
+   nuevo rol en pantalla (aplicarRolActivo) de inmediato, sin esperar a que este remint terminara.
+   supabaseAuthClient seguía firmado con el rol VIEJO durante esa ventana (confirmado en producción: ~1-4s,
+   variable según latencia de la Edge Function) -- cualquier escritura disparada en ese lapso (p. ej.
+   aprobar/rechazar una solicitud recién cambiado a Planner) se rechazaba con 42501 (RLS), con la pantalla
+   ya mostrando el rol nuevo como si todo estuviera listo. Ahora devuelve la promesa (antes no se
+   retornaba, así que ningún llamador podía esperarla) con { ok, token } explícito, para que
+   confirmarSeleccionPerfil la espere de verdad antes de dar el cambio de rol por completo. */
+function fijarSessionTokenConRol(user) {
+  return (sessionTokenMintEnVuelo || Promise.resolve()).then(function () {
     var tokenActual = localStorage.getItem('melonn_session');
-    if (!tokenActual || !user || !user.role) return;
+    if (!tokenActual || !user || !user.role) return { ok: false };
     return fetch(SUPABASE_URL + '/functions/v1/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -525,9 +532,11 @@ function fijarSessionTokenConRolNoBloqueante(user) {
         if (res && res.ok && res.token) {
           localStorage.setItem('melonn_session', res.token);
           rebuildSupabaseAuthClient(res.token);
+          return { ok: true, token: res.token };
         }
+        return { ok: false };
       });
-  }).catch(function () {});
+  }).catch(function () { return { ok: false }; });
 }
 function verificarSessionToken(token) {
   return fetch(SUPABASE_URL + '/functions/v1/session', {
@@ -18177,7 +18186,9 @@ function startSession(user) {
     return;
   }
   user.role = (user.roles && user.roles[0]) || user.role;
-  fijarSessionTokenConRolNoBloqueante(user);
+  /* Login de un solo rol (sin selección de perfil): sigue sin bloquear -- el usuario entra directo a su
+     único rol, sin la ventana de "cambio en caliente" que motivó el FIX de arriba (ver fijarSessionTokenConRol). */
+  fijarSessionTokenConRol(user);
   completarInicioSesion(user);
 }
 function completarInicioSesion(user) {
@@ -18245,20 +18256,27 @@ function renderModalSeleccionPerfil(user) {
   }).join('');
   document.getElementById('btnSeleccionPerfilCancelar').hidden = !!pendingRoleSelectionUser;
 }
-function confirmarSeleccionPerfil(rolElegido) {
+/* btnOrigen (opcional): el botón de perfil clicado -- se deshabilita con un indicio visual ("Confirmando…")
+   mientras se espera el remint con rol (ver fijarSessionTokenConRol), para que el cambio de perfil se
+   perciba como lo que ahora es: una confirmación bloqueante contra el servidor, no instantánea. */
+async function confirmarSeleccionPerfil(rolElegido, btnOrigen) {
+  if (btnOrigen) { btnOrigen.disabled = true; btnOrigen.textContent = 'Confirmando…'; }
   if (pendingRoleSelectionUser) {
     var user = pendingRoleSelectionUser;
     pendingRoleSelectionUser = null;
     user.role = rolElegido;
-    fijarSessionTokenConRolNoBloqueante(user);
+    await fijarSessionTokenConRol(user);
     closeModal();
     completarInicioSesion(user);
     return;
   }
   if (!state.user) return;
   state.user.role = rolElegido;
-  fijarSessionTokenConRolNoBloqueante(state.user);
+  var mintResultado = await fijarSessionTokenConRol(state.user);
   closeModal();
+  if (!mintResultado.ok) {
+    toast('warn', 'Cambio de perfil sin confirmar con el servidor', 'No se pudo validar tu nuevo rol (' + (ROLE_LABEL_ES[rolElegido] || rolElegido) + ') -- algunas acciones podrían rechazarse hasta que vuelvas a intentarlo o recargues la página.');
+  }
   aplicarRolActivo();
 }
 /* Cambio de rol EN CALIENTE (ver btnCambiarPerfil) -- misma cola de pasos que completarInicioSesion, salvo
@@ -20584,7 +20602,7 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'establecer-password-bodega') abrirModalEstablecerPasswordBodega(id);
     else if (act === 'copiar-enlace-recuperacion') copiarEnlaceRecuperacion(id);
     else if (act === 'asignar-clave-temporal-recuperacion') asignarClaveTemporalRecuperacion(id);
-    else if (act === 'seleccionar-perfil') confirmarSeleccionPerfil(btn.dataset.role);
+    else if (act === 'seleccionar-perfil') confirmarSeleccionPerfil(btn.dataset.role, btn);
     else if (act === 'usuario-editar') openUsuarioEditModal(id);
     else if (act === 'alerta-resolver-modal') openResolverAlertaModal(id, btn.dataset.code);
     else if (act === 'revertir-estado') openRevertirEstadoModal(id);
