@@ -10224,7 +10224,19 @@ function renderAlertasHistorial() {
   refreshAlertasHistTipoOptions();
   var qTipo = state.alertasHistTipo;
   var filtered = qTipo ? list.filter(function (r) { return r.tipoAlerta === qTipo; }) : list;
-  filtered.sort(function (a, b) { return a.route.fecha === b.route.fecha ? b.route.hora.localeCompare(a.route.hora) : b.route.fecha.localeCompare(a.route.fecha); });
+  /* Ver requerimiento "Orden Cronológico Descendente en Historiales": ordenar por route.fecha/route.hora
+     (la franja de CITACIÓN pactada) no refleja cuándo se resolvió/cerró realmente el evento -- dos alertas de
+     la misma fecha pueden tener su franja de citación muy distinta a su momento real de cierre (una
+     regularización del día siguiente, un retiro resuelto horas después, etc.), así que ese orden no es
+     verdaderamente cronológico. Se usa en su lugar el timestamp ISO del ÚLTIMO evento real registrado en el
+     Historial del Turno (route.historialCambios, siempre poblado desde la creación -- ver
+     registrarCreacionTurno/sembrarHistorialRuta), que sí refleja el momento real más reciente. */
+  filtered.sort(function (a, b) {
+    var ha = a.route.historialCambios, hb = b.route.historialCambios;
+    var ta = (ha && ha.length) ? ha[ha.length - 1].timestamp : (a.route.fecha + 'T' + a.route.hora);
+    var tb = (hb && hb.length) ? hb[hb.length - 1].timestamp : (b.route.fecha + 'T' + b.route.hora);
+    return tb.localeCompare(ta);
+  });
 
   document.getElementById('alertasHistTbody').innerHTML = filtered.map(alertHistRowHtml).join('');
   document.getElementById('alertasHistCount').textContent = filtered.length;
@@ -12399,6 +12411,17 @@ var SOLICITUD_TIPO_INFO_TIP = {
 function solicitudTipoBadgeHtml(tipo) {
   return '<span class="badge ' + (SOLICITUD_TIPO_BADGE_CLASS[tipo] || 'badge-disabled') + '"><i></i>' + (SOLICITUD_TIPO_LABEL_TABLA[tipo] || tipo) + badgeInfoTipHtml(SOLICITUD_TIPO_INFO_TIP[tipo]) + '</span>';
 }
+/* Ver requerimiento "Orden Cronológico Descendente en Historiales": sortKey para una fila YA RESUELTA de
+   Historial de Solicitudes se construía como (fecha + ' ' + horaTexto), con horaTexto en formato 12h
+   "HH:MM:SS AM/PM" -- comparable lexicográficamente SOLO si nunca cruza el límite AM/PM (ej. "01:00:00 PM"
+   ordena ANTES que "11:00:00 AM" como texto plano, aunque 11 AM sea más temprano que 1 PM el mismo día) y sin
+   ninguna fecha que desempate entre días. Convierte la hora a minutos-desde-medianoche (ya existe
+   parseAmPmToMinutes, ver sembrarHistorialRuta) con padding fijo, para que la concatenación con la fecha
+   ordene correctamente tanto entre días como dentro del mismo día. */
+function sortKeyFechaHora(fecha, horaAmPm) {
+  var minutos = parseAmPmToMinutes(horaAmPm);
+  return (fecha || '') + ' ' + String(minutos == null ? 0 : minutos).padStart(4, '0');
+}
 /* ---- Normalizadores: cada uno traduce su fuente original al mismo shape de fila unificada (tipo, tipoHtml,
    aliadoHtml, detalleHtml, sede, sortKey, + motivoHtml/solicitadaTxt/actionsHtml si es pendiente, o
    resultadoHtml/resueltoPorTxt/resueltaTxt/resueltoFecha si es historial) — ninguno reimplementa lógica de
@@ -12443,7 +12466,7 @@ function unifiedFromRouteSolicitud(route, pendiente) {
     rec.resueltoPorTxt = s.canceladoPor ? (escapeHtml(s.canceladoPor) + (s.canceladoPorRol ? ' (' + s.canceladoPorRol + ')' : '')) : '—';
     rec.resueltaTxt = s.canceladoEn ? ((s.canceladoFecha ? fmtDateLong(s.canceladoFecha) + ' · ' : '') + s.canceladoEn) : '—';
     rec.resueltoFecha = s.canceladoFecha || '';
-    rec.sortKey = s.canceladoEn || '';
+    rec.sortKey = sortKeyFechaHora(s.canceladoFecha, s.canceladoEn);
   } else if (s.estado === 'no_gestionada') {
     /* Ver requerimiento "Auditoría y Lógica de Cierre de Jornada / Rotación Automática de Alertas y
        Solicitudes a Historial": barrido automático de medianoche (ver cierreJornadaSweep) -- nadie la
@@ -12455,7 +12478,7 @@ function unifiedFromRouteSolicitud(route, pendiente) {
     rec.resueltoPorTxt = escapeHtml(s.resueltoPor || 'Sistema Gravity') + ' (SYSTEM)';
     rec.resueltaTxt = s.resueltoEn ? ((s.resueltoFecha ? fmtDateLong(s.resueltoFecha) + ' · ' : '') + s.resueltoEn) : '—';
     rec.resueltoFecha = s.resueltoFecha || '';
-    rec.sortKey = s.resueltoEn || '';
+    rec.sortKey = sortKeyFechaHora(s.resueltoFecha, s.resueltoEn);
   } else {
     var resultLabel;
     if (s.estado === 'aceptada') {
@@ -12471,7 +12494,7 @@ function unifiedFromRouteSolicitud(route, pendiente) {
     rec.resueltoPorTxt = s.resueltoPor ? (escapeHtml(s.resueltoPor) + (s.resueltoPorRol ? ' (' + s.resueltoPorRol + ')' : '')) : '—';
     rec.resueltaTxt = s.resueltoEn ? ((s.resueltoFecha ? fmtDateLong(s.resueltoFecha) + ' · ' : '') + s.resueltoEn) : '—';
     rec.resueltoFecha = s.resueltoFecha || '';
-    rec.sortKey = s.resueltoEn || '';
+    rec.sortKey = sortKeyFechaHora(s.resueltoFecha, s.resueltoEn);
   }
   return rec;
 }
@@ -12536,7 +12559,7 @@ function unifiedFromGeneral(sol) {
     rec.resueltoPorTxt = sol.canceladoPor ? (escapeHtml(sol.canceladoPor) + (sol.canceladoPorRol ? ' (' + sol.canceladoPorRol + ')' : '')) : '—';
     rec.resueltaTxt = sol.canceladoEn ? ((sol.canceladoFecha ? fmtDateLong(sol.canceladoFecha) + ' · ' : '') + sol.canceladoEn) : '—';
     rec.resueltoFecha = sol.canceladoFecha || '';
-    rec.sortKey = sol.canceladoEn || '';
+    rec.sortKey = sortKeyFechaHora(sol.canceladoFecha, sol.canceladoEn);
   } else if (sol.estado === 'no_gestionada') {
     /* Ver requerimiento "Auditoría y Lógica de Cierre de Jornada / Rotación Automática de Alertas y
        Solicitudes a Historial": barrido automático de medianoche (ver cierreJornadaSweep) -- nadie la
@@ -12546,7 +12569,7 @@ function unifiedFromGeneral(sol) {
     rec.resueltoPorTxt = escapeHtml(sol.resueltoPor || 'Sistema Gravity') + ' (SYSTEM)';
     rec.resueltaTxt = sol.resueltoEn ? ((sol.resueltoFecha ? fmtDateLong(sol.resueltoFecha) + ' · ' : '') + sol.resueltoEn) : '—';
     rec.resueltoFecha = sol.resueltoFecha || '';
-    rec.sortKey = sol.resueltoEn || '';
+    rec.sortKey = sortKeyFechaHora(sol.resueltoFecha, sol.resueltoEn);
   } else {
     rec.motivoHtml = escapeHtml(sol.motivo);
     rec.resultadoHtml = sol.estado === 'aceptada'
@@ -12555,7 +12578,7 @@ function unifiedFromGeneral(sol) {
     rec.resueltoPorTxt = sol.resueltoPor ? (escapeHtml(sol.resueltoPor) + (sol.resueltoPorRol ? ' (' + sol.resueltoPorRol + ')' : '')) : '—';
     rec.resueltaTxt = sol.resueltoEn ? ((sol.resueltoFecha ? fmtDateLong(sol.resueltoFecha) + ' · ' : '') + sol.resueltoEn) : '—';
     rec.resueltoFecha = sol.resueltoFecha || '';
-    rec.sortKey = sol.resueltoEn || '';
+    rec.sortKey = sortKeyFechaHora(sol.resueltoFecha, sol.resueltoEn);
   }
   return rec;
 }
@@ -12595,7 +12618,7 @@ function unifiedFromCuota(route, pendiente) {
     rec.resueltoPorTxt = c.resueltoPor ? (escapeHtml(c.resueltoPor) + (c.resueltoPorRol ? ' (' + c.resueltoPorRol + ')' : '')) : '—';
     rec.resueltaTxt = c.resueltoEn ? ((c.resueltoFecha ? fmtDateLong(c.resueltoFecha) + ' · ' : '') + c.resueltoEn) : '—';
     rec.resueltoFecha = c.resueltoFecha || '';
-    rec.sortKey = c.resueltoEn || '';
+    rec.sortKey = sortKeyFechaHora(c.resueltoFecha, c.resueltoEn);
   }
   return rec;
 }
@@ -14994,11 +15017,13 @@ function openHistorialModal(routeId) {
   document.getElementById('historialTitle').textContent = 'Historial del Turno — ' + route.id;
   var creadorEl = document.getElementById('historialCreador');
   if (creadorEl) creadorEl.textContent = 'Creado por: ' + (route.creadoPor ? (nombreConRol(route.creadoPor) || route.creadoPor) : 'No registrado') + ' · ' + route.sede;
-  /* Ver requerimiento "Restructuración Integral...", Parte 1: orden CRONOLÓGICO ASCENDENTE (arriba = Creación
-     del Turno, bajando hasta el despacho/cierre) -- route.historialCambios YA se construye en ese orden (cada
-     evento se hace .push() a medida que ocurre, ver registrarHistorialCambio/sembrarHistorialRuta), así que
-     ya no se invierte para la vista (antes el .reverse() mostraba el más reciente arriba). */
-  var entries = route.historialCambios || [];
+  /* Ver requerimiento "Orden Cronológico Descendente en Historiales" (reemplaza el criterio ascendente del
+     requerimiento "Restructuración Integral...", Parte 1): route.historialCambios se SIGUE construyendo en
+     orden ascendente internamente (cada evento se hace .push() a medida que ocurre, ver
+     registrarHistorialCambio/sembrarHistorialRuta -- _ultimoEstadoRegistrado depende de ese orden de
+     construcción) -- el .slice().reverse() es SOLO para esta vista, para que el evento más reciente quede
+     arriba sin tener que scrollear. */
+  var entries = (route.historialCambios || []).slice().reverse();
   document.getElementById('historialList').innerHTML = entries.length ? entries.map(historialItemHtml).join('') : '<p class="modal-note">Esta ruta no registra solicitudes ni cambios de horario.</p>';
   openModal('modalHistorial');
 }
