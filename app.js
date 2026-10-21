@@ -9060,22 +9060,21 @@ function rowHtmlProg(route) {
        que el resultado (directo vs. Solicitud de Cambio) lo decide progEditWindowState() dentro del modal
        (ver openTurnoModal/submitTurno) — Hoy siempre exige aprobación, Mañana sigue el cutoff existente. */
     actions += iconEditButtonHtml('editar-turno', ' data-id="' + route.id + '"');
-    /* CONMUTACIÓN ESTRICTA (ver desasignarMensajero): exclusivo de la vista "Mañana" — mismo botón siempre,
-       pero su etiqueta y su efecto cambian según el cutoff (progWindowState), igual que el banner de Editar.
-       Etiqueta "Eliminar mensajero" (ver requerimiento "Ajustes de Copies y Lógica de Eliminación de Turnos
-       según Modelo de Cuotas / Programación Libre", antes "Borrar Mensajero"; minúscula normalizada por
-       "Estandarización de Botones en Programar Flota (Pestaña Mañana)" para que coincida EXACTO con el botón
-       de borrado del turno 'Pendiente / Por Confirmar' arriba) -- el efecto real (desasignarMensajero) siempre
-       elimina el turno por completo (ver requerimiento "Explicación de Borrado Limpio y Retención de Cuota");
-       la cuota obligatoria se protege aparte, vía el banner de Avance de Cuotas y el Cierre Automático
-       Nocturno (cierreCuotasNocturnoSweep). */
-    if (state.progDay === 'tomorrow') {
-      var wsDes = progWindowState();
-      var directoDes = wsDes === 'open' || wsDes === 'alert' || wsDes === 'closed_extended_active';
-      actions += '<button data-act="desasignar-mensajero" data-id="' + route.id + '" class="danger" data-tip="' +
-        (directoDes ? 'Elimina el mensajero de inmediato, sin crear ninguna solicitud ni penalización.' : 'Fuera del cutoff: se enviará como Solicitud de Cambio, pendiente de aprobación de Planner.') + '">' +
-        (directoDes ? 'Eliminar mensajero' : 'Solicitar Desasignación de Mensajero') + '</button>';
-    }
+    /* FIX "Botón de Desasignación ausente para turnos de Hoy": antes este botón solo se renderizaba para
+       state.progDay === 'tomorrow' -- una vez que la fecha de un turno cruza a Hoy (TODAY_STR), la vista no
+       ofrecía NINGUNA forma de desasignar un mensajero ya confirmado, ni directa ni por solicitud (Editar sí
+       seguía disponible, ver comentario arriba, pero no había equivalente de "quitar" el recurso). Mismo
+       criterio exacto que progEditWindowState() (ver desasignarMensajero), aplicado aquí vía route.fecha en
+       vez de state.progDay para que el botón siempre refleje la ventana real DE ESE turno. Etiqueta "Eliminar
+       mensajero" (ver requerimiento "Ajustes de Copies y Lógica de Eliminación de Turnos según Modelo de
+       Cuotas / Programación Libre", antes "Borrar Mensajero") solo aplica cuando la acción es directa
+       (Mañana, dentro del cutoff); Hoy siempre entra por Solicitud de Cambio, igual que cualquier otra
+       edición del día en curso. */
+    var wsDes = route.fecha === TOMORROW_STR ? progWindowState() : 'today_solicitud';
+    var directoDes = wsDes === 'open' || wsDes === 'alert' || wsDes === 'closed_extended_active';
+    actions += '<button data-act="desasignar-mensajero" data-id="' + route.id + '" class="danger" data-tip="' +
+      (directoDes ? 'Elimina el mensajero de inmediato, sin crear ninguna solicitud ni penalización.' : 'Fuera del cutoff: se enviará como Solicitud de Cambio, pendiente de aprobación de Planner.') + '">' +
+      (directoDes ? 'Eliminar mensajero' : 'Solicitar Desasignación de Mensajero') + '</button>';
   }
   if (!actions) actions = '<span class="courier-sub">Solo lectura</span>';
   return '<tr data-route="' + route.id + '">' +
@@ -14573,9 +14572,14 @@ function eliminarTurnoPendiente(routeId) {
 function desasignarMensajero(routeId) {
   if (!canDo('schedule.aliado.manage')) return;
   var route = state.turnos.find(function (r) { return r.id === routeId; });
-  if (!route || route.fecha !== TOMORROW_STR || route.pendienteAsignacion || route.pendienteAprobacionPlanner || route.salida || route.retirado) return;
+  if (!route || route.pendienteAsignacion || route.pendienteAprobacionPlanner || route.salida || route.retirado) return;
   if (route.solicitudEdicionPendiente || (route.solicitud && route.solicitud.estado === 'pendiente')) return;
-  var ws = progWindowState();
+  /* Ver FIX "Botón de Desasignación ausente para turnos de Hoy" (rowHtmlProg): antes esta función exigía
+     route.fecha === TOMORROW_STR y usaba progWindowState() crudo -- un turno de Hoy quedaba sin ninguna
+     forma de desasignarse, ni directa ni por solicitud. Mismo criterio que progEditWindowState(), anclado a
+     route.fecha (la fecha REAL del turno) en vez de state.progDay (la pestaña que el Aliado tiene abierta en
+     este momento) -- más robusto, no depende de que ambos coincidan. */
+  var ws = route.fecha === TOMORROW_STR ? progWindowState() : 'today_solicitud';
   var directo = ws === 'open' || ws === 'alert' || ws === 'closed_extended_active';
   if (directo) {
     /* Ver requerimiento "Explicación de Borrado Limpio y Retención de Cuota": la cuota contratada ya no se
