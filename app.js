@@ -4521,6 +4521,7 @@ function noUbicaRecurso(routeId, motivo) {
   registrarHistorialCambio(route, { tipo: 'cancelacion', accion: 'aprobada', motivo: motivoFinal, horaAnterior: route.hora, horaPropuesta: null, por: state.user.nombre });
   toast('warn', 'Turno cerrado sin recurso', route.id + ' quedó cancelado por falta de mensajero disponible.');
   syncAndRender(true);
+  pushRouteConAviso(route, 'Cierre no confirmado en la nube');
 }
 /* El turno aún no registra ingreso en bodega ni fue despachado/cancelado — único momento válido para notificar llegada.
    Se excluye explícitamente 'afectacion_confirmada' (Incumplimiento Confirmado): el ciclo ya cerró automáticamente y
@@ -4652,7 +4653,7 @@ function resolverArriboAprobar(routeId) {
   registrarHistorialCambio(route, { tipo: 'arribo_aliado', accion: 'aprobada', motivo: 'Hora propuesta por el aliado aprobada como Check-In oficial — ' + fmtTime12(route.llegada) + '. ' + motivoVeredicto, horaAnterior: null, horaPropuesta: route.llegada, por: state.user.nombre, rol: state.user.role });
   toast('ok', 'Presencia confirmada', route.id + ' — Check-In oficial ' + fmtTime12(route.llegada) + '.');
   syncAndRender(true);
-  pushRouteBodega(route, 'Check-In no confirmado en la nube');
+  pushRouteConAviso(route, 'Check-In no confirmado en la nube');
 }
 /* OPCIÓN B — Llegó a Otra Hora (CASO 3 de la matriz de apelación): Bodega NO acepta la hora que declaró el
    Aliado — sostiene que el mensajero recién se presenta y ajusta el Check-In a la hora real/actual que ella
@@ -4672,7 +4673,7 @@ function resolverArriboHoraCorregida(routeId, horaReal) {
   registrarHistorialCambio(route, { tipo: 'arribo_aliado', accion: 'hora_corregida', motivo: 'Reporte con Hora Inexacta (Aliado) — Bodega corrigió el Check-In a ' + fmtTime12(route.llegada) + ' (hora propuesta original ' + fmtTime12(route.horaPropuestaAliado) + '). Llegada Tardía atribuible al Aliado, sin Alerta Falsa de Bodega.', horaAnterior: route.horaPropuestaAliado, horaPropuesta: route.llegada, por: state.user.nombre, rol: state.user.role });
   toast('warn', 'Hora corregida por Bodega', route.id + ' — Check-In oficial ' + fmtTime12(route.llegada) + ' (reporte con hora inexacta del aliado).');
   syncAndRender(true);
-  pushRouteBodega(route, 'Check-In no confirmado en la nube');
+  pushRouteConAviso(route, 'Check-In no confirmado en la nube');
 }
 /* OPCIÓN C — Sin Llegar / No Ha Llegado: NO se registra route.llegada, así que la FSM de inasistencia/
    sustitución sigue corriendo con normalidad (0-60 tolerancia, 61-120 gestión, > 120 Incumplimiento Confirmado
@@ -4690,7 +4691,7 @@ function resolverArriboSinLlegar(routeId, observacion) {
   registrarHistorialCambio(route, { tipo: 'arribo_aliado', accion: 'sin_llegar', motivo: 'Falso Arribo del Aliado — ' + observacion, horaAnterior: null, horaPropuesta: null, por: state.user.nombre, rol: state.user.role });
   toast('warn', 'Alerta falsa registrada', route.id + ' — la notificación no se confirmó en bodega; el ciclo de inasistencia sigue corriendo con normalidad.');
   syncAndRender(true);
-  pushRouteBodega(route, 'Registro no confirmado en la nube');
+  pushRouteConAviso(route, 'Registro no confirmado en la nube');
 }
 function openArriboHoraCorregidaModal(routeId) {
   if (!canDo('despacho.manage')) return;
@@ -4863,7 +4864,7 @@ function confirmarSolicitudRecursoExtraordinario(routeId) {
   toast('warn', 'Solicitud enviada', route.id + ' — Solicitud Extraordinaria de Recurso enviada al Aliado (SLA de 1 hora).');
   closeModal();
   syncAndRender(true);
-  pushRouteBodega(route, 'Solicitud no confirmada en la nube');
+  pushRouteConAviso(route, 'Solicitud no confirmada en la nube');
 }
 /* Ver requerimiento "Auditoría General y Restructuración de Módulos Operativos", punto 6 (Ciclo de Vida de
    Alertas): un 'retirado' Camino 2 que cierra sin ningún reemplazo/recurso pendiente (0% afectación, nada que
@@ -4892,7 +4893,7 @@ function declinarSolicitudRecursoExtraordinario(routeId) {
   toast('warn', 'Turno cerrado', route.id + ' queda cerrado como "Se retiró sin cargue (Presentó Demora en Despacho)". Sin afectación al Aliado.');
   closeModal();
   syncAndRender(true);
-  pushRouteBodega(route, 'Cierre no confirmado en la nube');
+  pushRouteConAviso(route, 'Cierre no confirmado en la nube');
 }
 /* Botón "Cancelar solicitud de recurso" en la fila de Bodega (ver rowHtmlDespacho): la ruta se resolvió
    internamente (p. ej. Bodega consiguió otro mensajero por su cuenta) antes de que el Aliado respondiera o
@@ -4911,7 +4912,7 @@ function cancelarSolicitudRecursoExtraordinario(routeId) {
   descartarAlertaRetiradoSinPendientes(routeId);
   toast('warn', 'Solicitud cancelada', route.id + ' — la Solicitud Extraordinaria de Recurso fue cancelada por Bodega.');
   syncAndRender(true);
-  pushRouteBodega(route, 'Cancelación no confirmada en la nube');
+  pushRouteConAviso(route, 'Cancelación no confirmada en la nube');
 }
 /* Botón "Rechazar" del Aliado en Alertas Activas (ver alertRowHtml): rechazo EXPLÍCITO, distinto del simple
    vencimiento del SLA (ver scanRoutes) -- mismo desenlace final (turno cerrado, sin afectación), pero
@@ -5203,7 +5204,7 @@ function justificarRetraso(route, motivo) {
   route.motivoJustificacion = motivo;
   state.statusCache[route.id] = 'justified';
   registrarHistorialCambio(route, { tipo: 'justificacion', accion: 'justificado', motivo: motivo, horaAnterior: null, horaPropuesta: null, por: state.user.nombre });
-  pushRouteBodega(route, 'Justificación no confirmada en la nube');
+  pushRouteConAviso(route, 'Justificación no confirmada en la nube');
 }
 function registrarSalida(routeId) {
   if (!canDo('departure.register')) return;
@@ -7918,7 +7919,7 @@ function guardarObservacionBodega(routeId, texto) {
   });
   toast('ok', 'Observación guardada', route.id + ' — observación de Bodega actualizada.');
   syncAndRender(true);
-  pushRouteBodega(route, 'Observación no confirmada en la nube');
+  pushRouteConAviso(route, 'Observación no confirmada en la nube');
 }
 /* Ver requerimiento "Corrección Puntual: Reversión y Lógica Simplificada de Flota Propia (México)": Bodega
    cierra el turno de Flota Propia con solo 2 acciones directas (Se Despacha / No Se Despacha) -- sin Llegada,
@@ -7937,7 +7938,7 @@ function despacharFlotaPropiaDirecto(routeId) {
   });
   toast('ok', 'Despachado', route.id + ' — turno despachado.');
   syncAndRender(true);
-  pushRouteBodega(route, 'Despacho no confirmado en la nube');
+  pushRouteConAviso(route, 'Despacho no confirmado en la nube');
 }
 function openNoDespachoFlotaPropiaModal(routeId) {
   if (!canDo('despacho.manage')) return;
@@ -7962,7 +7963,7 @@ function noDespacharFlotaPropiaDirecto(routeId, observacion) {
   });
   toast('warn', 'No Despachado', route.id + ' — quedó registrado como "No Despachado".');
   syncAndRender(true);
-  pushRouteBodega(route, 'Registro no confirmado en la nube');
+  pushRouteConAviso(route, 'Registro no confirmado en la nube');
 }
 function rowHtmlDespacho(route) {
   var m = getMensajero(route.mensajeroId), est = computeEstado(route);
@@ -8179,17 +8180,21 @@ function registrarLlegadaBodega(routeId) {
     }
   });
 }
-/* Ver verificación "Persistencia de Estados desde Bodega": registrarLlegadaBodega/registrarSalida eran las
-   ÚNICAS 2 acciones de Bodega con empuje inmediato a Supabase (ver sus propios comentarios -- incidente real
-   "55 turnos revertidos" por el autoguardado periódico de ~30s). Auditoría de todo lo demás gateado por
-   canDo('despacho.manage') encontró el MISMO hueco en prácticamente cada otra acción de Bodega (Maleta/
-   Celular, Novedad de Elementos, Validar Notificación de Llegada, Retiro, Justificar, No Autoriza Despacho,
-   Confirmar Mensajero en Bodega, Recurso Extraordinario, Observación de Bodega, Flota Propia) -- todas
-   dependían solo del autoguardado/logout, expuestas al mismo riesgo de pérdida silenciosa si otra pestaña con
-   snapshot desactualizado disparaba su propio empuje completo primero. Mismo criterio exacto en las 13+
-   llamadas nuevas: empuje inmediato, SIN revertir en memoria si falla (la acción física/operativa ya ocurrió),
-   solo un aviso para reintentar. */
-function pushRouteBodega(route, tituloFallo) {
+/* Ver verificación "Persistencia de Estados desde Bodega" + "Flujo de Solicitud de Cambio de Mensajero":
+   registrarLlegadaBodega/registrarSalida eran las ÚNICAS 2 acciones con empuje inmediato a Supabase (ver sus
+   propios comentarios -- incidente real "55 turnos revertidos" por el autoguardado periódico de ~30s).
+   Auditoría encontró el MISMO hueco tanto en el resto de acciones de Bodega (Maleta/Celular, Novedad de
+   Elementos, Validar Notificación de Llegada, Retiro, Justificar, No Autoriza Despacho, Confirmar Mensajero en
+   Bodega, Recurso Extraordinario, Observación de Bodega, Flota Propia) como en TODA creación de
+   route.solicitud (Nueva Solicitud del Aliado -- cancelación/reprogramación/cambio de mensajero/intercambio,
+   Reprogramar de Seguimiento, Nueva Solicitud del Planner, Solicitud desde Consolidado, No se Ubica Recurso)
+   -- ninguna empujaba el turno recién mutado, todas dependían solo del autoguardado/logout, expuestas al mismo
+   riesgo de pérdida silenciosa si otra pestaña con snapshot desactualizado disparaba su propio empuje completo
+   primero (confirmado en vivo: una Solicitud de Cambio de Mensajero enviada por la UI real nunca llegó a
+   Supabase). Nombre genérico (ya no exclusivo de Bodega) porque cubre ambos casos con el mismo criterio
+   exacto: empuje inmediato, SIN revertir en memoria si falla (la acción ya ocurrió/se envió), solo un aviso
+   para reintentar. */
+function pushRouteConAviso(route, tituloFallo) {
   scPushRows('app_turnos', [route]).then(function (res) {
     if (res && res.ok === false) {
       toast('warn', tituloFallo || 'No confirmado en la nube', route.id + ' se guardó localmente pero no se pudo sincronizar con Supabase — revisa tu conexión.');
@@ -8202,7 +8207,7 @@ function toggleMaleta(routeId, checked) {
   if (!route) return;
   route.maleta = checked;
   syncAndRender(true);
-  pushRouteBodega(route, 'Maleta no confirmada en la nube');
+  pushRouteConAviso(route, 'Maleta no confirmada en la nube');
 }
 function toggleCelular(routeId, checked) {
   if (!canDo('despacho.manage')) return;
@@ -8210,7 +8215,7 @@ function toggleCelular(routeId, checked) {
   if (!route) return;
   route.celular = checked;
   syncAndRender(true);
-  pushRouteBodega(route, 'Celular no confirmado en la nube');
+  pushRouteConAviso(route, 'Celular no confirmado en la nube');
 }
 /* ---------------- Novedad de elementos (Maleta/Celular) al llegar a bodega ---------------- */
 function novedadElementosLabel(tipo) {
@@ -8240,7 +8245,7 @@ function reportarNovedadElementos(routeId, faltaMaleta, faltaCelular) {
   toast('warn', 'Novedad reportada', route.id + ' — ' + novedadElementosLabel(tipo) + '. Se generó una alerta para Planner y Aliado; el turno queda exento del contador de Demora en Bodega mientras se resuelve.');
   closeModal();
   syncAndRender(true);
-  pushRouteBodega(route, 'Novedad no confirmada en la nube');
+  pushRouteConAviso(route, 'Novedad no confirmada en la nube');
 }
 /* Único punto de resolución de la novedad — usado tanto por el reemplazo en sitio del Aliado (Opción A)
    como por la excepción de despacho del Planner (Opción B): limpia la novedad, deja Maleta/Celular en
@@ -8278,7 +8283,7 @@ function confirmarCambioMensajeroSitio(routeId, datos) {
   toast('ok', 'Reemplazo confirmado', route.id + ' — Bodega recuperó Marcar Salida y Se Retira.');
   closeModal();
   syncAndRender(true);
-  pushRouteBodega(route, 'Reemplazo no confirmado en la nube');
+  pushRouteConAviso(route, 'Reemplazo no confirmado en la nube');
 }
 function openAutorizarExcepcionModal(routeId) {
   if (!canDo('consolidado.manage')) return;
@@ -8301,7 +8306,7 @@ function confirmarAutorizarExcepcion(routeId, observacion) {
   toast('ok', 'Excepción autorizada', route.id + ' — Bodega recuperó Marcar Salida y Se Retira.');
   closeModal();
   syncAndRender(true);
-  pushRouteBodega(route, 'Excepción no confirmada en la nube');
+  pushRouteConAviso(route, 'Excepción no confirmada en la nube');
 }
 function openRetiroModal(routeId) {
   if (!canDo('despacho.manage')) return;
@@ -8340,7 +8345,7 @@ function noAutorizarDespacho(routeId, observacion) {
   registrarHistorialCambio(route, { tipo: 'no_autoriza_despacho', accion: 'bloqueado', motivo: 'No se Autoriza Despacho — ' + observacion, horaAnterior: null, horaPropuesta: null, por: state.user.nombre });
   toast('critical', 'Despacho no autorizado', route.id + ' quedó en "Incumplimiento / Requiere Reemplazo" — el Aliado debe asignar un reemplazo desde Alertas.');
   syncAndRender(true);
-  pushRouteBodega(route, 'Bloqueo no confirmado en la nube');
+  pushRouteConAviso(route, 'Bloqueo no confirmado en la nube');
 }
 /* Ver requerimiento "Implementación y Estandarización de Flujo Integral: Retiro de Mensajero y Transmisión de
    Alertas (Bodega <-> Aliado)", puntos 1 y 3: acción EXCLUSIVA de Bodega sobre un retiro que seguía pidiendo
@@ -8368,7 +8373,7 @@ function confirmarMensajeroEnBodega(routeId) {
   registrarHistorialCambio(route, { tipo: 'confirmar_mensajero_bodega', accion: eraEvidenciaPendiente ? 'evidencia_aprobada' : 'confirmado_directo', motivo: motivoConfirm, horaAnterior: null, horaPropuesta: null, por: state.user.nombre, foto: eraEvidenciaPendiente ? route.retiroEvidenciaFoto : null });
   toast('ok', 'Mensajero confirmado en bodega', route.id + ' — ' + m.nombre + ' vuelve al ciclo operativo normal.');
   syncAndRender(true);
-  pushRouteBodega(route, 'Confirmación no confirmada en la nube');
+  pushRouteConAviso(route, 'Confirmación no confirmada en la nube');
 }
 
 /* ---------------- Calculador de Rutas (exclusivo PLANNER) ----------------
@@ -19741,6 +19746,7 @@ document.addEventListener('DOMContentLoaded', function () {
     toast('warn', tipoToastLabel, route.id + toastMsgReprog + ' — a la espera de respuesta del equipo Melonn.');
     closeModal();
     syncAndRender(true);
+    pushRouteConAviso(route, 'Solicitud no confirmada en la nube');
   });
 
   /* Ver requerimiento "Confirmación de Badges y Ejecución de las 5 Mejoras...", punto 1: modal contextual de
@@ -19775,6 +19781,7 @@ document.addEventListener('DOMContentLoaded', function () {
     toast('warn', 'Solicitud de reprogramación enviada', routeSeg.id + toastMsgSeg + ' — a la espera de respuesta del equipo Melonn.');
     closeModal();
     syncAndRender(true);
+    pushRouteConAviso(routeSeg, 'Solicitud no confirmada en la nube');
   });
 
   /* Ver requerimiento "Addendum de Funcionalidad: Botón 'Cancelar Solicitud' en 'Mis Solicitudes Enviadas'
@@ -19882,6 +19889,7 @@ document.addEventListener('DOMContentLoaded', function () {
     toast('warn', tipoToastLabelNp, route.id + toastMsgReprogNp + ' — a la espera de respuesta de ' + getMensajero(route.mensajeroId).aliado + '.');
     closeModal();
     syncAndRender(true);
+    pushRouteConAviso(route, 'Solicitud no confirmada en la nube');
   });
 
   document.getElementById('btnNuevoUsuario').addEventListener('click', openUsuarioModal);
@@ -20446,7 +20454,7 @@ document.addEventListener('DOMContentLoaded', function () {
     toast('warn', 'Mensajero retirado', route.id + ' — ' + m.nombre + ' se retiró sin cargue.' + retiroToastExtra);
     closeModal();
     syncAndRender(true);
-    pushRouteBodega(route, 'Retiro no confirmado en la nube');
+    pushRouteConAviso(route, 'Retiro no confirmado en la nube');
     if (huboDemoraPrevia) openRecursoExtraordinarioModal(routeId);
   });
 
@@ -20642,6 +20650,7 @@ document.addEventListener('DOMContentLoaded', function () {
     toast('warn', tipo === 'reprogramacion' ? 'Solicitud de reprogramación enviada' : 'Solicitud de cancelación enviada', route.id + ' — a la espera de respuesta de ' + getMensajero(route.mensajeroId).aliado + '.');
     closeModal();
     syncAndRender(true);
+    pushRouteConAviso(route, 'Solicitud no confirmada en la nube');
   });
 
   document.addEventListener('click', function (e) {
