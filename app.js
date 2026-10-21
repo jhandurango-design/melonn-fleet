@@ -3140,18 +3140,18 @@ function computeCancelPenalty(route) {
   var esVan = isVanCategory(route.vehiculo);
   var th = cancelacionThresholds();
   var sinPenalizacion = esVan ? (horasAntes >= th.vanMin && horasAntes <= th.vanMax) : (horasAntes >= th.moto);
-  /* Ver requerimiento "Exclusión de Penalizaciones" para Recursos Adicionales (ver esTurnoAdicionalExento):
-     un turno creado por encima de la cuota base contratada (causal 'cupo'/'domingo') nunca genera multa
-     económica por cancelación, sin importar la antelación -- solo la cuota base es objeto de penalización. */
-  var esAdicional = esTurnoAdicionalExento(route);
+  /* Ver requerimiento "Regla Definitiva para Recursos Adicionales": NINGUNA exención automática -- un turno
+     Adicional sigue exactamente la misma regla de penalización por cancelación que cualquier otro (punto B,
+     "Traza End-to-End"). esAdicional viaja solo como DATO informativo (ver esTurnoAdicional/
+     turnoAdicionalRowBadgeHtml), para que Auditoría de Cobros lo muestre en pantalla y el Auditor decida. */
+  var esAdicional = esTurnoAdicional(route);
   return {
     categoria: route.vehiculo,
     tipo: esVan ? 'van' : 'moto',
     horasAntesCargue: Math.round(horasAntes * 10) / 10,
-    aplicaPenalizacion: !sinPenalizacion && !esAdicional,
-    regla: esAdicional
-      ? 'Recurso Adicional (fuera de la cuota base contratada): exento de penalización por cancelación.'
-      : (esVan ? ('Vans: sin penalización entre ' + th.vanMin + ' y ' + th.vanMax + ' horas antes del cargue.') : ('Motos: sin penalización hasta ' + th.moto + ' hora(s) antes del cargue.'))
+    aplicaPenalizacion: !sinPenalizacion,
+    esAdicional: esAdicional,
+    regla: esVan ? ('Vans: sin penalización entre ' + th.vanMin + ' y ' + th.vanMax + ' horas antes del cargue.') : ('Motos: sin penalización hasta ' + th.moto + ' hora(s) antes del cargue.')
   };
 }
 /* Clasificación de antelación de una solicitud de Reprogramación enviada por el Aliado (ver
@@ -3219,34 +3219,30 @@ function turnosPendientesAprobacionCount(sede, aliado, fecha, franja, vehiculo) 
 /* Interruptor del módulo de Cuotas, independiente por país (ver Configuración/Cuotas de Flota — Admin
    controla Colombia y México por separado; ej. CO con cuotas activas mientras MX opera libre). */
 function cuotasActivoPais(country) { return country === 'MX' ? !!state.configSettings.cuotasActivoMX : !!state.configSettings.cuotasActivoCO; }
-/* Ver requerimiento "Diferenciación y Lógica de Recursos Adicionales": un turno es "Adicional" cuando se creó
-   por encima de la cuota BASE contratada (causal 'cupo', ver evaluarAprobacionCuota/checkCuotaGlobalExceso) o
-   como recurso sin cuota operativa de Domingo (causal 'domingo') -- NO festivo/tipología, que son excepciones
-   de un tipo distinto (día/vehículo), no de cantidad. route.pendienteAprobacionMotivo nunca se borra tras
-   aprobar/rechazar (ver aprobarCuotaPlanner/rechazarCuotaPlanner) -- queda como marca permanente, así que este
-   predicado sigue siendo válido durante todo el ciclo de vida del turno, aprobado o no. */
-function esTurnoAdicionalExento(route) {
+/* Ver requerimiento "Regla Definitiva para Recursos Adicionales (Visibilidad y Auditoría)": un turno es
+   "Adicional" cuando se creó por encima de la cuota BASE contratada (causal 'cupo', ver
+   evaluarAprobacionCuota/checkCuotaGlobalExceso) o como recurso sin cuota operativa de Domingo (causal
+   'domingo') -- NO festivo/tipología, que son excepciones de un tipo distinto (día/vehículo), no de cantidad.
+   Con Cuotas INACTIVAS para el país de la sede, NUNCA es Adicional (no hay meta contratada contra la cual
+   exceder -- "Programación Standard"). route.pendienteAprobacionMotivo nunca se borra tras aprobar/rechazar
+   (ver aprobarCuotaPlanner/rechazarCuotaPlanner) -- queda como marca permanente, así que este predicado sigue
+   siendo válido durante todo el ciclo de vida del turno, aprobado o no.
+   IMPORTANTE (ver requerimiento, punto B "Traza End-to-End"): esta función es EXCLUSIVAMENTE de identificación/
+   visibilidad -- un turno Adicional sigue EXACTAMENTE el mismo flujo operativo que cualquier otro (asistencia,
+   novedades, cobro de Standby, Incumplimientos Confirmados en Cumplimiento y Calidad). No existe ninguna
+   exención automática de penalización/SLA en el código -- el Auditor decide caso por caso, con esta bandera
+   visible en pantalla como insumo, nunca como un bloqueo o descuento aplicado de antemano. */
+function esTurnoAdicional(route) {
+  if (!cuotasActivoPais(countryForSede(route.sede))) return false;
   return route.pendienteAprobacionMotivo === 'cupo' || route.pendienteAprobacionMotivo === 'domingo';
 }
-/* Ver requerimiento "Diferenciación y Lógica de Recursos Adicionales", punto de identificación visual: badge
-   "+1 Adicional" en la propia fila del turno (Programar Flota/Consolidado), reutilizando el mismo estilo
-   .badge-sobrecupo que ya usa el widget agregado de Avance de Cuotas (ver cuotasSobrecupoBadgeHtml). */
+/* Badge "+1 Adicional" visible en la fila del turno, en TODOS los tableros que la muestran (Programación,
+   Consolidado, Despacho, Seguimiento, Cumplimiento/Calidad, Auditoría de Cobros) -- mismo estilo .badge-
+   sobrecupo que ya usa el widget agregado de Avance de Cuotas (ver cuotasSobrecupoBadgeHtml). */
 function turnoAdicionalRowBadgeHtml(route) {
-  if (!esTurnoAdicionalExento(route)) return '';
+  if (!esTurnoAdicional(route)) return '';
   var causaTxt = route.pendienteAprobacionMotivo === 'domingo' ? 'Recurso Adicional de Domingo' : 'Cupo Excedido';
-  return ' <span class="badge-sobrecupo" data-tip="Turno fuera de la cuota base contratada (' + causaTxt + '); no genera penalización ni afecta el cumplimiento del aliado.">+1 Adicional</span>';
-}
-/* Único punto de "¿este turno cuenta como Incumplimiento Confirmado para Cumplimiento y Calidad?" -- mismo
-   criterio que ya usaban por separado aliadoMetricas/renderCumplimientoBodegaTab/gatherSolicitudesHistorial
-   (afectacion_confirmada/sin_reemplazo/sinReemplazoAusencia), ahora con la exención de Recursos Adicionales
-   (ver esTurnoAdicionalExento) aplicada en un solo lugar: un turno Adicional cancelado/sin cubrir NO debe
-   penalizar al aliado ni afectar su score de SLA, aunque su badge de estado siga mostrando el mismo código
-   FSM de siempre (afectacion_confirmada/sin_reemplazo) -- esto es deliberado, para no alterar ninguna de las
-   ~15 comprobaciones existentes de "¿este turno ya cerró/está bloqueado para edición?" en toda la plataforma. */
-function esIncumplimientoConfirmado(route) {
-  if (esTurnoAdicionalExento(route)) return false;
-  var c = computeEstado(route).code;
-  return c === 'sin_reemplazo' || c === 'afectacion_confirmada' || !!route.sinReemplazoAusencia;
+  return ' <span class="badge-sobrecupo" data-tip="Turno fuera de la cuota base contratada (' + causaTxt + '); sigue el mismo flujo operativo normal -- el Auditor decide cobros/exoneraciones con esta información visible.">+1 Adicional</span>';
 }
 /* Único punto de control de excesos de cupo (ver evaluarAprobacionCuota/submitTurno) — sin cuota asignada
    para la combinación (cantidad=0) se interpreta como "sin control", no como "cupo cero"; evita bloquear
@@ -3704,7 +3700,7 @@ function cierreJornadaSweep() {
    turnosProgramadosGlobalCount (mismo total CONTRATADO que ya gobierna checkCuotaGlobalExceso/
    evaluarAprobacionCuota) para no duplicar ningún criterio de cuota -- por construcción, nunca genera más
    plazas que el déficit exacto, así que estos pendientes nunca califican como "Adicional" (ver
-   esTurnoAdicionalExento). Idempotencia: state.cierreCuotasNocturnoHecho, mismo patrón que
+   esTurnoAdicional). Idempotencia: state.cierreCuotasNocturnoHecho, mismo patrón que
    state.jornadaCerrada -- corre una sola vez por cruce de medianoche real. */
 function cierreCuotasNocturnoSweep() {
   if (state.cierreCuotasNocturnoHecho || state.now < progMidnightDT()) return;
@@ -4399,9 +4395,7 @@ function noUbicaRecurso(routeId, motivo) {
     origen: 'aliado', penalizacion: penal
   };
   route.pendienteAsignacion = false;
-  /* Ver requerimiento "Exclusión de Penalizaciones" (esTurnoAdicionalExento): un cupo Adicional sin cubrir
-     nunca debe sumar a "Incumplimientos Confirmados" (ver esIncumplimientoConfirmado). */
-  route.sinReemplazoAusencia = !esTurnoAdicionalExento(route);
+  route.sinReemplazoAusencia = true;
   registrarHistorialCambio(route, { tipo: 'cancelacion', accion: 'aprobada', motivo: motivoFinal, horaAnterior: route.hora, horaPropuesta: null, por: state.user.nombre });
   toast('warn', 'Turno cerrado sin recurso', route.id + ' quedó cancelado por falta de mensajero disponible.');
   syncAndRender(true);
@@ -10596,7 +10590,7 @@ function auditRowHtml(rec) {
     '<td>' + rec.route.fecha + '</td>' +
     '<td>' + escapeHtml(rec.route.sede) + '</td>' +
     '<td>' + escapeHtml(rec.m.aliado) + '</td>' +
-    '<td>' + escapeHtml(rec.m.nombre) + '<div class="courier-sub">' + escapeHtml(rec.m.placa) + '</div></td>' +
+    '<td>' + escapeHtml(rec.m.nombre) + turnoAdicionalRowBadgeHtml(rec.route) + '<div class="courier-sub">' + escapeHtml(rec.m.placa) + '</div></td>' +
     '<td><span class="badge ' + badgeClassFor(rec.code) + '"><i></i>' + rec.estado + '</span><div class="courier-sub">' + AUDIT_KPI_CATEGORIAS[rec.categoria].label + '</div></td>' +
     '<td>' + respHtml + '</td>' +
     '<td class="courier-sub">' + escapeHtml(rec.motivo) + '</td>' +
@@ -10612,7 +10606,7 @@ function auditStandbyRowHtml(rec) {
     '<td>' + rec.route.fecha + '</td>' +
     '<td>' + escapeHtml(rec.route.sede) + '</td>' +
     '<td>' + escapeHtml(rec.m.aliado) + '</td>' +
-    '<td>' + escapeHtml(rec.m.nombre) + '<div class="courier-sub">' + escapeHtml(rec.m.placa) + '</div></td>' +
+    '<td>' + escapeHtml(rec.m.nombre) + turnoAdicionalRowBadgeHtml(rec.route) + '<div class="courier-sub">' + escapeHtml(rec.m.placa) + '</div></td>' +
     '<td><strong>' + escapeHtml(rec.standby.causal) + '</strong></td>' +
     '<td class="courier-sub">' + escapeHtml(auditStandbyDetalle(rec)) + '</td>' +
     '<td><span class="badge ' + badgeClassFor(rec.code) + '"><i></i>' + escapeHtml(auditEstadoServicio(rec)) + '</span></td>' +
@@ -10840,7 +10834,7 @@ function aliadoMetricas(aliadoNombre, rango, bodegaScope, mensajeroScope) {
   var conLlegada = routes.filter(function (r) { return !!r.llegada; });
   var tarde = conLlegada.filter(isLlegadaTarde);
   var pctPuntualidad = conLlegada.length ? Math.round(((conLlegada.length - tarde.length) / conLlegada.length) * 100) : 0;
-  var incumplimientosConfirmados = routes.filter(esIncumplimientoConfirmado).length;
+  var incumplimientosConfirmados = routes.filter(function (r) { var c = computeEstado(r).code; return c === 'sin_reemplazo' || c === 'afectacion_confirmada' || r.sinReemplazoAusencia; }).length;
   var ausentismoHistoricoCount = routes.reduce(function (s, r) { return s + (r.ausentismoHistorico ? r.ausentismoHistorico.length : 0); }, 0);
   var ausentismoTotal = incumplimientosConfirmados + ausentismoHistoricoCount;
   var totalRutas = routes.length;
@@ -10934,7 +10928,7 @@ function mensajeroMetricas(m, rango) {
   var routes = state.turnos.filter(function (r) { return r.mensajeroId === m.id && r.fecha >= rango.desde && r.fecha <= rango.hasta; });
   var conLlegada = routes.filter(function (r) { return !!r.llegada; });
   var tarde = conLlegada.filter(isLlegadaTarde).length;
-  var routesIncumplimiento = routes.filter(esIncumplimientoConfirmado);
+  var routesIncumplimiento = routes.filter(function (r) { var c = computeEstado(r).code; return c === 'sin_reemplazo' || c === 'afectacion_confirmada' || r.sinReemplazoAusencia; });
   var incumplimientosConfirmados = routesIncumplimiento.length;
   var historicoPropio = [];
   state.turnos.forEach(function (r) {
@@ -11148,7 +11142,9 @@ function cumplimientoDetalleEventosHtml(mensajeroIds, rango, kpiFiltro) {
      fecha (no la hora, que ahora se lee junto al resto del detalle en la línea de abajo). */
   return '<div class="historial-list">' + eventos.map(function (e) {
     var m = getMensajero(e.mensajeroId);
-    return '<div class="historial-item"><div class="historial-item-top"><strong>' + escapeHtml(e.bodega) + ' — ' + escapeHtml(m ? m.nombre : '—') + '</strong><span class="historial-item-time">' + fmtDateLong(e.route.fecha) + '</span></div>' +
+    /* Ver requerimiento "Regla Definitiva para Recursos Adicionales": el badge viaja también al detalle de
+       Cumplimiento y Calidad, para que el Auditor vea de un vistazo si el evento era de Cuota Base o Adicional. */
+    return '<div class="historial-item"><div class="historial-item-top"><strong>' + escapeHtml(e.bodega) + ' — ' + escapeHtml(m ? m.nombre : '—') + '</strong><span class="historial-item-time">' + fmtDateLong(e.route.fecha) + turnoAdicionalRowBadgeHtml(e.route) + '</span></div>' +
       '<div class="courier-sub">' + escapeHtml(m ? (m.vehiculo || '—') + ' · ' + (m.placa || '—') : '—') + ' · Cita ' + fmtTime12(e.horaCitacion) + ' · ' + (e.llegadaReal ? ('Llegada real ' + fmtTime12(e.llegadaReal)) : 'No se presentó') + ' · ' + escapeHtml(e.motivo) + '</div></div>';
   }).join('') + '</div>';
 }
@@ -11607,7 +11603,7 @@ function turnosNovedadParaMensajeros(mensajeroIds, rango) {
         eventos.push({ route: r, mensajeroId: r.mensajeroId, categoria: 'tarde', horaCitacion: r.hora, llegadaReal: r.llegada, bodega: r.sede, motivo: 'Llegada tarde' });
       }
       var codeR = computeEstado(r).code;
-      if (esIncumplimientoConfirmado(r)) {
+      if (codeR === 'sin_reemplazo' || codeR === 'afectacion_confirmada' || r.sinReemplazoAusencia) {
         eventos.push({ route: r, mensajeroId: r.mensajeroId, categoria: 'incumplimiento', horaCitacion: r.hora, llegadaReal: null, bodega: r.sede, motivo: codeR === 'sin_reemplazo' ? 'Sin reemplazo confirmado' : (r.sinReemplazoAusencia ? 'Sin recurso disponible' : 'Incumplimiento confirmado') });
       }
     }
@@ -11875,7 +11871,7 @@ function detalleBodegaHtml(m) {
       /* Fecha histórica con llegada pero SIN salida registrada (ciclo inconcluso, ver estadoDespachoBodegaRoute
          punto 3) -- no hay salida contra la cual medir minutos exactos. */
       var detalleTiempo = r.salida ? ('Llegada ' + r.llegada + ' · Despacho ' + r.salida + ' · ' + minutesDiff(parseDT(r.fecha, r.salida), parseDT(r.fecha, r.llegada)) + ' min en bodega') : ('Llegada ' + r.llegada + ' · Sin salida registrada (turno de fecha histórica, ciclo inconcluso)');
-      return '<div class="historial-item"><div class="historial-item-top"><strong>' + r.id + ' — ' + escapeHtml(mens ? mens.nombre : '—') + '</strong><span class="historial-item-time">' + fmtDateLong(r.fecha) + '</span></div>' +
+      return '<div class="historial-item"><div class="historial-item-top"><strong>' + r.id + ' — ' + escapeHtml(mens ? mens.nombre : '—') + '</strong><span class="historial-item-time">' + fmtDateLong(r.fecha) + turnoAdicionalRowBadgeHtml(r) + '</span></div>' +
         '<div class="courier-sub">' + detalleTiempo + (r.observaciones ? ' · ' + escapeHtml(r.observaciones) : '') + '</div></div>';
     }).join('') + '</div>';
 }
@@ -11930,7 +11926,7 @@ function detalleEsperaHtml(m) {
     '<div class="historial-list">' + m.conSalidaRoutes.map(function (r) {
       var mens = getMensajero(r.mensajeroId);
       var espera = minutesDiff(parseDT(r.fecha, r.salida), parseDT(r.fecha, r.hora));
-      return '<div class="historial-item"><div class="historial-item-top"><strong>' + r.id + ' — ' + escapeHtml(mens ? mens.nombre : '—') + '</strong><span class="historial-item-time">' + fmtDateLong(r.fecha) + '</span></div>' +
+      return '<div class="historial-item"><div class="historial-item-top"><strong>' + r.id + ' — ' + escapeHtml(mens ? mens.nombre : '—') + '</strong><span class="historial-item-time">' + fmtDateLong(r.fecha) + turnoAdicionalRowBadgeHtml(r) + '</span></div>' +
         '<div class="courier-sub">Llegada ' + (r.llegada || '—') + ' · Salida ' + r.salida + ' · ' + espera + ' min de espera total' + '</div></div>';
     }).join('') + '</div>';
 }

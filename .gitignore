@@ -1,2 +1,4 @@
 backups/
 supabase/.temp/
+carga_*_resultados.json
+piloto_*_resultados.json
