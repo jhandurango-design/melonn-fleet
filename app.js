@@ -14069,10 +14069,19 @@ function submitTurno(e) {
       var turnoSubmitBtnCuota = document.getElementById('turnoSubmitBtn');
       turnoSubmitBtnCuota.disabled = true;
       turnoSubmitBtnCuota.textContent = 'Guardando…';
-      var pushesCuotaPendiente = [scPushRows('app_turnos', [turnoPendienteAprobacion])];
-      if (mensajeroNuevoCreado) pushesCuotaPendiente.push(scPushRows('app_mensajeros', [mensajeroNuevoCreado]));
-      Promise.all(pushesCuotaPendiente).then(function (results) {
-        if (results.some(function (r) { return r && r.ok === false; })) {
+      /* FIX "Condición de carrera RLS: turno vs. mensajero nuevo": antes ambos push se disparaban en
+         paralelo (Promise.all) -- si el insert de app_turnos llegaba a la base de datos una fracción de
+         segundo antes de que el insert de app_mensajeros confirmara, RLS rechazaba el turno (FK/cédula del
+         mensajero aún inexistente), con un "No se pudo confirmar en la nube" intermitente y no
+         reproducible de forma determinista. Ahora el mensajero nuevo (si lo hay) se persiste PRIMERO y se
+         espera su confirmación explícita antes de intentar el push del turno que lo referencia; sin
+         mensajero nuevo (mensajero recurrente ya existente), se salta directo al push del turno. */
+      var mensajeroPushCuotaPendiente = mensajeroNuevoCreado ? scPushRows('app_mensajeros', [mensajeroNuevoCreado]) : Promise.resolve({ ok: true });
+      mensajeroPushCuotaPendiente.then(function (resMensajero) {
+        if (resMensajero && resMensajero.ok === false) return resMensajero;
+        return scPushRows('app_turnos', [turnoPendienteAprobacion]);
+      }).then(function (resTurno) {
+        if (!resTurno || resTurno.ok === false) {
           state.turnos = state.turnos.filter(function (r) { return r.id !== turnoPendienteAprobacion.id; });
           if (mensajeroNuevoCreado) state.mensajeros = state.mensajeros.filter(function (m) { return m.id !== mensajeroNuevoCreado.id; });
           toast('warn', 'No se pudo confirmar en la nube', 'El turno no se guardó — revisa tu conexión e inténtalo de nuevo.');
