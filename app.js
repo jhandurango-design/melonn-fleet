@@ -17616,8 +17616,15 @@ function cuotasProgresoPorSede(aliado, fecha) {
      GLOBAL ya esté cubierta, el desglose por franja de abajo puede no coincidir con la matriz pactada. */
   Object.keys(porSede).forEach(function (s) {
     porSede[s].franjas.sort(function (a, b) { return a.franja < b.franja ? -1 : 1; });
+    /* FIX "Falso positivo en Descalce de Franja" (reporte Rapiboy/Bogotá, 2026-10-21): descalceFranjaAlerta
+       se marca UNA VEZ al crear/editar un turno fuera de su franja base y nunca se limpiaba aunque el turno
+       luego se corrigiera (reasignación de hora) a una franja real contratada -- el badge seguía mostrando
+       "Descalce de Franja" con el desglose ya 100% cuadrado. Se revalida en vivo con
+       horaPerteneceAFranjaContratada (misma función que ya blinda el selector de hora/backend) en vez de
+       confiar ciegamente en la presencia histórica del flag. */
     porSede[s].descalce = state.turnos.some(function (r) {
-      return r.sede === s && r.fecha === fecha && r.descalceFranjaAlerta && getMensajero(r.mensajeroId).aliado === aliado;
+      return r.sede === s && r.fecha === fecha && r.descalceFranjaAlerta && getMensajero(r.mensajeroId).aliado === aliado &&
+        !horaPerteneceAFranjaContratada(r.sede, aliado, r.vehiculo, r.hora, r.fecha);
     });
     /* FIX "Desfase de conteo en Avance de Cuotas" (reporte en vivo, Bogotá #2 - Montevideo): `actuales` se
        armaba SOLO sumando turnosProgramadosCount por cada franja que existe en la matriz contratada -- un
@@ -17662,8 +17669,10 @@ function cuotasProgresoPorAliadoManana(sedeFiltro) {
   Object.keys(porAliado).forEach(function (a) {
     var sedesDeEsteAliado = Object.keys(sedesPorAliado[a]);
     porAliado[a].franjas.sort(function (x, y) { return x.franja < y.franja ? -1 : 1; });
+    /* Mismo FIX "Falso positivo en Descalce de Franja" que cuotasProgresoPorSede (ver ese comentario). */
     porAliado[a].descalce = state.turnos.some(function (r) {
-      return r.fecha === TOMORROW_STR && r.descalceFranjaAlerta && sedesDeEsteAliado.indexOf(r.sede) !== -1 && getMensajero(r.mensajeroId).aliado === a;
+      return r.fecha === TOMORROW_STR && r.descalceFranjaAlerta && sedesDeEsteAliado.indexOf(r.sede) !== -1 && getMensajero(r.mensajeroId).aliado === a &&
+        !horaPerteneceAFranjaContratada(r.sede, a, r.vehiculo, r.hora, r.fecha);
     });
     /* FIX "Desfase de conteo en Avance de Cuotas" (ver mismo fix en cuotasProgresoPorSede): mismo criterio --
        actuales se sobreescribe con el conteo GLOBAL real (turnosProgramadosGlobalCount), sumado a través de
@@ -17696,8 +17705,10 @@ function cuotasProgresoPorBodegaYAliadoManana() {
     var aliados = Object.keys(porSede[sede]).sort().map(function (a) {
       var rec = porSede[sede][a];
       rec.franjas.sort(function (x, y) { return x.franja < y.franja ? -1 : 1; });
+      /* Mismo FIX "Falso positivo en Descalce de Franja" que cuotasProgresoPorSede (ver ese comentario). */
       rec.descalce = state.turnos.some(function (r) {
-        return r.sede === sede && r.fecha === TOMORROW_STR && r.descalceFranjaAlerta && getMensajero(r.mensajeroId).aliado === a;
+        return r.sede === sede && r.fecha === TOMORROW_STR && r.descalceFranjaAlerta && getMensajero(r.mensajeroId).aliado === a &&
+          !horaPerteneceAFranjaContratada(r.sede, a, r.vehiculo, r.hora, r.fecha);
       });
       /* FIX "Desfase de conteo en Avance de Cuotas" (ver mismo fix en cuotasProgresoPorSede/
          cuotasProgresoPorAliadoManana): actuales se sobreescribe con el conteo GLOBAL real de esta sede. */
