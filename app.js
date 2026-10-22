@@ -14196,6 +14196,31 @@ function submitTurno(e) {
         var mensajeroIdDirecto = modo === 'confirm' ? findOrCreateMensajero(payload) : route.mensajeroId;
         var conflictoRetornoDirecto = turnoEnVentanaRetorno(mensajeroIdDirecto, route.fecha, hora, route.id);
         if (conflictoRetornoDirecto) { alertarVentanaRetorno(mensajeroIdDirecto, conflictoRetornoDirecto); reactivarBotonGuardar(); return; }
+        /* FIX "Auditoría Cordiandina: validación de secuencia saltada por edición directa" (2026-10-21): el
+           chequeo de "Secuencia Obligatoria por Horario" agregado en submitTurno solo corría en modo==='create'
+           -- mover un turno YA EXISTENTE a otra hora (modo 'edit'/'confirm', único camino directo disponible
+           para Mañana dentro de la ventana de edición) mutaba route.hora sin revalidar nada, dejando abierto
+           exactamente el mismo salto que el fix de create ya cierra. Confirmado en producción: varios turnos
+           "+1 Adicional" de Cordiandina en Bogotá/Medellín nunca pasaron por create en esa hora -- se crearon
+           en una franja temprana válida y luego se EDITARON (reasignación directa de hora) hasta la franja
+           11:30 AM, sin disparar pendienteAprobacionPlanner ni ningún chequeo de cuota. Mismo criterio que el
+           de create, aplicado aquí: solo se evalúa si la hora realmente cambia. */
+        if (route.fecha === TOMORROW_STR && route.hora !== hora) {
+          var franjaDestinoEdicion = franjaForHora(hora, countryForSede(route.sede));
+          if (franjaDestinoEdicion) {
+            var progresoSedeEdicion = cuotasProgresoPorSede(state.user.aliado, route.fecha).find(function (p) { return p.sede === route.sede; });
+            var franjaAnteriorIncompletaEdicion = progresoSedeEdicion && progresoSedeEdicion.franjas
+              .filter(function (f) { return f.franja < franjaDestinoEdicion && f.cuota > 0; })
+              .sort(function (a, b) { return a.franja.localeCompare(b.franja); })
+              .find(function (f) { return f.actuales < f.cuota; });
+            if (franjaAnteriorIncompletaEdicion) {
+              toast('warn', 'Completa la franja anterior primero',
+                'Debes completar los cupos de las ' + fmtTime12(franjaAnteriorIncompletaEdicion.franja) + ' antes de mover un turno a franjas posteriores.');
+              reactivarBotonGuardar();
+              return;
+            }
+          }
+        }
         /* Ver requerimiento "Optimización: Trazabilidad en Historial...", punto 1c (Reasignaciones/Cambios:
            mensajero, vehículo, placa o tipo de flota): esta edición directa (fuera del flujo formal de
            Solicitudes) no dejaba NINGÚN rastro en route.historialCambios -- se captura el snapshot ANTES de
