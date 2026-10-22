@@ -5895,6 +5895,15 @@ function notificarCambiosSolicitudes() {
 }
 function syncAndRender(silent) {
   if (!state.user) return;
+  /* FIX "Tooltip flotante que queda pegado en pantalla" (reporte en vivo, panel Avance de Cuotas): el fix
+     anterior ("Bug Visual de Tooltip Persistente", ver removeAppTooltip más arriba) limpia el tooltip global
+     cuando SÍ llega un mouseout -- pero si el nodo con data-tip se destruye por un re-render (innerHTML de un
+     panel que se reconstruye cada 1s vía gravityTick) mientras el cursor está encima y SIN que el mouse se
+     mueva, el navegador nunca dispara ese mouseout, y el tooltip huérfano queda flotando en una posición que
+     ya no corresponde a nada hasta el próximo movimiento real del cursor. Se limpia proactivamente al inicio
+     de CADA ciclo de render -- cualquier tooltip visible pertenece a un DOM a punto de reconstruirse, así que
+     nunca vale la pena conservarlo; si el cursor sigue sobre el mismo ícono, reaparece con el próximo mouseover. */
+  removeAppTooltip();
   syncEventosScripted();
   asegurarFlotaPropiaSembrada();
   scanRoutes(silent);
