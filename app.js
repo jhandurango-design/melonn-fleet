@@ -14184,9 +14184,17 @@ function submitTurno(e) {
        salida por un caso no verificado en vivo. */
     if (aprobacion.requiere && aprobacion.motivo === 'cupo' && fecha === TOMORROW_STR) {
       var progresoSedeBloqueo = cuotasProgresoPorSede(state.user.aliado, fecha).find(function (p) { return p.sede === sede; });
-      if (progresoSedeBloqueo && progresoSedeBloqueo.franjas.some(function (f) { return f.actuales < f.cuota; })) {
+      /* AJUSTE (caso real Bogotá/Easyway, 2026-10-21 -- mismo criterio que ya aplica la Secuencia Obligatoria
+         por Horario, ver más abajo): este bloqueo también comparaba TODAS las franjas de la sede sin
+         importar el vehículo -- una franja incompleta de OTRO tipo de flota (ej. Moto xs) bloqueaba un
+         Adicional de un vehículo totalmente distinto (Moto Estándar) ya 100% cubierto, igual que pasaba con
+         Dedicado Rappi en Barranquilla. Se acota al mismo vehículo que se está registrando. */
+      var franjasMismoVehiculo = progresoSedeBloqueo ? progresoSedeBloqueo.franjas.filter(function (f) { return f.vehiculo === vehiculo; }) : [];
+      if (franjasMismoVehiculo.length && franjasMismoVehiculo.some(function (f) { return f.actuales < f.cuota; })) {
+        var actualesMismoVehiculo = franjasMismoVehiculo.reduce(function (s, f) { return s + f.actuales; }, 0);
+        var cuotaMismoVehiculo = franjasMismoVehiculo.reduce(function (s, f) { return s + f.cuota; }, 0);
         toast('warn', 'Completa tu Cuota Base primero',
-          'Debes completar el 100% de tu cuota base requerida (' + progresoSedeBloqueo.actuales + '/' + progresoSedeBloqueo.cuota + ' cargados) antes de poder registrar o solicitar cupos adicionales.');
+          'Debes completar el 100% de tu cuota base requerida (' + actualesMismoVehiculo + '/' + cuotaMismoVehiculo + ' cargados) antes de poder registrar o solicitar cupos adicionales.');
         reactivarBotonGuardar();
         return;
       }
