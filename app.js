@@ -14188,8 +14188,14 @@ function submitTurno(e) {
          por Horario, ver más abajo): este bloqueo también comparaba TODAS las franjas de la sede sin
          importar el vehículo -- una franja incompleta de OTRO tipo de flota (ej. Moto xs) bloqueaba un
          Adicional de un vehículo totalmente distinto (Moto Estándar) ya 100% cubierto, igual que pasaba con
-         Dedicado Rappi en Barranquilla. Se acota al mismo vehículo que se está registrando. */
-      var franjasMismoVehiculo = progresoSedeBloqueo ? progresoSedeBloqueo.franjas.filter(function (f) { return f.vehiculo === vehiculo; }) : [];
+         Dedicado Rappi en Barranquilla. Se acota al mismo vehículo que se está registrando.
+         SEGUNDO AJUSTE (mismo caso real): tampoco debe contar la franja EXACTA que se está registrando --
+         completarla es precisamente lo que resuelve el déficit, no un salto hacia otro lado (mismo criterio
+         que ya usa la Secuencia, que excluye la franja destino de su propio chequeo). Sin esto, la última
+         plaza de una franja quedaba en un callejón sin salida: para completarla hacía falta superar el
+         global (ya en tope), y el bloqueo citaba esa misma franja como "incompleta" para impedirlo. */
+      var franjaDeEsteTurnoBloqueo = franjaForHora(hora, countryForSede(sede));
+      var franjasMismoVehiculo = progresoSedeBloqueo ? progresoSedeBloqueo.franjas.filter(function (f) { return f.vehiculo === vehiculo && f.franja !== franjaDeEsteTurnoBloqueo; }) : [];
       if (franjasMismoVehiculo.length && franjasMismoVehiculo.some(function (f) { return f.actuales < f.cuota; })) {
         var actualesMismoVehiculo = franjasMismoVehiculo.reduce(function (s, f) { return s + f.actuales; }, 0);
         var cuotaMismoVehiculo = franjasMismoVehiculo.reduce(function (s, f) { return s + f.cuota; }, 0);
