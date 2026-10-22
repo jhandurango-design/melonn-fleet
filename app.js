@@ -17569,6 +17569,11 @@ function cuotasProgresoPorAliadoManana(sedeFiltro) {
     porAliado[a].descalce = state.turnos.some(function (r) {
       return r.fecha === TOMORROW_STR && r.descalceFranjaAlerta && sedesDeEsteAliado.indexOf(r.sede) !== -1 && getMensajero(r.mensajeroId).aliado === a;
     });
+    /* FIX "Desfase de conteo en Avance de Cuotas" (ver mismo fix en cuotasProgresoPorSede): mismo criterio --
+       actuales se sobreescribe con el conteo GLOBAL real (turnosProgramadosGlobalCount), sumado a través de
+       TODAS las sedes de este aliado, en vez de quedarse solo con la suma de franjas que existen en la
+       matriz. Un turno real en una franja sin fila en la matriz quedaba invisible para este total también. */
+    porAliado[a].actuales = sedesDeEsteAliado.reduce(function (sum, s) { return sum + turnosProgramadosGlobalCount(s, a, TOMORROW_STR); }, 0);
   });
   return Object.keys(porAliado).sort().map(function (a) { return porAliado[a]; });
 }
@@ -17598,6 +17603,9 @@ function cuotasProgresoPorBodegaYAliadoManana() {
       rec.descalce = state.turnos.some(function (r) {
         return r.sede === sede && r.fecha === TOMORROW_STR && r.descalceFranjaAlerta && getMensajero(r.mensajeroId).aliado === a;
       });
+      /* FIX "Desfase de conteo en Avance de Cuotas" (ver mismo fix en cuotasProgresoPorSede/
+         cuotasProgresoPorAliadoManana): actuales se sobreescribe con el conteo GLOBAL real de esta sede. */
+      rec.actuales = turnosProgramadosGlobalCount(sede, a, TOMORROW_STR);
       return rec;
     });
     return { sede: sede, aliados: aliados };
