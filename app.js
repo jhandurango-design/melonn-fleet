@@ -3109,7 +3109,17 @@ function computeEstado(route) {
     }
     var llegadaDT = parseDT(route.fecha, route.llegada);
     var elapsed = minutesDiff(state.now, llegadaDT);
-    if (elapsed > 60) return { code: 'dock_overdue', label: estadoLabel('dock_overdue'), elapsed: elapsed };
+    /* FIX "Cálculo Demora en Despacho" (reporte real, 2026-10-22): el SLA de 60 min de dock_overdue contaba
+       siempre desde route.llegada, sin importar si el mensajero llegó ANTES de su hora programada -- un
+       mensajero que llegó a las 08:16 AM para un turno de las 08:30 AM activaba la alerta a las 09:16 AM,
+       16 minutos antes de lo justo. hora_base = MAX(hora_programada, hora_llegada): si llegó temprano, el
+       conteo arranca en la hora programada (09:30 AM en ese ejemplo); si llegó tarde, sigue contando desde
+       su llegada real, sin cambios. Exclusivo de este umbral -- no toca bodegaEsperaTramo (clasificación de
+       Gabela/Espera al retirar un mensajero, un criterio distinto). */
+    var horaBaseDockOverdue = parseDT(route.fecha, route.hora);
+    if (llegadaDT > horaBaseDockOverdue) horaBaseDockOverdue = llegadaDT;
+    var elapsedDesdeBaseDockOverdue = minutesDiff(state.now, horaBaseDockOverdue);
+    if (elapsedDesdeBaseDockOverdue > 60) return { code: 'dock_overdue', label: estadoLabel('dock_overdue'), elapsed: elapsedDesdeBaseDockOverdue };
     if (isLlegadaTarde(route)) return { code: 'late_arrival', label: estadoLabel('late_arrival'), elapsed: elapsed };
     if (minutesDiff(llegadaDT, parseDT(route.fecha, route.hora)) > 0) return { code: 'tolerance_arrival', label: estadoLabel('tolerance_arrival'), elapsed: elapsed };
     return { code: 'in_dock', label: estadoLabel('in_dock'), elapsed: elapsed };
@@ -4299,16 +4309,21 @@ function aplicarSolicitudGeneral(sol) {
        venía de una Solicitud Extraordinaria de Recurso (Camino 2 — demora en despacho previa), se limpia junto
        con los demás flags de origen del retiro. */
     routeRe.recursoExtraordinarioPendiente = false; routeRe.recursoExtraordinarioDesde = null;
+    /* FIX "Inmutabilidad de Hora en Reemplazos" (reporte real Sabaneta/Cordiandina, 2026-10-22): esta misma
+       reasignación de T0 rompía el conteo de cuota -- turnosProgramadosCount/cuotasProgresoPorSede emparejan
+       por route.hora EXACTA contra la franja contratada (ver horaPerteneceAFranjaContratada); correr
+       route.hora a la hora de aprobación sacaba el turno de su franja real, dejándola "incompleta" pese a
+       estar cubierta. route.hora YA NUNCA se reasigna aquí -- se conserva siempre igual a la franja
+       contratada. La hora real en que se asignó un reemplazo tardío (solo informativa, para reportes de
+       SLA) queda en routeRe.horaAsignacionReemplazo, un campo aparte que el motor de cuotas no lee. */
+    var reemplazoTardioAlerta = !veniaDeRetiro && !veniaDeNoAutoriza && state.now > parseDT(routeRe.fecha, routeRe.hora);
     var motivoReemplazoAlerta = (veniaDeRetiro ? 'Reemplazo confirmado por retiro en bodega, sin afectación. Conserva la hora de citación original.'
       : veniaDeNoAutoriza ? 'Reemplazo confirmado por no autorización de despacho, sin afectación. Conserva la hora de citación original.'
       : 'Reemplazo confirmado por el Aliado y aprobado por Planner, sin afectación.') +
+      (reemplazoTardioAlerta ? ' Hora real de asignación del reemplazo: ' + fmtTimeHM(state.now) + ' — la franja contratada (' + fmtTime12(routeRe.hora) + ') se conserva intacta para el conteo de cuota.' : '') +
       ' Mensajero saliente: ' + mensajeroSalienteReemplazoAlerta + ' → Mensajero entrante: ' + sol.detalle.nombre + '.';
     registrarHistorialCambio(routeRe, { tipo: 'cancelacion', accion: 'aprobada', motivo: motivoReemplazoAlerta, horaAnterior: routeRe.hora, horaPropuesta: null, por: state.user.nombre });
-    /* Ver requerimiento "Implementación y Estandarización de Flujo Integral...": el reemplazo por retiro/no
-       autorización SIEMPRE conserva route.hora (la misma hora de citación/cargue pactada), a diferencia del
-       ajuste de T0 que sigue aplicando a cualquier OTRO origen de 'reemplazo_alerta' (ausencia pura) más
-       abajo, donde si T0 ya venció se corre a la hora de aprobación. */
-    if (!veniaDeRetiro && !veniaDeNoAutoriza && state.now > parseDT(routeRe.fecha, routeRe.hora)) routeRe.hora = fmtTimeHM(state.now);
+    if (reemplazoTardioAlerta) routeRe.horaAsignacionReemplazo = fmtTimeHM(state.now);
     routeRe.reemplazoPendiente = false;
     routeRe.reemplazoConfirmado = true;
     turnosAfectados.push(routeRe);
@@ -4329,8 +4344,13 @@ function aplicarSolicitudGeneral(sol) {
     if (routeCr.retirado) { routeCr.retirado = false; routeCr.llegada = null; routeCr.salida = null; routeCr.retiroTramo = null; desvincularEventoGuionado(routeCr); }
     routeCr.noAutorizaDespacho = false; routeCr.motivoNoAutoriza = null;
     routeCr.reemplazoPendienteTrasRetiro = false;
-    registrarHistorialCambio(routeCr, { tipo: 'cancelacion', accion: 'aprobada', motivo: 'Cancelación y reemplazo del mensajero aprobados por Planner, sin afectación. Mensajero saliente: ' + mensajeroSalienteReemplazoCr + ' → Mensajero entrante: ' + sol.detalle.nombre + '.', horaAnterior: routeCr.hora, horaPropuesta: null, por: state.user.nombre });
-    if (state.now > parseDT(routeCr.fecha, routeCr.hora)) routeCr.hora = fmtTimeHM(state.now);
+    /* FIX "Inmutabilidad de Hora en Reemplazos" (mismo criterio que 'reemplazo_alerta', ver ese comentario):
+       routeCr.hora ya NUNCA se reasigna a la hora de aprobación -- la franja contratada se conserva intacta
+       para el motor de cuotas. La hora real de un reemplazo tardío queda solo en
+       routeCr.horaAsignacionReemplazo (informativo). */
+    var reemplazoTardioCr = state.now > parseDT(routeCr.fecha, routeCr.hora);
+    registrarHistorialCambio(routeCr, { tipo: 'cancelacion', accion: 'aprobada', motivo: 'Cancelación y reemplazo del mensajero aprobados por Planner, sin afectación.' + (reemplazoTardioCr ? ' Hora real de asignación del reemplazo: ' + fmtTimeHM(state.now) + ' — la franja contratada (' + fmtTime12(routeCr.hora) + ') se conserva intacta para el conteo de cuota.' : '') + ' Mensajero saliente: ' + mensajeroSalienteReemplazoCr + ' → Mensajero entrante: ' + sol.detalle.nombre + '.', horaAnterior: routeCr.hora, horaPropuesta: null, por: state.user.nombre });
+    if (reemplazoTardioCr) routeCr.horaAsignacionReemplazo = fmtTimeHM(state.now);
     routeCr.reemplazoPendiente = false;
     routeCr.reemplazoConfirmado = true;
     turnosAfectados.push(routeCr);
