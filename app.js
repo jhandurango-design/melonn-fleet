@@ -3333,16 +3333,24 @@ function tipologiaHabilitada(sede, aliado, vehiculo) {
    vehículo+día, sin importar si vino del picker, de un reintento, o de cualquier otro camino. Nunca
    restringe: Cuotas inactivas para el país, Flota Propia, domingo (sin matriz ese día, ver diaSemanaKey),
    ni un vehículo SIN NINGUNA fila en la matriz (tipología no habilitada en absoluto -- eso lo resuelve su
-   propio flujo de excepción, nunca este bloqueo). */
+   propio flujo de excepción, nunca este bloqueo).
+   AJUSTE (caso real Bogotá/Easyway, 11:30 AM): una hora que NO coincide con ninguna franja contratada SÍ
+   se permite como Adicional genuino cuando TODAS las franjas contratadas de ese mismo vehículo para ese
+   día ya están 100% completas -- en ese caso no se está "saltando" ningún hueco (el problema real de
+   Cordiandina), es capacidad extra agregada después de cubrir el 100% de lo pactado. Si queda aunque sea
+   una franja contratada incompleta, se sigue rechazando igual que antes. */
 function horaPerteneceAFranjaContratada(sede, aliado, vehiculo, hora, fecha) {
   var country = countryForSede(sede);
   if (!cuotasActivoPais(country) || esFlotaPropia(aliado)) return true;
   var dia = diaSemanaKey(fecha);
   if (!dia) return true;
   var matriz = fecha === TODAY_STR ? state.cuotasMatrizVigenteHoy : state.cuotasMatriz;
-  var tieneAlgunaFilaVehiculo = matriz.some(function (c) { return c.sede === sede && c.aliado === aliado && c.vehiculo === vehiculo; });
-  if (!tieneAlgunaFilaVehiculo) return true;
-  return matriz.some(function (c) { return c.sede === sede && c.aliado === aliado && c.dia === dia && c.vehiculo === vehiculo && c.franja === hora && c.cantidad > 0; });
+  var filasVehiculo = matriz.filter(function (c) { return c.sede === sede && c.aliado === aliado && c.vehiculo === vehiculo; });
+  if (!filasVehiculo.length) return true;
+  if (filasVehiculo.some(function (c) { return c.dia === dia && c.franja === hora && c.cantidad > 0; })) return true;
+  var franjasDelDia = filasVehiculo.filter(function (c) { return c.dia === dia && c.cantidad > 0; });
+  if (!franjasDelDia.length) return true;
+  return franjasDelDia.every(function (c) { return turnosProgramadosCount(sede, aliado, fecha, c.franja, c.vehiculo) >= c.cantidad; });
 }
 /* Único punto de control de "requiere aprobación de Planner" (ver submitTurno) — dos causales bajo el mismo
    interruptor por país (cuotasActivoPais): 1) la fecha es festivo en el país de la bodega, 2) el cupo
@@ -13821,7 +13829,12 @@ function initTimePicker(inputId) {
     var matrizPicker = fechaPicker === TODAY_STR ? state.cuotasMatrizVigenteHoy : state.cuotasMatriz;
     var filasVehiculo = matrizPicker.filter(function (c) { return c.sede === sedeSelVal && c.aliado === state.user.aliado && c.vehiculo === vehSelVal; });
     if (!filasVehiculo.length) return null; // tipología no habilitada en absoluto -- lo resuelve su propio flujo de excepción
-    return filasVehiculo.filter(function (c) { return c.dia === dia && c.cantidad > 0; }).map(function (c) { return c.franja; });
+    var franjasDelDia = filasVehiculo.filter(function (c) { return c.dia === dia && c.cantidad > 0; });
+    /* AJUSTE (caso real Bogotá/Easyway, 11:30 AM): con TODAS las franjas contratadas de este vehículo ya al
+       100%, se libera el picker -- cualquier hora adicional ya es capacidad extra legítima, nunca un salto
+       sobre un hueco (mismo criterio que horaPerteneceAFranjaContratada, ver ese comentario). */
+    if (franjasDelDia.length && franjasDelDia.every(function (c) { return turnosProgramadosCount(sedeSelVal, state.user.aliado, fechaPicker, c.franja, c.vehiculo) >= c.cantidad; })) return null;
+    return franjasDelDia.map(function (c) { return c.franja; });
   }
   function horaEsValida(h, m) {
     if (!franjasValidas) return true;
