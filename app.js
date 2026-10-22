@@ -3327,6 +3327,23 @@ function checkCuotaGlobalExceso(sede, aliado, fecha) {
 function tipologiaHabilitada(sede, aliado, vehiculo) {
   return state.cuotasMatriz.some(function (c) { return c.sede === sede && c.aliado === aliado && c.vehiculo === vehiculo; });
 }
+/* Ver requerimiento "Restricción de Horarios en Modales" (blindaje de cuotas, 2026-10-21): backend
+   authoritative de la misma restricción que ya aplica el picker de #turnoHora (ver initTimePicker) -- la
+   hora programada debe coincidir EXACTO con una franja contratada (cantidad > 0) de esa sede+aliado+
+   vehículo+día, sin importar si vino del picker, de un reintento, o de cualquier otro camino. Nunca
+   restringe: Cuotas inactivas para el país, Flota Propia, domingo (sin matriz ese día, ver diaSemanaKey),
+   ni un vehículo SIN NINGUNA fila en la matriz (tipología no habilitada en absoluto -- eso lo resuelve su
+   propio flujo de excepción, nunca este bloqueo). */
+function horaPerteneceAFranjaContratada(sede, aliado, vehiculo, hora, fecha) {
+  var country = countryForSede(sede);
+  if (!cuotasActivoPais(country) || esFlotaPropia(aliado)) return true;
+  var dia = diaSemanaKey(fecha);
+  if (!dia) return true;
+  var matriz = fecha === TODAY_STR ? state.cuotasMatrizVigenteHoy : state.cuotasMatriz;
+  var tieneAlgunaFilaVehiculo = matriz.some(function (c) { return c.sede === sede && c.aliado === aliado && c.vehiculo === vehiculo; });
+  if (!tieneAlgunaFilaVehiculo) return true;
+  return matriz.some(function (c) { return c.sede === sede && c.aliado === aliado && c.dia === dia && c.vehiculo === vehiculo && c.franja === hora && c.cantidad > 0; });
+}
 /* Único punto de control de "requiere aprobación de Planner" (ver submitTurno) — dos causales bajo el mismo
    interruptor por país (cuotasActivoPais): 1) la fecha es festivo en el país de la bodega, 2) el cupo
    asignado ya está cubierto (checkCuotaExceso). Festivo tiene prioridad de mensaje si ambas causales
@@ -13780,16 +13797,64 @@ function initTimePicker(inputId) {
     return '<button type="button" data-m="' + m + '">' + String(m).padStart(2, '0') + '</button>';
   }).join('');
 
+  /* FIX "Restricción de Horarios en Modales" (blindaje de cuotas, 2026-10-21): exclusivo de #turnoHora (único
+     uso de este picker en todo el proyecto, ver initTimePicker('turnoHora') -- acoplarse directo a
+     #turnoSede/#turnoVehiculo aquí no afecta a ningún otro picker). Con Cuotas activas para el país de la
+     sede elegida, el Aliado no es Flota Propia, y el vehículo elegido SÍ tiene al menos una fila en la
+     matriz (si no tiene ninguna, es "tipología no habilitada" -- lo maneja su propio flujo de excepción, el
+     picker se deja libre para no bloquear esa solicitud), el picker deja de ser libre: solo se pueden
+     seleccionar horas que coincidan EXACTO con una franja contratada (cantidad > 0) de esa sede+vehículo+día.
+     Se recalcula en cada apertura del panel (abrir(), más abajo) -- no hace falta escuchar 'change' de sede/
+     vehículo por separado, porque para cuando el Aliado abre el reloj esos campos ya están resueltos (por
+     defecto o por "Cargar Rápido — Mensajero Recurrente", que tampoco dispara 'change'). */
+  var franjasValidas = null; // null = picker libre; array (incluso vacío) = restringido
+  function calcularFranjasValidas() {
+    if (!canDo('schedule.aliado.manage') || !state.user.aliado) return null;
+    var sedeSelVal = document.getElementById('turnoSede') ? document.getElementById('turnoSede').value : '';
+    var vehSelVal = document.getElementById('turnoVehiculo') ? document.getElementById('turnoVehiculo').value : '';
+    if (!sedeSelVal || !vehSelVal) return null;
+    var country = countryForSede(sedeSelVal);
+    if (!cuotasActivoPais(country) || esFlotaPropia(state.user.aliado)) return null;
+    var fechaPicker = state.progDay === 'tomorrow' ? TOMORROW_STR : TODAY_STR;
+    var dia = diaSemanaKey(fechaPicker);
+    if (!dia) return null; // domingo: sin matriz ese día, Recurso Adicional libre como siempre
+    var matrizPicker = fechaPicker === TODAY_STR ? state.cuotasMatrizVigenteHoy : state.cuotasMatriz;
+    var filasVehiculo = matrizPicker.filter(function (c) { return c.sede === sedeSelVal && c.aliado === state.user.aliado && c.vehiculo === vehSelVal; });
+    if (!filasVehiculo.length) return null; // tipología no habilitada en absoluto -- lo resuelve su propio flujo de excepción
+    return filasVehiculo.filter(function (c) { return c.dia === dia && c.cantidad > 0; }).map(function (c) { return c.franja; });
+  }
+  function horaEsValida(h, m) {
+    if (!franjasValidas) return true;
+    var hhmm = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+    return franjasValidas.indexOf(hhmm) !== -1;
+  }
+
   function marcarSeleccion() {
-    colHora.querySelectorAll('button').forEach(function (b) { b.classList.toggle('selected', Number(b.dataset.h) === pendiente.h); });
-    colMin.querySelectorAll('button').forEach(function (b) { b.classList.toggle('selected', Number(b.dataset.m) === pendiente.m); });
+    colHora.querySelectorAll('button').forEach(function (b) {
+      var hNum = Number(b.dataset.h);
+      var habilitada = !franjasValidas || franjasValidas.some(function (f) { return Number(f.slice(0, 2)) === hNum; });
+      b.disabled = !habilitada;
+      b.classList.toggle('selected', hNum === pendiente.h);
+    });
+    colMin.querySelectorAll('button').forEach(function (b) {
+      var mNum = Number(b.dataset.m);
+      b.disabled = !horaEsValida(pendiente.h, mNum);
+      b.classList.toggle('selected', mNum === pendiente.m);
+    });
   }
   colHora.addEventListener('click', function (e) {
-    var b = e.target.closest('button'); if (!b) return;
-    pendiente.h = Number(b.dataset.h); marcarSeleccion();
+    var b = e.target.closest('button'); if (!b || b.disabled) return;
+    pendiente.h = Number(b.dataset.h);
+    /* Al cambiar de hora en modo restringido, el minuto pendiente puede dejar de ser válido -- se reasigna
+       al primer minuto válido de esa hora (siempre existe al menos uno, ver filtrado de franjasValidas). */
+    if (franjasValidas && !horaEsValida(pendiente.h, pendiente.m)) {
+      var primeraFranjaDeEstaHora = franjasValidas.find(function (f) { return Number(f.slice(0, 2)) === pendiente.h; });
+      if (primeraFranjaDeEstaHora) pendiente.m = Number(primeraFranjaDeEstaHora.slice(3, 5));
+    }
+    marcarSeleccion();
   });
   colMin.addEventListener('click', function (e) {
-    var b = e.target.closest('button'); if (!b) return;
+    var b = e.target.closest('button'); if (!b || b.disabled) return;
     pendiente.m = Number(b.dataset.m); marcarSeleccion();
   });
 
@@ -13822,6 +13887,15 @@ function initTimePicker(inputId) {
   function abrir() {
     var actual = input.value ? input.value.split(':') : null;
     if (actual) { pendiente.h = parseInt(actual[0], 10); pendiente.m = parseInt(actual[1], 10); }
+    franjasValidas = calcularFranjasValidas();
+    /* Si el valor actual del campo ya no corresponde a una franja contratada (p. ej. el default "08:00" de
+       un alta nueva, o un vehículo recién cambiado), se reencuadra a la primera franja válida -- así el
+       Aliado nunca ve el picker completo en gris sin ninguna hora marcada. */
+    if (franjasValidas && franjasValidas.length && !horaEsValida(pendiente.h, pendiente.m)) {
+      var primeraFranjaValida = franjasValidas.slice().sort()[0];
+      pendiente.h = Number(primeraFranjaValida.slice(0, 2));
+      pendiente.m = Number(primeraFranjaValida.slice(3, 5));
+    }
     marcarSeleccion();
     panel.hidden = false;
     posicionar();
@@ -13982,6 +14056,19 @@ function submitTurno(e) {
       reactivarBotonGuardar();
       return;
     }
+  }
+  /* Ver requerimiento "Restricción de Horarios en Modales" (blindaje de cuotas, 2026-10-21): backend
+     authoritative -- rechaza de raíz cualquier alta nueva cuya hora NO coincida con una franja contratada
+     (cantidad > 0) para esta sede+aliado+vehículo+día, sin importar si vino del picker restringido (ver
+     initTimePicker) o de cualquier otro camino. Va DESPUÉS del flujo de excepción de tipología (arriba) --
+     un vehículo sin ninguna fila en la matriz sigue su propio camino de excepción, nunca este rechazo. Con
+     esto, "Descalce de Franja" deja de poder originarse en un alta nueva vía Programar Flota: la única forma
+     de superar la cuota pasa a ser exclusivamente un +1 Adicional dentro de una franja YA contratada. */
+  if (modo === 'create' && !pendiente && !horaPerteneceAFranjaContratada(sede, state.user.aliado, vehiculo, hora, fecha)) {
+    toast('warn', 'Hora fuera de la matriz de cuotas',
+      'La hora seleccionada no corresponde a una franja contratada para esta sede y tipo de vehículo. Elige una franja válida en el selector de hora.');
+    reactivarBotonGuardar();
+    return;
   }
   /* Módulo Cuotas de Flota (si está activo para el país de la bodega, ver Configuración/Admin en Cuotas de
      Flota): un alta nueva que exceda la cuota asignada, o que caiga en un día festivo del país, SÍ se crea
@@ -14229,6 +14316,15 @@ function submitTurno(e) {
               return;
             }
           }
+        }
+        /* Ver requerimiento "Restricción de Horarios en Modales" (mismo criterio que en create, ver más
+           arriba): si la hora o el vehículo de destino cambian, la combinación resultante debe coincidir con
+           una franja contratada real. */
+        if (route.fecha === TOMORROW_STR && (route.hora !== hora || route.vehiculo !== vehiculo) && !horaPerteneceAFranjaContratada(route.sede, state.user.aliado, vehiculo, hora, route.fecha)) {
+          toast('warn', 'Hora fuera de la matriz de cuotas',
+            'La hora seleccionada no corresponde a una franja contratada para esta sede y tipo de vehículo. Elige una franja válida en el selector de hora.');
+          reactivarBotonGuardar();
+          return;
         }
         /* Ver requerimiento "Optimización: Trazabilidad en Historial...", punto 1c (Reasignaciones/Cambios:
            mensajero, vehículo, placa o tipo de flota): esta edición directa (fuera del flujo formal de
