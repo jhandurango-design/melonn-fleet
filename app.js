@@ -13989,6 +13989,38 @@ function submitTurno(e) {
      (ver evaluarAprobacionCuota/computeEstado) hasta que Planner/Admin la apruebe o rechace desde
      "Aprobaciones de Cuotas y Festivos" en Solicitudes y Cambios (ver aprobarCuotaPlanner/rechazarCuotaPlanner). */
   if (modo === 'create') {
+    /* Ver requerimiento "Secuencia Obligatoria por Horario" (reporte Cordiandina, Bogotá #2/Medellín #2,
+       2026-10-21): blindaje adicional a la Regla 1 de "Control de Cuotas Base vs. Adicionales" -- Regla 1
+       (ver más abajo) solo bloquea un Adicional cuando excede la cuota GLOBAL del día; el "Descalce de
+       Franja" (ver evaluarAprobacionCuota/checkCuotaExceso, diseño previo a este requerimiento) seguía
+       permitiendo saltarse una franja incompleta mientras el global tuviera espacio -- por diseño explícito
+       anterior ("el turno SÍ se registra igual, nunca bloquea"). Caso real: Cordiandina dejó la franja de
+       10:30 AM en 1/2 y citó directo una van a las 11:30 AM, sin tocar nunca la causal 'cupo' porque el
+       global aún tenía espacio. El Planner pidió cerrar ese salto por completo para Mañana: NINGÚN turno
+       (incluida la franja exacta que se esté registrando, exceda o no el global, y sin importar si es un
+       alta con mensajero real o "Pendiente / Por Confirmar") puede registrarse en una franja si CUALQUIER
+       franja ANTERIOR del mismo día (misma sede+aliado) sigue por debajo de su propia cuota. Va como lo
+       PRIMERO del bloque 'create' -- antes incluso de tipología/cuota -- porque es un bloqueo de secuencia
+       puro, independiente de esas otras causales. Exclusivo de Mañana (franja1 Regla 1 también lo es);
+       franjaForHora puede devolver null si la hora elegida no coincide con ninguna franja configurada (p.
+       ej. tipología sin habilitar) -- en ese caso se deja pasar sin bloquear aquí, el flujo de excepción de
+       tipología (más abajo) es quien decide. */
+    if (fecha === TOMORROW_STR) {
+      var franjaDeEsteTurno = franjaForHora(hora, countryForSede(sede));
+      if (franjaDeEsteTurno) {
+        var progresoSedeSecuencia = cuotasProgresoPorSede(state.user.aliado, fecha).find(function (p) { return p.sede === sede; });
+        var franjaAnteriorIncompleta = progresoSedeSecuencia && progresoSedeSecuencia.franjas
+          .filter(function (f) { return f.franja < franjaDeEsteTurno && f.cuota > 0; })
+          .sort(function (a, b) { return a.franja.localeCompare(b.franja); })
+          .find(function (f) { return f.actuales < f.cuota; });
+        if (franjaAnteriorIncompleta) {
+          toast('warn', 'Completa la franja anterior primero',
+            'Debes completar los cupos de las ' + fmtTime12(franjaAnteriorIncompleta.franja) + ' antes de programar en franjas posteriores.');
+          reactivarBotonGuardar();
+          return;
+        }
+      }
+    }
     /* Ver requerimiento "Control de Cuotas Base vs. Adicionales", Regla 2 (Hoy): se evalúa como lo PRIMERO
        dentro de 'create' -- ANTES de tipología/cuota -- porque un alta de hoy que también dispare
        aprobación de Planner (cupo ya excedido, festivo, tipología no habilitada) termina siempre en un
