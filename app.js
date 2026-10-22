@@ -17489,6 +17489,17 @@ function cuotasProgresoPorSede(aliado, fecha) {
     porSede[s].descalce = state.turnos.some(function (r) {
       return r.sede === s && r.fecha === fecha && r.descalceFranjaAlerta && getMensajero(r.mensajeroId).aliado === aliado;
     });
+    /* FIX "Desfase de conteo en Avance de Cuotas" (reporte en vivo, Bogotá #2 - Montevideo): `actuales` se
+       armaba SOLO sumando turnosProgramadosCount por cada franja que existe en la matriz contratada -- un
+       turno real cuya hora cae en una franja SIN fila en la matriz (p. ej. cuota 0/no configurada para ese
+       aliado+sede+franja) quedaba totalmente invisible para el total, aunque sí es un recurso real
+       desplegado ese día (caso real: turno de 08:00 sin cuota configurada en una sede que sí tiene cuota a
+       las 08:30/09:30/15:30 -- 3 turnos reales en pantalla, el widget mostraba "2/8"). checkCuotaGlobalExceso
+       (el que de verdad bloquea, ver evaluarAprobacionCuota) ya usaba turnosProgramadosGlobalCount -- el
+       conteo GLOBAL real, sin pasar por la matriz -- así que el total mostrado quedaba desalineado con la
+       lógica real de bloqueo. Se sobreescribe aquí con el mismo conteo real, cierra la brecha entre lo que
+       se ve y lo que de verdad cuenta. */
+    porSede[s].actuales = turnosProgramadosGlobalCount(s, aliado, fecha);
   });
   return Object.keys(porSede).sort().map(function (s) { return porSede[s]; });
 }
@@ -17630,7 +17641,13 @@ function renderProgCuotasResumen() {
       return '<div class="cuotas-resumen-chip ' + claseChip + '"' + tipDescalce + '>' +
         '<span>' + p.sede + ': ' + etiqueta + cuotasSobrecupoBadgeHtml(p.actuales, p.cuota) + notaPendientes + '</span>' +
         desglose +
-        (cubierto ? '' : ('<button type="button" class="btn-link" data-act="completar-cuota-pendiente" data-sede="' + p.sede + '">Faltan ' + faltan + ' — Completar con Pendiente/Por Confirmar</button>')) +
+        /* FIX "Remover botón obsoleto" (reporte en vivo): el atajo manual "Faltan X — Completar con
+           Pendiente/Por Confirmar" se retira de la UI -- el cierre de cupos pendientes ya es 100%
+           automático (ver cierreCuotasNocturnoSweep, misma lógica exacta que usaba este botón) y cualquier
+           gestión manual de un "Pendiente / Por Confirmar" pasa por el modal de creación de turno
+           correspondiente. El manejador `completar-cuota-pendiente` se deja intacto en el dispatcher de
+           clics (sin wiring, por si se necesita reactivar desde otro punto en el futuro) -- solo se quita
+           este botón. */
         '</div>';
     }).join('') + '</div>';
 }
