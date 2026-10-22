@@ -14009,8 +14009,14 @@ function submitTurno(e) {
       var franjaDeEsteTurno = franjaForHora(hora, countryForSede(sede));
       if (franjaDeEsteTurno) {
         var progresoSedeSecuencia = cuotasProgresoPorSede(state.user.aliado, fecha).find(function (p) { return p.sede === sede; });
+        /* AJUSTE (auditoría Barranquilla/Cordiandina, 2026-10-21): la secuencia solo mira franjas ANTERIORES
+           del MISMO vehículo/tipo de flota que se está registrando -- no toda la sede. Tipologías como
+           "Dedicado Rappi" operan aparte (otro canal/contrato, no comparable a Moto/Van's) y nunca deberían
+           bloquear el registro de otra flota solo por tener su propia franja incompleta. Caso real: Cordiandina
+           no pudo registrar las 15:30 PM (Moto Estándar, cuota ya al día en 08:30) porque las 08:00 AM
+           (Dedicado Rappi, otra tipología por completo) seguían en 0/1. */
         var franjaAnteriorIncompleta = progresoSedeSecuencia && progresoSedeSecuencia.franjas
-          .filter(function (f) { return f.franja < franjaDeEsteTurno && f.cuota > 0; })
+          .filter(function (f) { return f.franja < franjaDeEsteTurno && f.cuota > 0 && f.vehiculo === vehiculo; })
           .sort(function (a, b) { return a.franja.localeCompare(b.franja); })
           .find(function (f) { return f.actuales < f.cuota; });
         if (franjaAnteriorIncompleta) {
@@ -14209,8 +14215,11 @@ function submitTurno(e) {
           var franjaDestinoEdicion = franjaForHora(hora, countryForSede(route.sede));
           if (franjaDestinoEdicion) {
             var progresoSedeEdicion = cuotasProgresoPorSede(state.user.aliado, route.fecha).find(function (p) { return p.sede === route.sede; });
+            /* Mismo ajuste que en create (ver comentario ahí): la secuencia solo compara franjas anteriores
+               del MISMO vehículo/tipo de flota destino -- nunca contra tipologías distintas (p. ej. Dedicado
+               Rappi) que operan por fuera del flujo normal. */
             var franjaAnteriorIncompletaEdicion = progresoSedeEdicion && progresoSedeEdicion.franjas
-              .filter(function (f) { return f.franja < franjaDestinoEdicion && f.cuota > 0; })
+              .filter(function (f) { return f.franja < franjaDestinoEdicion && f.cuota > 0 && f.vehiculo === vehiculo; })
               .sort(function (a, b) { return a.franja.localeCompare(b.franja); })
               .find(function (f) { return f.actuales < f.cuota; });
             if (franjaAnteriorIncompletaEdicion) {
