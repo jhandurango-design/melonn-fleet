@@ -2242,8 +2242,9 @@ const state = {
   /* Instantánea de la Cuota Vigente congelada para HOY (ver requerimiento "Aplicación a Futuro de Cambios y
      Banner Informativo Visual") — se inicializa al cargar la app (ver DOMContentLoaded, ANTES de que Admin
      pueda editar nada) y solo cuotasAutoSwapVigencia() la vuelve a tocar; guardarCuotasMatriz() NUNCA la
-     modifica. checkCuotaExceso/cuotasComplianceRecords la usan para fecha === TODAY_STR en vez de cuotasMatriz
-     en vivo, para que una edición recién guardada no altere el control de cupos del día en curso. */
+     modifica. checkCuotaExceso/cuotasProgresoPorSede/cuotasProgresoPorAliadoHoy/cuotasProgresoPorBodegaYAliadoHoy
+     la usan para fecha === TODAY_STR en vez de cuotasMatriz en vivo, para que una edición recién guardada no
+     altere el control de cupos del día en curso. */
   cuotasMatrizVigenteHoy: [],
   /* null = "todavía sin inicializar" (arranca en una bodega/aliado concreto vía refreshCuotasSedeOptions/
      refreshCuotasAliadoOptions, igual que siempre); '' es un valor DISTINTO y deliberado que el usuario solo
@@ -3217,8 +3218,8 @@ function cuotaAsignada(sede, aliado, dia, franja, vehiculo) {
 /* Cuota "congelada para hoy" (ver requerimiento "Aplicación a Futuro de Cambios y Banner Informativo
    Visual") — misma forma que cuotaAsignada pero lee state.cuotasMatrizVigenteHoy en vez de cuotasMatriz en
    vivo: una edición guardada HOY sobre la Cuota Vigente no debe alterar el control de cupos de las citas del
-   día en curso, solo desde mañana. Único consumidor: checkCuotaExceso/cuotasComplianceRecords para
-   fecha === TODAY_STR; cualquier otra fecha usa cuotaAsignada (en vivo) sin cambios. */
+   día en curso, solo desde mañana. Consumidores: checkCuotaExceso (fecha === TODAY_STR) y la detección de
+   diferencias de cuotasVigenteTienePendiente; cualquier otra fecha usa cuotaAsignada (en vivo) sin cambios. */
 function cuotaAsignadaVigenteHoy(sede, aliado, dia, franja, vehiculo) {
   var row = state.cuotasMatrizVigenteHoy.find(function (c) { return c.sede === sede && c.aliado === aliado && c.dia === dia && c.franja === franja && c.vehiculo === vehiculo; });
   return row ? row.cantidad : 0;
@@ -7410,6 +7411,40 @@ function renderConsolidado() {
      tarjeta activo al entrar a este modo: sin tarjetas que mostrarlo, no debe quedar un sub-filtro fantasma
      acotando la tabla. */
   document.getElementById('consolMetrics').hidden = enModoHistorial;
+  /* Ver requerimiento "Reorganización Visual del Avance de Cuotas": panel "Avance de Cuotas por Aliado — Hoy"
+     -- mismo patrón/markup que renderConsolidadoManana (Avance y Carga T+1), pero sobre TODAY_STR/
+     cuotasMatrizVigenteHoy y reutilizando el filtro de Bodega YA existente de esta vista
+     (state.consolFiltroBodega), sin ningún filtro nuevo. Oculto y vaciado por completo en "Historial del Mes",
+     mismo criterio que consolMetrics (líneas arriba). */
+  var panelHoy = document.getElementById('consolHoyCompliancePanel');
+  if (panelHoy) {
+    panelHoy.hidden = enModoHistorial;
+    if (enModoHistorial) {
+      document.getElementById('consolHoyComplianceChips').innerHTML = '';
+      document.getElementById('consolHoyComplianceEmpty').classList.remove('show');
+    } else {
+      var chipsHoyEl = document.getElementById('consolHoyComplianceChips');
+      var huboResultadosHoy;
+      if (!state.consolFiltroBodega) {
+        var gruposHoy = cuotasProgresoPorBodegaYAliadoHoy();
+        var htmlHoy = '';
+        gruposHoy.forEach(function (g) {
+          if (!g.aliados.length) return;
+          htmlHoy += '<div class="consol-man-grupo-bodega"><p class="consol-man-grupo-titulo">📍 ' + g.sede + '</p>' +
+            '<div class="cuotas-resumen-chips">' + g.aliados.map(consolManChipHtml).join('') + '</div></div>';
+        });
+        chipsHoyEl.className = 'consol-man-chips-agrupadas';
+        chipsHoyEl.innerHTML = htmlHoy;
+        huboResultadosHoy = !!htmlHoy;
+      } else {
+        var progresoHoy = cuotasProgresoPorAliadoHoy(state.consolFiltroBodega);
+        chipsHoyEl.className = 'cuotas-resumen-chips';
+        chipsHoyEl.innerHTML = progresoHoy.map(consolManChipHtml).join('');
+        huboResultadosHoy = progresoHoy.length > 0;
+      }
+      document.getElementById('consolHoyComplianceEmpty').classList.toggle('show', !huboResultadosHoy);
+    }
+  }
   /* Ver requerimiento "Corrección Crítica de Bugs...", punto 2: el aviso "💡 Para modificar..." se retira POR
      COMPLETO de Consolidado -- Planner ya tiene sus propias herramientas directas (Exonerar/Revertir Estado)
      ahí mismo, sin necesitar que se le redirija a Solicitudes y Cambios. Vive EXCLUSIVAMENTE en "Programación"
@@ -17622,23 +17657,10 @@ function cancelarCuotaProxima() {
     }
   });
 }
-/* Avance de cumplimiento de hoy — mismo par sede+aliado seleccionado arriba, para mantener el contexto de
-   la matriz y la tabla siempre coherentes. "Pendiente por Programar" reutiliza el badge/estilo "pending"
-   que ya usa el resto de la plataforma (ver ESTADOS.pending) en vez de inventar un estado nuevo. */
-/* Lee cuotasMatrizVigenteHoy (la instantánea congelada para HOY, ver requerimiento "Aplicación a Futuro de
-   Cambios"), no cuotasMatriz en vivo — el "Avance de Cumplimiento" de hoy debe reflejar exactamente la misma
-   cuota que de verdad se está aplicando en checkCuotaExceso para las citas de hoy, no un cupo recién editado
-   que todavía no rige. */
-function cuotasComplianceRecords(sede, aliado) {
-  var dia = diaSemanaKey(TODAY_STR);
-  if (!dia || !sede || !aliado) return [];
-  return state.cuotasMatrizVigenteHoy.filter(function (c) { return c.sede === sede && c.aliado === aliado && c.dia === dia; })
-    .map(function (c) { return { sede: c.sede, aliado: c.aliado, vehiculo: c.vehiculo, franja: c.franja, cantidad: c.cantidad, actuales: turnosProgramadosCount(c.sede, c.aliado, TODAY_STR, c.franja, c.vehiculo) }; });
-}
-/* Ver requerimiento "Integración y Reglas de Cuotas en Programar Flota": mismo motor que
-   cuotasComplianceRecords (checkCuotaExceso/cuotaAsignada), pero agregado por SEDE (sumando todas las
-   franjas/vehículos del día) y para TODAS las bodegas donde este aliado tiene cuota -- no solo el par
-   sede+aliado puntual que esté seleccionado en el módulo de Cuotas. Hoy usa la instantánea vigente congelada
+/* Ver requerimiento "Integración y Reglas de Cuotas en Programar Flota": mismo motor que checkCuotaExceso/
+   cuotaAsignada, pero agregado por SEDE (sumando todas las franjas/vehículos del día) y para TODAS las
+   bodegas donde este aliado tiene cuota -- no solo el par sede+aliado puntual que esté seleccionado en el
+   módulo de Cuotas. Hoy usa la instantánea vigente congelada
    (cuotasMatrizVigenteHoy), igual que el resto de la plataforma; cualquier otra fecha (Mañana) usa la matriz
    en vivo -- mismo criterio que evaluarAprobacionCuota/checkCuotaExceso. Bodegas sin Cuotas activas para su
    país quedan fuera por completo (ninguna de estas reglas aplica si el módulo está apagado). */
@@ -17765,6 +17787,66 @@ function cuotasProgresoPorBodegaYAliadoManana() {
     return { sede: sede, aliados: aliados };
   });
 }
+/* Ver requerimiento "Reorganización Visual del Avance de Cuotas": equivalentes exactos de
+   cuotasProgresoPorAliadoManana/cuotasProgresoPorBodegaYAliadoManana, pero para HOY — motor del panel
+   "Avance de Cuotas por Aliado — Hoy" en Consolidado/Operación del Día (PLANNER). Usa cuotasMatrizVigenteHoy
+   (la instantánea congelada para hoy, nunca cuotasMatriz en vivo) y TODAY_STR, mismo criterio que ya usa
+   cuotasProgresoPorSede para no desalinearse de checkCuotaExceso (ver ese comentario). */
+function cuotasProgresoPorAliadoHoy(sedeFiltro) {
+  var dia = diaSemanaKey(TODAY_STR);
+  if (!dia) return [];
+  var porAliado = {};
+  var sedesPorAliado = {};
+  state.cuotasMatrizVigenteHoy.forEach(function (c) {
+    if (c.dia !== dia || c.cantidad <= 0) return;
+    if (!cuotasActivoPais(countryForSede(c.sede))) return;
+    if (sedeFiltro && c.sede !== sedeFiltro) return;
+    if (!porAliado[c.aliado]) { porAliado[c.aliado] = { aliado: c.aliado, sede: sedeFiltro || null, cuota: 0, actuales: 0, franjas: [] }; sedesPorAliado[c.aliado] = {}; }
+    var actualesFranjaHoy = turnosProgramadosCount(c.sede, c.aliado, TODAY_STR, c.franja, c.vehiculo);
+    porAliado[c.aliado].cuota += c.cantidad;
+    porAliado[c.aliado].actuales += actualesFranjaHoy;
+    if (sedeFiltro) porAliado[c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaHoy });
+    sedesPorAliado[c.aliado][c.sede] = true;
+  });
+  Object.keys(porAliado).forEach(function (a) {
+    var sedesDeEsteAliado = Object.keys(sedesPorAliado[a]);
+    porAliado[a].franjas.sort(function (x, y) { return x.franja < y.franja ? -1 : 1; });
+    porAliado[a].descalce = state.turnos.some(function (r) {
+      return r.fecha === TODAY_STR && r.descalceFranjaAlerta && sedesDeEsteAliado.indexOf(r.sede) !== -1 && getMensajero(r.mensajeroId).aliado === a &&
+        !horaPerteneceAFranjaContratada(r.sede, a, r.vehiculo, r.hora, r.fecha);
+    });
+    porAliado[a].actuales = sedesDeEsteAliado.reduce(function (sum, s) { return sum + turnosProgramadosGlobalCount(s, a, TODAY_STR); }, 0);
+  });
+  return Object.keys(porAliado).sort().map(function (a) { return porAliado[a]; });
+}
+function cuotasProgresoPorBodegaYAliadoHoy() {
+  var dia = diaSemanaKey(TODAY_STR);
+  if (!dia) return [];
+  var porSede = {};
+  state.cuotasMatrizVigenteHoy.forEach(function (c) {
+    if (c.dia !== dia || c.cantidad <= 0) return;
+    if (!cuotasActivoPais(countryForSede(c.sede))) return;
+    if (!porSede[c.sede]) porSede[c.sede] = {};
+    if (!porSede[c.sede][c.aliado]) porSede[c.sede][c.aliado] = { aliado: c.aliado, sede: c.sede, cuota: 0, actuales: 0, franjas: [] };
+    var actualesFranjaBAH = turnosProgramadosCount(c.sede, c.aliado, TODAY_STR, c.franja, c.vehiculo);
+    porSede[c.sede][c.aliado].cuota += c.cantidad;
+    porSede[c.sede][c.aliado].actuales += actualesFranjaBAH;
+    porSede[c.sede][c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaBAH });
+  });
+  return Object.keys(porSede).sort().map(function (sede) {
+    var aliados = Object.keys(porSede[sede]).sort().map(function (a) {
+      var rec = porSede[sede][a];
+      rec.franjas.sort(function (x, y) { return x.franja < y.franja ? -1 : 1; });
+      rec.descalce = state.turnos.some(function (r) {
+        return r.sede === sede && r.fecha === TODAY_STR && r.descalceFranjaAlerta && getMensajero(r.mensajeroId).aliado === a &&
+          !horaPerteneceAFranjaContratada(r.sede, a, r.vehiculo, r.hora, r.fecha);
+      });
+      rec.actuales = turnosProgramadosGlobalCount(sede, a, TODAY_STR);
+      return rec;
+    });
+    return { sede: sede, aliados: aliados };
+  });
+}
 /* Widget de avance de cuotas al tope de Programar Flota -- oculto por completo si Cuotas no está activo
    para ninguna de las bodegas de este aliado en la fecha activa (Hoy/Mañana). Cada bodega con déficit
    ofrece un atajo directo a "Nuevo Turno" con Pendiente/Por Confirmar ya marcado para esa sede (ver
@@ -17846,19 +17928,6 @@ function renderProgCuotasResumen() {
            este botón. */
         '</div>';
     }).join('') + '</div>';
-}
-function cuotasComplianceRowHtml(rec) {
-  /* Ver requerimiento "Semaforización Visual por Estado", aplicado también al badge de franja de esta tabla
-     (antes binario Cubierto/Pendiente): Completo (verde), A medias -- al menos 1 recurso pero incompleto
-     (ámbar), Sin iniciar -- cero recursos (rojo, badge-critical). */
-  var estadoFranjaRec = cuotasEstadoManana(rec.actuales, rec.cantidad);
-  var estado = estadoFranjaRec === 'ok'
-    ? '<span class="badge badge-dispatched"><i></i>Cubierto</span>'
-    : estadoFranjaRec === 'vacio'
-      ? '<span class="badge badge-critical"><i></i>Sin iniciar (' + rec.cantidad + ')</span>'
-      : '<span class="badge badge-pending"><i></i>Pendiente por Programar (' + (rec.cantidad - rec.actuales) + ')</span>';
-  var vehiculoLabel = cuotasVehiculoLabel(rec.vehiculo, countryForSede(rec.sede));
-  return '<tr><td>' + rec.sede + '</td><td>' + rec.aliado + '</td><td>' + escapeHtml(vehiculoLabel) + '</td><td>' + fmtTime12(rec.franja) + '</td><td>' + rec.cantidad + '</td><td>' + rec.actuales + '</td><td>' + estado + '</td></tr>';
 }
 /* Cabecera formal tipo "comunicado oficial": nombre del Proveedor/Aliado y fechas de vigencia de la semana
    operativa vigente. Exclusivo Colombia (ver requerimiento "Vista México — Resumida y Minimalista": México
@@ -17964,31 +18033,6 @@ function cancelarEdicionCuotasBanner() {
   state.cuotasBannerEditing = false;
   renderCuotasBanner();
 }
-/* Resumen de cumplimiento agrupado — exclusivo Colombia (ver requerimiento "el conteo global de
-   cumplimiento agrupa todas las categorías de Motos"). Es una AGREGACIÓN de presentación sobre los mismos
-   registros ya calculados por cuotasComplianceRecords/turnosProgramadosCount: suma cuota y programados de
-   las filas cuyo vehículo contiene "Moto" (mismo criterio que usa el resto de la plataforma, ver línea con
-   route.vehiculo.indexOf('Moto')) frente a las filas de Van's — sin recalcular ni tocar el motor. */
-function cuotasResumenGrupoHtml(sede, aliado, complianceList) {
-  if (!sede || !aliado || countryForSede(sede) !== 'CO' || !complianceList.length) return '';
-  var motos = { cuota: 0, actuales: 0 }, vans = { cuota: 0, actuales: 0 };
-  complianceList.forEach(function (rec) {
-    var grupo = rec.vehiculo.indexOf('Moto') !== -1 ? motos : vans;
-    grupo.cuota += rec.cantidad; grupo.actuales += rec.actuales;
-  });
-  function grupoHtml(nombre, g) {
-    if (g.cuota === 0 && g.actuales === 0) return '';
-    var estado = g.actuales >= g.cuota ? 'badge-dispatched' : 'badge-pending';
-    return '<div class="cuotas-leyenda-item"><strong>' + nombre + '</strong><span><span class="badge ' + estado + '"><i></i>' + g.actuales + ' / ' + g.cuota + '</span></span></div>';
-  }
-  var body = grupoHtml('Total Motos (todas las categorías)', motos) + grupoHtml('Total Van´s', vans);
-  if (!body) return '';
-  /* Vista ejecutiva: solo título + las dos tarjetas de contador — la descripción técnica secundaria se
-     retiró (ver requerimiento "Depuración y Control de Visibilidad por Roles"). Exclusivo Admin/Planner —
-     el rol Aliado ni siquiera llama a esta función (ver renderCuotas). */
-  return '<section class="panel"><p class="panel-title">Resumen de Cumplimiento Agrupado — Hoy</p>' +
-    '<div class="cuotas-leyenda">' + body + '</div></section>';
-}
 /* Edición explícita (ver requerimiento "Sección de Observaciones — Edición explícita"): exclusivo Admin, que
    por defecto ve el bloque en modo LECTURA (mismo texto plano que Planner/Aliado) con el botón-ícono "Editar"
    — solo al hacer clic se habilitan los <textarea> (poblados en ese momento, ver abrirEdicionCuotasObs) y
@@ -18080,7 +18124,20 @@ function renderCuotasTabs() {
   var tieneProxima = !!state.cuotasFechaProxima;
   var btnProxima = seg.querySelector('[data-cuotas-tab="proxima"]');
   var mostrarProxima = role === 'ADMIN' || tieneProxima;
-  if (btnProxima) btnProxima.hidden = !mostrarProxima;
+  /* Ver requerimiento "Pestaña 'Próxima Cuota' siempre visible": ya no se oculta por completo para Planner/
+     Aliado cuando no hay borrador -- queda siempre visible pero deshabilitada (mismo patrón ya usado por
+     "Calidad en ofrecimiento" en Cumplimiento y Calidad: class="disabled" + disabled + data-tip, CSS ya
+     existente .segmented button.disabled). Admin SIEMPRE queda habilitado sin importar tieneProxima -- es
+     quien debe poder entrar a una Próxima Cuota vacía para crearla (ver comentario de arriba, "necesita poder
+     crear una Próxima Cuota"); deshabilitarla también para Admin le bloquearía esa creación. */
+  if (btnProxima) {
+    btnProxima.hidden = false;
+    var deshabilitada = role !== 'ADMIN' && !tieneProxima;
+    btnProxima.disabled = deshabilitada;
+    btnProxima.classList.toggle('disabled', deshabilitada);
+    if (deshabilitada) btnProxima.setAttribute('data-tip', 'No hay próximas cuotas programadas actualmente.');
+    else btnProxima.removeAttribute('data-tip');
+  }
   if (!mostrarProxima && state.cuotasTab === 'proxima') state.cuotasTab = 'vigente';
   seg.querySelectorAll('button[data-cuotas-tab]').forEach(function (b) { b.classList.toggle('active', b.dataset.cuotasTab === state.cuotasTab); });
   var badge = document.getElementById('cuotasProximaBadge');
@@ -18172,15 +18229,6 @@ function renderCuotas() {
   renderCuotasBanner();
   renderCuotasMatriz();
   renderCuotasObservaciones();
-
-  var complianceList = cuotasComplianceRecords(sede, aliado);
-  document.getElementById('cuotasComplianceTbody').innerHTML = complianceList.map(cuotasComplianceRowHtml).join('');
-  document.getElementById('cuotasComplianceCount').textContent = complianceList.length;
-  document.getElementById('cuotasComplianceEmpty').classList.toggle('show', complianceList.length === 0);
-  /* Resumen de Cumplimiento Agrupado — oculto por completo para ALIADO (solo ve su propia tabla de Avance de
-     Cumplimiento, sin el KPI de control global); Admin/Planner lo conservan (ver requerimiento "Depuración y
-     Control de Visibilidad por Roles"). */
-  document.getElementById('cuotasResumenGrupo').innerHTML = role === 'ALIADO' ? '' : cuotasResumenGrupoHtml(sede, aliado, complianceList);
 
   var nota = document.getElementById('cuotasImpactoNota');
   if (!sede || !aliado) {
@@ -20547,6 +20595,7 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   document.querySelectorAll('#cuotasTabSegment button[data-cuotas-tab]').forEach(function (b) {
     b.addEventListener('click', function () {
+      if (b.disabled) return;
       state.cuotasTab = b.dataset.cuotasTab;
       resyncCuotasFechaProximaInput();
       renderCuotas();

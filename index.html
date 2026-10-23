@@ -596,6 +596,18 @@
 
           <section class="metrics" id="consolMetrics"></section>
 
+          <!-- Ver requerimiento "Reorganización Visual del Avance de Cuotas": equivalente de
+               #consolCuerpoManana > "Avance de Cuotas por Aliado — Mañana" (más abajo), pero para Hoy --
+               mismas clases .panel/.cuotas-resumen-chips/.empty-state, sin CSS nuevo. -->
+          <section class="panel" id="consolHoyCompliancePanel">
+            <p class="panel-title">Avance de Cuotas por Aliado — Hoy</p>
+            <div class="cuotas-resumen-chips" id="consolHoyComplianceChips"></div>
+            <div class="empty-state" id="consolHoyComplianceEmpty">
+              <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+              <div>Sin cuotas activas para hoy en el alcance seleccionado.</div>
+            </div>
+          </section>
+
           <section class="table-card">
             <div class="kpi-active-filter-bar" id="consolKpiActiveBar">
               <span class="kpi-active-filter-bar-text">Filtro activo: <strong class="kpi-active-filter-bar-value"></strong></span>
@@ -2177,27 +2189,6 @@
           </div>
         </section>
 
-        <div id="cuotasResumenGrupo"></div>
-
-        <section class="table-card" style="margin-top:20px;">
-          <div class="table-head">
-            <div>
-              <h2>Avance de Cumplimiento — Hoy</h2>
-              <div class="count"><span id="cuotasComplianceCount">0</span> combinaciones con cuota asignada</div>
-            </div>
-          </div>
-          <div class="table-scroll">
-            <table id="cuotasComplianceTable">
-              <thead>
-                <tr><th>Bodega</th><th>Aliado</th><th>Vehículo</th><th>Franja</th><th>Cuota</th><th>Programados</th><th>Estado</th></tr>
-              </thead>
-              <tbody id="cuotasComplianceTbody"></tbody>
-            </table>
-          </div>
-          <div class="empty-state" id="cuotasComplianceEmpty">
-            <div>Sin combinaciones de cuota vigentes para hoy en el alcance seleccionado.</div>
-          </div>
-        </section>
         <p class="config-help" id="cuotasImpactoNota" style="margin-top:12px;"></p>
       </section>
 
