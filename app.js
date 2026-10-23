@@ -9315,15 +9315,8 @@ function rowHtmlProg(route) {
     }
   }
   if (!actions) actions = '<span class="courier-sub">Solo lectura</span>';
-  /* Ver requerimiento "Integración de Placa y Botón de Copiado Rápido (Programar Flota, Aliado)": la placa
-     ya vivía en el subtexto del bloque Mensajero (no había columna independiente que eliminar); lo único que
-     faltaba era el botón de copiado rápido -- se reutiliza TAL CUAL el mismo componente genérico que ya usan
-     Consolidado/Despacho (misma clase .copy-btn, mismo data-act="copiar-info", misma copiarInfoMensajero()
-     en vez de una función nueva). */
   return '<tr data-route="' + route.id + '">' +
-    '<td><div class="courier"><div><div class="courier-name">' + m.nombre + '</div><div class="courier-sub">Placa ' + m.placa + ' · CÉDULA/INE ' + (m.cedula || '—') + ' · Tel ' + m.telefono + '</div><div class="courier-sub">' + (m.correo || '—') + '</div></div>' +
-      '<button class="copy-btn" data-act="copiar-info" data-id="' + route.id + '" data-tip="Copiar datos del mensajero">' + ICONS.copiar + '</button>' +
-      '</div></td>' +
+    '<td><div class="courier"><div><div class="courier-name">' + m.nombre + '</div><div class="courier-sub">Placa ' + m.placa + ' · CÉDULA/INE ' + (m.cedula || '—') + ' · Tel ' + m.telefono + '</div><div class="courier-sub">' + (m.correo || '—') + '</div></div></div></td>' +
     '<td>' + route.vehiculo + '</td>' +
     '<td>' + route.sede + '</td>' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
@@ -15187,15 +15180,7 @@ function copiarInfoMensajero(routeId) {
   var route = state.turnos.find(function (r) { return r.id === routeId; });
   if (!route) return;
   var m = getMensajero(route.mensajeroId);
-  /* Ver requerimiento "Integración de Placa y Botón de Copiado Rápido (Programar Flota, Aliado)": formato
-     multilínea (ficha técnica) en vez del formato de una sola línea separado por "|" -- este cambio de
-     formato aplica a los 3 llamadores de este mismo botón genérico (Consolidado, Despacho y ahora Programar
-     Flota), no solo a Programar Flota, para no forkear el componente en 2 formatos distintos. */
-  var texto = m.nombre + '\n' +
-    'Placa: ' + m.placa + '\n' +
-    'Cédula/INE: ' + m.cedula + '\n' +
-    'Tel: ' + m.telefono + '\n' +
-    'Correo: ' + m.correo;
+  var texto = 'Nombre: ' + m.nombre + ' | CÉDULA/INE: ' + m.cedula + ' | Tel: ' + m.telefono + ' | Placa: ' + m.placa + ' | Correo: ' + m.correo;
   var btn = document.querySelector('#view-' + state.currentView + ' .copy-btn[data-id="' + routeId + '"]');
   function marcarCopiado() {
     toast('ok', 'Copiado', 'Datos de ' + m.nombre + ' copiados al portapapeles.');
