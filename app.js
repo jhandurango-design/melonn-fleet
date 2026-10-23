@@ -8975,25 +8975,24 @@ function renderProgramacion() {
      exactamente la misma función (cargarFlotaHabitual/guardarFlotaHabitual/eliminarFlotaHabitual) vía el
      dispatcher global de [data-act], nunca un addEventListener propio (el menú se reconstruye desde cero en
      cada apertura, así que un listener atado al nodo viejo no sobreviviría).
-     Ver requerimiento "Estandarización Visual del Botón 'Acciones' y Orden de Botones": en Hoy el botón ya NO
-     se oculta (display:none) -- queda siempre visible pero deshabilitado (disabled + .disabled + data-tip,
-     mismo patrón exacto que btnProxima en renderCuotasTabs) para que el header no salte de alto/ancho al
-     alternar Hoy/Mañana, y para que quede ya preparado para habilitarse en Hoy si un flujo futuro lo requiere. */
+     Ver requerimiento "Estandarización Visual del Botón 'Acciones' y Orden de Botones" (aclaración del
+     usuario: el botón debe quedar OCULTO por completo en Hoy, no deshabilitado/gris): se oculta vía
+     `.hidden` (equivalente semántico de display:none, mismo mecanismo que btnProxima.hidden en
+     renderCuotasTabs) en vez de disabled+data-tip. No genera salto de alto en el header porque esa fila usa
+     align-items:flex-end y su altura ya la determina "+ Nuevo Turno" (.btn.btn-primary, siempre visible en
+     ambas pestañas) -- la ausencia del botón, más chico, no cambia la altura del contenedor. */
   var btnProgAcciones = document.getElementById('btnProgAcciones');
   var plantillaPropiaExiste = !!(state.flotaHabitual[state.user.aliado] && state.flotaHabitual[state.user.aliado].length);
-  var accionesDeshabilitadas = state.progDay !== 'tomorrow';
-  btnProgAcciones.disabled = accionesDeshabilitadas;
-  btnProgAcciones.classList.toggle('disabled', accionesDeshabilitadas);
-  if (accionesDeshabilitadas) {
-    btnProgAcciones.setAttribute('data-tip', 'Cargar, guardar o eliminar tu Flota Recurrente solo aplica para la Programación de mañana.');
-  } else {
-    btnProgAcciones.setAttribute('data-tip', 'Cargar, guardar o eliminar tu Flota Recurrente');
+  if (state.progDay === 'tomorrow') {
+    btnProgAcciones.hidden = false;
     btnProgAcciones.dataset.menuHtml =
       '<button type="button" data-act="prog-cargar-flota-habitual"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Cargar Flota Recurrente</button>' +
       '<button type="button" data-act="prog-guardar-flota-habitual"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Guardar como Flota Recurrente</button>' +
       (plantillaPropiaExiste
         ? '<button type="button" class="danger" data-act="prog-eliminar-flota-habitual"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 0V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2"/></svg>Eliminar Flota Recurrente</button>'
         : '');
+  } else {
+    btnProgAcciones.hidden = true;
   }
   renderProgBanner();
   renderProgCuotasResumen();

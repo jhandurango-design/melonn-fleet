@@ -904,12 +904,11 @@
                  Flota)": reutiliza AL PIE DE LA LETRA el estándar de la plataforma para botones "Acciones •••"
                  (class="row-menu-toggle", mismo texto/bullets que rowMenuToggleHtml en app.js -- antes usaba
                  "btn btn-ghost" + chevron propio, que es justo el bug ya documentado en styles.css de que ese
-                 botón "se veía blanco/neutro en vez de su lila/morado propio"). Ya NO se oculta por completo en
-                 Hoy (display:none) sino que queda siempre en el DOM y se deshabilita/habilita vía disabled +
-                 data-tip (ver renderProgramacion) -- mismo patrón que btnProxima en Cuotas -- así el contenedor
-                 nunca cambia de alto/contenido al alternar Hoy/Mañana, y la estructura ya queda lista para
-                 habilitarlo en Hoy si un flujo futuro lo requiere. Queda a la IZQUIERDA; "+ Nuevo Turno" a la
-                 derecha (orden solicitado). -->
+                 botón "se veía blanco/neutro en vez de su lila/morado propio"). Se oculta por completo en Hoy
+                 (.hidden, ver renderProgramacion -- ninguna de las 3 acciones del menú aplica ese día) sin
+                 generar salto de alto en el header: esa fila usa align-items:flex-end y su altura ya la
+                 determina "+ Nuevo Turno" (siempre visible en ambas pestañas), no este botón. Queda a la
+                 IZQUIERDA; "+ Nuevo Turno" a la derecha (orden solicitado). -->
             <button type="button" class="row-menu-toggle" id="btnProgAcciones" data-act="toggle-row-menu" data-id="prog-acciones" data-tip="Cargar, guardar o eliminar tu Flota Recurrente">Acciones&nbsp;&bull;&bull;&bull;</button>
             <!-- Ver requerimiento "Corrección Crítica de Bugs, Eliminación de Modal Incorrecto, Banners y
                  Control de Observaciones", punto 1: eliminado por completo el botón/flujo separado
