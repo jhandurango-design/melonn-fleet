@@ -8649,29 +8649,36 @@ function calculadorAdvanceSet(sede, fecha, franja, perfilId, valor) { state.calc
    REALES ya en state.turnos, "Mensajeros Programados" — ver auditoría previa "Diagnóstico: Calculador de
    Rutas"). Bajas sigue reduciendo directamente la Base (rutas que ya no se van a cubrir); Advance Noche
    sigue reduciendo lo que aún falta armar. Todo calculado dentro del propio tipo de vehículo — nunca se
-   resta el advance de un perfil contra el target de otro.
-   Math.max(0, ...) por pedido explícito del requerimiento: "Faltan" nunca baja de 0. Efecto colateral a
-   tener presente — calculadorBadge()/calculadorBrechaDisplay() todavía tienen su rama `brecha < 0` para
-   "⚠️ Sobrecupo" (ver "Bloque Final de Correcciones...", punto 4): con este clamp, calculadorBrecha() ya NUNCA
-   devuelve un negativo, así que esa rama queda inalcanzable — Sobrecupo deja de distinguirse de "Completo" en
-   la UI. Se deja el código de Sobrecupo intacto (no se borra) en vez de asumir que también debe eliminarse;
-   si se requiere seguir detectando Sobrecupo (Advance/Bajas superando lo realmente Programado), avisar para
-   decidir dónde debe vivir esa comparación por separado. */
+   resta el advance de un perfil contra el target de otro. Math.max(0, ...): "Faltan" nunca baja de 0 — el
+   excedente (Advance+Bajas por encima de lo Programado) se reporta aparte, ver calculadorExceso. */
 function calculadorBrecha(sede, fecha, franja, perfil) {
   return Math.max(0, calculadorProgramado(sede, fecha, franja, perfil) - calculadorBajas(sede, fecha, franja, perfil) - calculadorAdvanceGet(sede, fecha, franja, perfil.id));
 }
-/* Ver requerimiento "Bloque Final de Correcciones...", punto 4 (Alertas de Sobrecupo): brecha < 0 (Advance
-   supera Target - Bajas) ya NO cae en el mismo "Completado" verde que brecha === 0 -- vuelve a distinguirse
-   como un estado propio ("Sobrecupo"), revirtiendo a propósito la simplificación binaria de
-   calculadorBrechaDisplay (ver su comentario, "nunca se muestra un excedente aparte") SOLO para este badge y
-   esa función -- el requerimiento pide explícitamente una alerta distinta cuando Advance > Mensajeros
-   Programados, en vez de considerarlo "completo" sin más. */
+/* Ver requerimiento "Alerta de Sobrecupo en Calculador de Rutas": complemento de calculadorBrecha — mientras
+   esa función solo informa cuánto FALTA (nunca negativo), esta informa cuánto SOBRA cuando Advance + Bajas ya
+   superan lo realmente Programado (ej. el Planner registró más Advance del que en verdad hay turnos armados).
+   Son dos lecturas de la misma resta cruda (Programado - Bajas - Advance): si es negativa, calculadorBrecha
+   la recorta a 0 y calculadorExceso reporta su valor absoluto; si es >= 0, calculadorExceso es 0. Nunca
+   ambas funciones son positivas al mismo tiempo para la misma combinación. */
+function calculadorExceso(sede, fecha, franja, perfil) {
+  var prog = calculadorProgramado(sede, fecha, franja, perfil);
+  var bajas = calculadorBajas(sede, fecha, franja, perfil);
+  var advance = calculadorAdvanceGet(sede, fecha, franja, perfil.id);
+  return Math.max(0, (advance + bajas) - prog);
+}
+/* Ver requerimiento "Bloque Final de Correcciones...", punto 4 (Alertas de Sobrecupo), reactivado por
+   "Alerta de Sobrecupo en Calculador de Rutas": Sobrecupo (Advance+Bajas > Programado) ya NO cae en el mismo
+   "Completado" verde que Faltan === 0 -- vuelve a distinguirse como un estado propio, revirtiendo a propósito
+   la simplificación binaria de calculadorBrechaDisplay (ver su comentario) SOLO para este badge y esa
+   función -- el requerimiento pide explícitamente una alerta distinta cuando Advance+Bajas superan lo
+   realmente Programado, en vez de considerarlo "completo" sin más. */
 function calculadorBadge(sede, fecha, franja, perfil) {
   if (calculadorHuerfanas(sede, fecha, franja, perfil) > 0) return { label: 'Ruta Huérfana por Retiro', cls: 'badge-critical', def: 'El mensajero se retiró de bodega y el turno todavía espera que el Aliado confirme un reemplazo.' };
+  var exceso = calculadorExceso(sede, fecha, franja, perfil);
+  if (exceso > 0) return { label: '⚠️ Sobrecupo (+' + exceso + ')', cls: 'badge-warn', def: 'El Advance + Bajas registrado (' + exceso + ' de más) supera los Mensajeros Programados realmente -- revisar capacidad / posible exceso de mensajeros asignados antes de confirmar la jornada.' };
   var brecha = calculadorBrecha(sede, fecha, franja, perfil);
-  if (brecha < 0) return { label: '⚠️ Sobrecupo (+' + (-brecha) + ')', cls: 'badge-warn', def: 'El Advance registrado (' + (-brecha) + ' de más) supera la Base Operativa necesaria (Target - Bajas) -- revisar capacidad / posible exceso de mensajeros asignados antes de confirmar la jornada.' };
-  if (brecha === 0) return { label: 'Completado', cls: 'badge-dispatched', def: 'La Base Operativa de esta combinación ya está cubierta exactamente (Target - Bajas - Avance = 0).' };
-  return { label: 'Rutas Pendientes', cls: 'badge-warn', def: 'Aún faltan rutas por armar en esta combinación (Target - Bajas - Avance > 0).' };
+  if (brecha === 0) return { label: 'Completado', cls: 'badge-dispatched', def: 'La Base Operativa de esta combinación ya está cubierta exactamente (Programado - Bajas - Avance = 0).' };
+  return { label: 'Rutas Pendientes', cls: 'badge-warn', def: 'Aún faltan rutas por armar en esta combinación (Programado - Bajas - Avance > 0).' };
 }
 /* Celda/valor de Bajas-Retiros: número plano cuando es 0, botón interactivo (abre el Modal de Detalle) en
    cuanto hay al menos 1 — tanto en la tabla principal (franja/perfilId concretos) como en las tarjetas de
@@ -8698,17 +8705,15 @@ function openCalculadorBajasModal(sede, franja, perfilId) {
   }).join('');
   openModal('modalCalculadorBajas');
 }
-/* Lectura de 2 estados de "Rutas Pendientes" (ver requerimiento "Corrección de Lógica de Rutas"): brecha > 0
-   es un déficit real ("Faltan N"); CUALQUIER brecha <= 0 (exacta o negativa) es "Completo" — ya no se
-   distingue un excedente ("Sobran N") como estado aparte, porque bajo la fórmula nueva un resultado negativo
-   significa simplemente que no queda ninguna ruta pendiente por armar, sin valor operativo adicional en
-   conocer "cuánto de sobra". Nunca se muestra un número crudo con signo "-". */
-function calculadorBrechaDisplay(brecha) {
+/* Lectura de 3 estados de "Rutas Pendientes" (ver requerimiento "Corrección de Lógica de Rutas" +
+   "Alerta de Sobrecupo en Calculador de Rutas"): exceso > 0 es Sobrecupo (Advance+Bajas superan lo
+   Programado) -- el valor numérico principal de Faltan se mantiene en 0 (ver calculadorBrecha, ya clampeado)
+   y la celda muestra la alerta en su lugar; brecha > 0 (sin exceso) es un déficit real ("Faltan N"); el resto
+   es "Completo". `brecha` y `exceso` llegan ya calculados por el llamador (fila puntual vía calculadorBrecha/
+   calculadorExceso, o acumulados por tarjeta/Total Bodega) -- nunca se recalculan aquí. */
+function calculadorBrechaDisplay(brecha, exceso) {
+  if (exceso > 0) return { label: 'Sobrecupo', text: '⚠️ Sobrecupo (+' + exceso + ')', value: 0, cls: 'warn' };
   if (brecha > 0) return { label: 'Faltantes', text: 'Faltan ' + brecha, value: brecha, cls: 'danger' };
-  /* Ver requerimiento "Bloque Final de Correcciones...", punto 4: mismo criterio que calculadorBadge (arriba)
-     -- un excedente (Advance > Base Operativa) vuelve a mostrarse distinto de "Completo" en vez de fundirse
-     ahí, para que la celda de Brecha de la tabla principal quede consistente con el badge de la misma fila. */
-  if (brecha < 0) return { label: 'Sobrecupo', text: '⚠️ Sobrecupo (+' + (-brecha) + ')', value: brecha, cls: 'warn' };
   return { label: 'Completo', text: 'Completo', value: 0, cls: 'neutral' };
 }
 function calculadorSedeSlug(sede) { return stripAccents(sede).replace(/[^a-zA-Z0-9]+/g, '-'); }
@@ -8747,9 +8752,9 @@ function calculadorSummaryColHtml(sede, slug, perfilId, label, totals, brechaDis
 function calculadorSedeCardHtml(sede, fecha) {
   var slug = calculadorSedeSlug(sede);
   var franjas = calculadorFranjas();
-  var targetTotal = 0, progTotal = 0, bajasTotal = 0, advanceTotal = 0, brechaTotal = 0;
+  var targetTotal = 0, progTotal = 0, bajasTotal = 0, advanceTotal = 0, brechaTotal = 0, excesoTotal = 0;
   var perfilTotals = {};
-  CALCULADOR_PERFILES_VEHICULO.forEach(function (p) { perfilTotals[p.id] = { target: 0, prog: 0, bajas: 0, advance: 0, brecha: 0 }; });
+  CALCULADOR_PERFILES_VEHICULO.forEach(function (p) { perfilTotals[p.id] = { target: 0, prog: 0, bajas: 0, advance: 0, brecha: 0, exceso: 0 }; });
   var rowsHtml = franjas.map(function (franja) {
     var fid = franja.replace(':', '');
     return CALCULADOR_PERFILES_VEHICULO.map(function (perfil, pIdx) {
@@ -8758,14 +8763,16 @@ function calculadorSedeCardHtml(sede, fecha) {
       var bajas = calculadorBajas(sede, fecha, franja, perfil);
       var advance = calculadorAdvanceGet(sede, fecha, franja, perfil.id);
       var brecha = calculadorBrecha(sede, fecha, franja, perfil);
-      var brechaDisp = calculadorBrechaDisplay(brecha);
+      var exceso = calculadorExceso(sede, fecha, franja, perfil);
+      var brechaDisp = calculadorBrechaDisplay(brecha, exceso);
       var badge = calculadorBadge(sede, fecha, franja, perfil);
-      targetTotal += target; progTotal += prog; bajasTotal += bajas; advanceTotal += advance; brechaTotal += brecha;
-      /* Ítem 2/3 (Totalizador directo): pt.brecha acumula la MISMA cifra "Rutas Pendientes" que ya se pintó
-         en esta fila (calculadorBrecha), en vez de recalcularse aparte con su propia fórmula — así la tarjeta
-         de cada tipo de vehículo es una suma exacta de la tabla, y "Total Bodega" (que suma sobre brechaTotal,
-         el mismo acumulador global) reconcilia matemáticamente al 100% con la suma de las 3 tarjetas. */
-      var pt = perfilTotals[perfil.id]; pt.target += target; pt.prog += prog; pt.bajas += bajas; pt.advance += advance; pt.brecha += brecha;
+      targetTotal += target; progTotal += prog; bajasTotal += bajas; advanceTotal += advance; brechaTotal += brecha; excesoTotal += exceso;
+      /* Ítem 2/3 (Totalizador directo): pt.brecha/pt.exceso acumulan las MISMAS cifras que ya se pintaron en
+         esta fila (calculadorBrecha/calculadorExceso), en vez de recalcularse aparte con su propia fórmula —
+         así la tarjeta de cada tipo de vehículo es una suma exacta de la tabla, y "Total Bodega" (que suma
+         sobre brechaTotal/excesoTotal, los mismos acumuladores globales) reconcilia matemáticamente al 100%
+         con la suma de las 3 tarjetas. */
+      var pt = perfilTotals[perfil.id]; pt.target += target; pt.prog += prog; pt.bajas += bajas; pt.advance += advance; pt.brecha += brecha; pt.exceso += exceso;
       var suf = slug + '-' + fid + '-' + perfil.id;
       var franjaCell = pIdx === 0 ? ('<td rowspan="' + CALCULADOR_PERFILES_VEHICULO.length + '" class="calculador-franja-cell">' + fmtTime12(franja) + '</td>') : '';
       return '<tr data-sede="' + escapeHtml(sede) + '" data-franja="' + franja + '" data-perfil="' + perfil.id + '">' +
@@ -8782,8 +8789,8 @@ function calculadorSedeCardHtml(sede, fecha) {
   }).join('');
   var summaryColsHtml = CALCULADOR_PERFILES_VEHICULO.map(function (p) {
     var pt = perfilTotals[p.id];
-    return calculadorSummaryColHtml(sede, slug, p.id, p.label, pt, calculadorBrechaDisplay(pt.brecha));
-  }).join('') + calculadorSummaryColHtml(sede, slug, 'total', 'Total Bodega', { target: targetTotal, prog: progTotal, bajas: bajasTotal, advance: advanceTotal }, calculadorBrechaDisplay(brechaTotal));
+    return calculadorSummaryColHtml(sede, slug, p.id, p.label, pt, calculadorBrechaDisplay(pt.brecha, pt.exceso));
+  }).join('') + calculadorSummaryColHtml(sede, slug, 'total', 'Total Bodega', { target: targetTotal, prog: progTotal, bajas: bajasTotal, advance: advanceTotal }, calculadorBrechaDisplay(brechaTotal, excesoTotal));
   return '<section class="table-card calculador-sede-card" data-sede-card="' + escapeHtml(sede) + '">' +
     '<div class="table-head calculador-sede-head">' +
       '<h2>📍 ' + escapeHtml(sede) + '</h2>' +
@@ -8803,9 +8810,9 @@ function calculadorSurgicalUpdate() {
   var franjas = calculadorFranjas();
   calculadorSedes().forEach(function (sede) {
     var slug = calculadorSedeSlug(sede);
-    var targetTotal = 0, progTotal = 0, bajasTotal = 0, advanceTotal = 0, brechaTotal = 0;
+    var targetTotal = 0, progTotal = 0, bajasTotal = 0, advanceTotal = 0, brechaTotal = 0, excesoTotal = 0;
     var perfilTotals = {};
-    CALCULADOR_PERFILES_VEHICULO.forEach(function (p) { perfilTotals[p.id] = { target: 0, prog: 0, bajas: 0, advance: 0, brecha: 0 }; });
+    CALCULADOR_PERFILES_VEHICULO.forEach(function (p) { perfilTotals[p.id] = { target: 0, prog: 0, bajas: 0, advance: 0, brecha: 0, exceso: 0 }; });
     franjas.forEach(function (franja) {
       var fid = franja.replace(':', '');
       CALCULADOR_PERFILES_VEHICULO.forEach(function (perfil) {
@@ -8814,10 +8821,11 @@ function calculadorSurgicalUpdate() {
         var bajas = calculadorBajas(sede, fecha, franja, perfil);
         var advance = calculadorAdvanceGet(sede, fecha, franja, perfil.id);
         var brecha = calculadorBrecha(sede, fecha, franja, perfil);
-        var brechaDisp = calculadorBrechaDisplay(brecha);
+        var exceso = calculadorExceso(sede, fecha, franja, perfil);
+        var brechaDisp = calculadorBrechaDisplay(brecha, exceso);
         var badge = calculadorBadge(sede, fecha, franja, perfil);
-        targetTotal += target; progTotal += prog; bajasTotal += bajas; advanceTotal += advance; brechaTotal += brecha;
-        var pt = perfilTotals[perfil.id]; pt.target += target; pt.prog += prog; pt.bajas += bajas; pt.advance += advance; pt.brecha += brecha;
+        targetTotal += target; progTotal += prog; bajasTotal += bajas; advanceTotal += advance; brechaTotal += brecha; excesoTotal += exceso;
+        var pt = perfilTotals[perfil.id]; pt.target += target; pt.prog += prog; pt.bajas += bajas; pt.advance += advance; pt.brecha += brecha; pt.exceso += exceso;
         var suf = slug + '-' + fid + '-' + perfil.id;
         var targetCell = document.getElementById('calc-target-' + suf); if (targetCell) targetCell.textContent = target;
         var progCell = document.getElementById('calc-prog-' + suf); if (progCell) progCell.textContent = prog;
@@ -8839,9 +8847,9 @@ function calculadorSurgicalUpdate() {
     }
     CALCULADOR_PERFILES_VEHICULO.forEach(function (p) {
       var pt = perfilTotals[p.id];
-      updateSummaryCol(p.id, pt, calculadorBrechaDisplay(pt.brecha));
+      updateSummaryCol(p.id, pt, calculadorBrechaDisplay(pt.brecha, pt.exceso));
     });
-    updateSummaryCol('total', { target: targetTotal, prog: progTotal, bajas: bajasTotal, advance: advanceTotal }, calculadorBrechaDisplay(brechaTotal));
+    updateSummaryCol('total', { target: targetTotal, prog: progTotal, bajas: bajasTotal, advance: advanceTotal }, calculadorBrechaDisplay(brechaTotal, excesoTotal));
   });
 }
 function renderCalculador() {
