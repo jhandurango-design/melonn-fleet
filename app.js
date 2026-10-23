@@ -8966,15 +8966,29 @@ function renderProgramacion() {
      (eliminado por completo, ver btnSolicitarNuevoTurnoHoy en el historial de index.html). submitTurno ya
      decide solo, vía progEditWindowState(), si el alta de Hoy se aplica en vivo o se encola como Solicitud
      de Cambio -- ningún cambio de lógica de negocio, solo de qué modal se abre. */
-  /* "Cargar"/"Guardar como Flota Habitual" siguen exclusivas de Mañana (alta directa real con flota
-     recurrente) -- Hoy nunca aplica en vivo, así que no tiene sentido ahí (ver renderProgBanner). */
-  document.getElementById('btnCargarFlotaHabitual').style.display = state.progDay === 'tomorrow' ? '' : 'none';
-  document.getElementById('btnGuardarFlotaHabitual').style.display = state.progDay === 'tomorrow' ? '' : 'none';
-  /* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase", punto 2: solo tiene sentido ofrecer "Eliminar"
-     cuando ya existe una plantilla guardada para este aliado -- mismo criterio de visibilidad que los otros 2
-     botones (exclusivo de "Mañana"). */
+  /* Ver requerimiento "Menú Desplegable de Acciones para Flota Recurrente": "Cargar"/"Guardar como Flota
+     Habitual" siguen exclusivas de Mañana (alta directa real con flota recurrente) -- Hoy nunca aplica en
+     vivo, así que no tiene sentido ahí (ver renderProgBanner). "Eliminar" solo tiene sentido cuando ya existe
+     una plantilla guardada para este aliado (ver FIX "Bug Crítico de Edición y Persistencia en Supabase",
+     punto 2). Mismos 3 íconos/textos/condiciones que antes tenían los botones sueltos, ahora como ítems del
+     menú flotante de #btnProgAcciones (data-menu-html, ver toggleRowMenu) -- cada botón sigue disparando
+     exactamente la misma función (cargarFlotaHabitual/guardarFlotaHabitual/eliminarFlotaHabitual) vía el
+     dispatcher global de [data-act], nunca un addEventListener propio (el menú se reconstruye desde cero en
+     cada apertura, así que un listener atado al nodo viejo no sobreviviría). El botón "Acciones" completo se
+     oculta cuando progDay !== 'tomorrow', ya que ninguna de las 3 acciones aplicaría ese día. */
+  var btnProgAcciones = document.getElementById('btnProgAcciones');
   var plantillaPropiaExiste = !!(state.flotaHabitual[state.user.aliado] && state.flotaHabitual[state.user.aliado].length);
-  document.getElementById('btnEliminarFlotaHabitual').style.display = (state.progDay === 'tomorrow' && plantillaPropiaExiste) ? '' : 'none';
+  if (state.progDay === 'tomorrow') {
+    btnProgAcciones.style.display = '';
+    btnProgAcciones.dataset.menuHtml =
+      '<button type="button" data-act="prog-cargar-flota-habitual"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Cargar Flota Recurrente</button>' +
+      '<button type="button" data-act="prog-guardar-flota-habitual"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Guardar como Flota Recurrente</button>' +
+      (plantillaPropiaExiste
+        ? '<button type="button" class="danger" data-act="prog-eliminar-flota-habitual"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 0V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2"/></svg>Eliminar Flota Recurrente</button>'
+        : '');
+  } else {
+    btnProgAcciones.style.display = 'none';
+  }
   renderProgBanner();
   renderProgCuotasResumen();
   refreshProgFiltroBodegaOptions();
@@ -13704,8 +13718,13 @@ function openTurnoModal(mode, routeId) {
   document.getElementById('turnoRecurrenteField').hidden = mode === 'edit';
   var pool = state.mensajeros.filter(function (m) { return m.aliado === state.user.aliado && m.cedula && !m.superseded; });
   var rsel = document.getElementById('turnoRecurrente');
-  rsel.innerHTML = '<option value="">— Selecciona un mensajero ya registrado —</option>' + pool.map(function (m) { return '<option value="' + m.id + '">' + m.nombre + ' · ' + m.placa + '</option>'; }).join('');
+  /* Ver requerimiento "Autocompletado / Búsqueda en Carga Rápida": la cédula se agrega al texto visible de
+     cada opción (antes solo "nombre · placa") para que initMensajeroTypeahead -- que filtra por
+     o.textContent, ver su propio comentario -- también encuentre coincidencias al teclear el documento, no
+     solo nombre/placa. */
+  rsel.innerHTML = '<option value="">— Selecciona un mensajero ya registrado —</option>' + pool.map(function (m) { return '<option value="' + m.id + '">' + m.nombre + ' · ' + m.cedula + ' · ' + m.placa + '</option>'; }).join('');
   rsel.value = '';
+  syncMensajeroTypeaheadInput('turnoRecurrente');
   rsel.onchange = function () {
     var m = state.mensajeros.find(function (x) { return x.id === rsel.value; });
     if (!m) return;
@@ -14732,13 +14751,13 @@ function eliminarFlotaHabitual() {
   });
 }
 function ejecutarCargaFlotaHabitual(plantilla) {
-  /* Ver requerimiento "Idempotencia / Control de Duplicados en Solicitudes al Planner": defensa complementaria
-     al chequeo de yaProgramados de abajo -- deshabilitar el botón mientras la carga está en curso evita que
-     un clic repetido (antes de que termine de procesar/empujar la pasada anterior) alcance a disparar una
-     segunda ejecución completa de esta función. Se reactiva en TODOS los desenlaces (nada que cargar, éxito o
-     fallo del push). */
-  var btnCargarFlota = document.getElementById('btnCargarFlotaHabitual');
-  btnCargarFlota.disabled = true;
+  /* Ver requerimiento "Menú Desplegable de Acciones para Flota Recurrente": el botón que disparó esta acción
+     ya NO existe en el DOM para cuando esta función corre -- vivía dentro del menú flotante de #btnProgAcciones
+     (ver toggleRowMenu), que se cierra solo al hacer clic en cualquiera de sus ítems, y cargarFlotaHabitual()
+     (el llamador real) además interpone un modal de confirmación de por medio antes de llegar aquí. La
+     protección contra doble ejecución que antes deshabilitaba ese botón ya no aplica (no hay nada que
+     deshabilitar) -- el propio modal de confirmación, que exige una interacción deliberada cada vez, cumple
+     el mismo propósito de no disparar dos cargas en paralelo por un clic accidental repetido. */
   var fecha = TOMORROW_STR;
   var yaProgramados = {};
   routesInScope('tomorrow').forEach(function (r) {
@@ -14836,7 +14855,6 @@ function ejecutarCargaFlotaHabitual(plantilla) {
     } else {
       toast('warn', 'Flota Recurrente', 'Todos los mensajeros de tu flota recurrente ya estaban programados para mañana.');
     }
-    btnCargarFlota.disabled = false;
     return;
   }
   var msg = 'Se cargaron ' + creados + ' turno' + (creados === 1 ? '' : 's') + ' dentro de la cuota disponible.';
@@ -14868,16 +14886,13 @@ function ejecutarCargaFlotaHabitual(plantilla) {
           state.mensajeros = state.mensajeros.filter(function (m) { return idsMensajerosNuevos.indexOf(m.id) === -1; });
           state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return idsSolicitudesNuevas.indexOf(s.id) === -1; });
           toast('warn', 'No se pudo confirmar en la nube', 'La carga de Flota Recurrente no se guardó — revisa tu conexión e inténtalo de nuevo.');
-          btnCargarFlota.disabled = false;
           syncAndRender(true);
           return;
         }
-        btnCargarFlota.disabled = false;
         syncAndRender(true);
       });
     });
   } else {
-    btnCargarFlota.disabled = false;
     syncAndRender(true);
   }
 }
@@ -20671,6 +20686,13 @@ document.addEventListener('DOMContentLoaded', function () {
      valor (routeId leído en el submit, ver wireNuevaSolicitudModal) -- cero cambios a esa lógica. */
   initMensajeroTypeahead('nsRuta', { pinFirstAsTodos: false, placeholder: 'Buscar por nombre, placa o ID de turno...' });
   initMensajeroTypeahead('npRuta', { pinFirstAsTodos: false, placeholder: 'Buscar por nombre, placa o ID de turno...' });
+  /* Ver requerimiento "Autocompletado / Búsqueda en Carga Rápida — Mensajero Recurrente": mismo widget
+     Typeahead, mismo criterio que nsRuta/npRuta arriba (pinFirstAsTodos:false -- "— Selecciona un mensajero
+     ya registrado —" es un placeholder de instrucción, no un atajo de "Todos" que deba fijarse siempre arriba
+     de los resultados filtrados). Elegir una sugerencia dispara el 'change' nativo sobre #turnoRecurrente, que
+     sigue siendo la única fuente de verdad -- su propio onchange (reasignado en cada openTurnoModal, ver ese
+     comentario) ya rellena Nombre/Teléfono/Cédula/Placa/Correo/Vehículo sin ningún cambio. */
+  initMensajeroTypeahead('turnoRecurrente', { pinFirstAsTodos: false, placeholder: 'Buscar por nombre, cédula o placa...' });
   document.querySelectorAll('#seguimientoModoSegment button').forEach(function (b) {
     b.addEventListener('click', function () {
       document.querySelectorAll('#seguimientoModoSegment button').forEach(function (x) { x.classList.remove('active'); });
@@ -20755,9 +20777,12 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   document.getElementById('btnNuevoTurno').addEventListener('click', function () { openTurnoModal('create', null); });
-  document.getElementById('btnCargarFlotaHabitual').addEventListener('click', cargarFlotaHabitual);
-  document.getElementById('btnGuardarFlotaHabitual').addEventListener('click', guardarFlotaHabitual);
-  document.getElementById('btnEliminarFlotaHabitual').addEventListener('click', eliminarFlotaHabitual);
+  /* Ver requerimiento "Menú Desplegable de Acciones para Flota Recurrente": Cargar/Guardar/Eliminar ya no son
+     botones estáticos con su propio addEventListener -- viven como ítems del menú flotante de #btnProgAcciones
+     (data-menu-html armado en cada render de renderProgramacion(), ver ese comentario), disparados por el
+     dispatcher global de [data-act] (prog-cargar-flota-habitual/prog-guardar-flota-habitual/
+     prog-eliminar-flota-habitual, ver más abajo) -- un listener atado aquí a un id estático ya no aplicaría,
+     porque el menú (y sus botones) se reconstruye desde cero cada vez que se abre. */
 
   /* Flota Propia (BODEGA, México) -- ver requerimiento "Reestructuración y Migración de Flota Propia México
      al Módulo Bodega". */
@@ -21179,6 +21204,9 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'editar-observacion-bodega') openObservacionBodegaModal(id);
     else if (act === 'desasignar-mensajero') desasignarMensajero(id);
     else if (act === 'confirmar-mensajero') openTurnoModal('confirm', id);
+    else if (act === 'prog-cargar-flota-habitual') cargarFlotaHabitual();
+    else if (act === 'prog-guardar-flota-habitual') guardarFlotaHabitual();
+    else if (act === 'prog-eliminar-flota-habitual') eliminarFlotaHabitual();
     else if (act === 'flota-propia-editar') openFlotaPropiaEditModal(id);
     else if (act === 'flota-propia-eliminar') eliminarFlotaPropiaMensajero(id);
     else if (act === 'flota-propia-agregar') openFlotaPropiaCrearModal();

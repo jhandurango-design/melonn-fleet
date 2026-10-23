@@ -909,27 +909,16 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
               Nuevo Turno
             </button>
-            <!-- Carga rápida de Flota Habitual (ver requerimiento "Agregar Botón de Carga Rápida 'Flota
-                 Habitual' en Programar Flota"): no toca el modal de Nuevo Turno ni la tabla -- ambos botones
-                 solo alimentan/leen state.turnos y state.flotaHabitual por los mismos caminos que ya usa
-                 submitTurno (findOrCreateMensajero, evaluarAprobacionCuota, registrarCreacionTurno). Visibles
-                 únicamente cuando progDay = 'mañana' (alta directa real; Hoy nunca aplica en vivo, ver
-                 renderProgBanner). -->
-            <button class="btn btn-primary" id="btnCargarFlotaHabitual">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Cargar Flota Recurrente
-            </button>
-            <button class="btn btn-ghost" id="btnGuardarFlotaHabitual">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-              Guardar como Flota Recurrente
-            </button>
-            <!-- Ver FIX "Bug Crítico de Edición y Persistencia en Supabase" (reporte Easyway), punto 2: reinicio
-                 explícito de la plantilla propia de Flota Recurrente -- solo borra state.flotaHabitual[aliado]
-                 (3 campos descriptivos por fila: sede/vehículo/hora/datos de contacto), nunca mensajeros/turnos
-                 reales. Visible únicamente cuando ya existe una plantilla guardada (ver renderProgramacion). -->
-            <button class="btn btn-danger" id="btnEliminarFlotaHabitual">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 0V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2"/></svg>
-              Eliminar Flota Recurrente
+            <!-- Ver requerimiento "Menú Desplegable de Acciones para Flota Recurrente": los 3 botones sueltos
+                 (Cargar/Guardar/Eliminar Flota Recurrente) se agrupan en un único menú flotante, reutilizando
+                 el mismo mecanismo ya existente de "Acciones •••" de fila (ver toggleRowMenu/rowActionsMenu en
+                 app.js) -- el contenido (data-menu-html) se arma en cada render de renderProgramacion() con
+                 exactamente los mismos 3 botones/íconos/condiciones de visibilidad que antes tenían por
+                 separado, solo que ahora como ítems del menú. El botón en sí se oculta por completo cuando
+                 progDay !== 'tomorrow' (ninguna de las 3 acciones aplica a Hoy). -->
+            <button type="button" class="btn btn-ghost" id="btnProgAcciones" data-act="toggle-row-menu" data-id="prog-acciones" data-tip="Cargar, guardar o eliminar tu Flota Recurrente">
+              Acciones
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
             </button>
           </div>
         </div>
