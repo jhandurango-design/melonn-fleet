@@ -8644,15 +8644,21 @@ function calculadorTarget(sede, fecha, franja, perfil) {
 function calculadorAdvanceKey(sede, fecha, franja, perfilId) { return sede + '|' + fecha + '|' + franja + '|' + perfilId; }
 function calculadorAdvanceGet(sede, fecha, franja, perfilId) { return state.calculadorAdvanceNoche[calculadorAdvanceKey(sede, fecha, franja, perfilId)] || 0; }
 function calculadorAdvanceSet(sede, fecha, franja, perfilId, valor) { state.calculadorAdvanceNoche[calculadorAdvanceKey(sede, fecha, franja, perfilId)] = Math.max(0, valor || 0); }
-/* Fórmula corregida del requerimiento "Rutas Pendientes": Base Operativa - Bajas Sin Reemplazo - Advance
-   Noche. La Base Operativa es calculadorTarget() tal cual — ya resuelve sola "Cuota Target si está activa,
-   si no Programado Efectivo" (ver cuotasActivoPais dentro de calculadorTarget) — así que Programado Efectivo
-   NUNCA se resta aparte aquí: solo entra a la fórmula cuando el país no tiene Cuotas activas, vía la propia
-   Base. Bajas reduce directamente la Base (rutas que ya no se van a cubrir); Advance Noche reduce lo que aún
-   falta armar. Todo calculado dentro del propio tipo de vehículo — nunca se resta el advance de un perfil
-   contra el target de otro. */
+/* Ver requerimiento "Reajuste de Fórmula de Faltan (Flota Real Programada)": la Base Operativa deja de ser
+   calculadorTarget() (cuota CONTRATADA, "Cuotas Solicitadas") y pasa a ser calculadorProgramado() (turnos
+   REALES ya en state.turnos, "Mensajeros Programados" — ver auditoría previa "Diagnóstico: Calculador de
+   Rutas"). Bajas sigue reduciendo directamente la Base (rutas que ya no se van a cubrir); Advance Noche
+   sigue reduciendo lo que aún falta armar. Todo calculado dentro del propio tipo de vehículo — nunca se
+   resta el advance de un perfil contra el target de otro.
+   Math.max(0, ...) por pedido explícito del requerimiento: "Faltan" nunca baja de 0. Efecto colateral a
+   tener presente — calculadorBadge()/calculadorBrechaDisplay() todavía tienen su rama `brecha < 0` para
+   "⚠️ Sobrecupo" (ver "Bloque Final de Correcciones...", punto 4): con este clamp, calculadorBrecha() ya NUNCA
+   devuelve un negativo, así que esa rama queda inalcanzable — Sobrecupo deja de distinguirse de "Completo" en
+   la UI. Se deja el código de Sobrecupo intacto (no se borra) en vez de asumir que también debe eliminarse;
+   si se requiere seguir detectando Sobrecupo (Advance/Bajas superando lo realmente Programado), avisar para
+   decidir dónde debe vivir esa comparación por separado. */
 function calculadorBrecha(sede, fecha, franja, perfil) {
-  return calculadorTarget(sede, fecha, franja, perfil) - calculadorBajas(sede, fecha, franja, perfil) - calculadorAdvanceGet(sede, fecha, franja, perfil.id);
+  return Math.max(0, calculadorProgramado(sede, fecha, franja, perfil) - calculadorBajas(sede, fecha, franja, perfil) - calculadorAdvanceGet(sede, fecha, franja, perfil.id));
 }
 /* Ver requerimiento "Bloque Final de Correcciones...", punto 4 (Alertas de Sobrecupo): brecha < 0 (Advance
    supera Target - Bajas) ya NO cae en el mismo "Completado" verde que brecha === 0 -- vuelve a distinguirse
