@@ -8974,20 +8974,26 @@ function renderProgramacion() {
      menú flotante de #btnProgAcciones (data-menu-html, ver toggleRowMenu) -- cada botón sigue disparando
      exactamente la misma función (cargarFlotaHabitual/guardarFlotaHabitual/eliminarFlotaHabitual) vía el
      dispatcher global de [data-act], nunca un addEventListener propio (el menú se reconstruye desde cero en
-     cada apertura, así que un listener atado al nodo viejo no sobreviviría). El botón "Acciones" completo se
-     oculta cuando progDay !== 'tomorrow', ya que ninguna de las 3 acciones aplicaría ese día. */
+     cada apertura, así que un listener atado al nodo viejo no sobreviviría).
+     Ver requerimiento "Estandarización Visual del Botón 'Acciones' y Orden de Botones": en Hoy el botón ya NO
+     se oculta (display:none) -- queda siempre visible pero deshabilitado (disabled + .disabled + data-tip,
+     mismo patrón exacto que btnProxima en renderCuotasTabs) para que el header no salte de alto/ancho al
+     alternar Hoy/Mañana, y para que quede ya preparado para habilitarse en Hoy si un flujo futuro lo requiere. */
   var btnProgAcciones = document.getElementById('btnProgAcciones');
   var plantillaPropiaExiste = !!(state.flotaHabitual[state.user.aliado] && state.flotaHabitual[state.user.aliado].length);
-  if (state.progDay === 'tomorrow') {
-    btnProgAcciones.style.display = '';
+  var accionesDeshabilitadas = state.progDay !== 'tomorrow';
+  btnProgAcciones.disabled = accionesDeshabilitadas;
+  btnProgAcciones.classList.toggle('disabled', accionesDeshabilitadas);
+  if (accionesDeshabilitadas) {
+    btnProgAcciones.setAttribute('data-tip', 'Cargar, guardar o eliminar tu Flota Recurrente solo aplica para la Programación de mañana.');
+  } else {
+    btnProgAcciones.setAttribute('data-tip', 'Cargar, guardar o eliminar tu Flota Recurrente');
     btnProgAcciones.dataset.menuHtml =
       '<button type="button" data-act="prog-cargar-flota-habitual"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Cargar Flota Recurrente</button>' +
       '<button type="button" data-act="prog-guardar-flota-habitual"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Guardar como Flota Recurrente</button>' +
       (plantillaPropiaExiste
         ? '<button type="button" class="danger" data-act="prog-eliminar-flota-habitual"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 0V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2"/></svg>Eliminar Flota Recurrente</button>'
         : '');
-  } else {
-    btnProgAcciones.style.display = 'none';
   }
   renderProgBanner();
   renderProgCuotasResumen();
@@ -9293,11 +9299,21 @@ function rowHtmlProg(route) {
        Cuotas / Programación Libre", antes "Borrar Mensajero") solo aplica cuando la acción es directa
        (Mañana, dentro del cutoff); Hoy siempre entra por Solicitud de Cambio, igual que cualquier otra
        edición del día en curso. */
+    /* Ver requerimiento "Remoción del Botón Redundante 'Solicitar Desasignación'": cuando la acción NO es
+       directa (fuera del cutoff en Mañana, o siempre en Hoy -- wsDes='today_solicitud') este botón terminaba
+       generando una Solicitud de Cambio por una vía distinta y con una etiqueta ambigua, en paralelo al botón
+       "Editar" de arriba (que ya cubre "Editar / Solicitar Cambio" en esa misma ventana vía submitTurno) y al
+       banner fijo SOLICITUDES_REDIRECT_BANNER_HTML ("Para modificar o cancelar turnos en vivo, envía la
+       solicitud desde el módulo 'Solicitudes y Cambios'."). Se retira por completo solo esa variante
+       ("Solicitar Desasignación de Mensajero"); la acción DIRECTA ("Eliminar mensajero", sin solicitud ni
+       penalización) se conserva intacta. La rama !directoDes de desasignarMensajero() queda sin ningún
+       llamador en la UI tras este cambio -- se deja el código intacto (no se borra) por si se reutiliza desde
+       otro punto de entrada más adelante. */
     var wsDes = route.fecha === TOMORROW_STR ? progWindowState() : 'today_solicitud';
     var directoDes = wsDes === 'open' || wsDes === 'alert' || wsDes === 'closed_extended_active';
-    actions += '<button data-act="desasignar-mensajero" data-id="' + route.id + '" class="danger" data-tip="' +
-      (directoDes ? 'Elimina el mensajero de inmediato, sin crear ninguna solicitud ni penalización.' : 'Fuera del cutoff: se enviará como Solicitud de Cambio, pendiente de aprobación de Planner.') + '">' +
-      (directoDes ? 'Eliminar mensajero' : 'Solicitar Desasignación de Mensajero') + '</button>';
+    if (directoDes) {
+      actions += '<button data-act="desasignar-mensajero" data-id="' + route.id + '" class="danger" data-tip="Elimina el mensajero de inmediato, sin crear ninguna solicitud ni penalización.">Eliminar mensajero</button>';
+    }
   }
   if (!actions) actions = '<span class="courier-sub">Solo lectura</span>';
   return '<tr data-route="' + route.id + '">' +

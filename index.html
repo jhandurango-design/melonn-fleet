@@ -900,6 +900,17 @@
             <p class="sub" id="progSub">Carga de Programación de Flota y asignación de mensajeros</p>
           </div>
           <div class="page-head-actions">
+            <!-- Ver requerimiento "Estandarización Visual del Botón 'Acciones' y Orden de Botones (Programar
+                 Flota)": reutiliza AL PIE DE LA LETRA el estándar de la plataforma para botones "Acciones •••"
+                 (class="row-menu-toggle", mismo texto/bullets que rowMenuToggleHtml en app.js -- antes usaba
+                 "btn btn-ghost" + chevron propio, que es justo el bug ya documentado en styles.css de que ese
+                 botón "se veía blanco/neutro en vez de su lila/morado propio"). Ya NO se oculta por completo en
+                 Hoy (display:none) sino que queda siempre en el DOM y se deshabilita/habilita vía disabled +
+                 data-tip (ver renderProgramacion) -- mismo patrón que btnProxima en Cuotas -- así el contenedor
+                 nunca cambia de alto/contenido al alternar Hoy/Mañana, y la estructura ya queda lista para
+                 habilitarlo en Hoy si un flujo futuro lo requiere. Queda a la IZQUIERDA; "+ Nuevo Turno" a la
+                 derecha (orden solicitado). -->
+            <button type="button" class="row-menu-toggle" id="btnProgAcciones" data-act="toggle-row-menu" data-id="prog-acciones" data-tip="Cargar, guardar o eliminar tu Flota Recurrente">Acciones&nbsp;&bull;&bull;&bull;</button>
             <!-- Ver requerimiento "Corrección Crítica de Bugs, Eliminación de Modal Incorrecto, Banners y
                  Control de Observaciones", punto 1: eliminado por completo el botón/flujo separado
                  "+ Solicitar Nuevo Turno" (abría por error el modal "Nueva Solicitud") -- "+ Nuevo Turno" es
@@ -908,17 +919,6 @@
             <button class="btn btn-primary" id="btnNuevoTurno">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
               Nuevo Turno
-            </button>
-            <!-- Ver requerimiento "Menú Desplegable de Acciones para Flota Recurrente": los 3 botones sueltos
-                 (Cargar/Guardar/Eliminar Flota Recurrente) se agrupan en un único menú flotante, reutilizando
-                 el mismo mecanismo ya existente de "Acciones •••" de fila (ver toggleRowMenu/rowActionsMenu en
-                 app.js) -- el contenido (data-menu-html) se arma en cada render de renderProgramacion() con
-                 exactamente los mismos 3 botones/íconos/condiciones de visibilidad que antes tenían por
-                 separado, solo que ahora como ítems del menú. El botón en sí se oculta por completo cuando
-                 progDay !== 'tomorrow' (ninguna de las 3 acciones aplica a Hoy). -->
-            <button type="button" class="btn btn-ghost" id="btnProgAcciones" data-act="toggle-row-menu" data-id="prog-acciones" data-tip="Cargar, guardar o eliminar tu Flota Recurrente">
-              Acciones
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
             </button>
           </div>
         </div>

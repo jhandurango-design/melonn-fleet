@@ -885,6 +885,12 @@ button.row-menu-toggle{
   display:inline-flex;align-items:center;justify-content:center;gap:4px;flex-shrink:0;
 }
 button.row-menu-toggle:hover{background:#E3E1FB;color:#635BFF;}
+/* Ver requerimiento "Estandarización Visual del Botón 'Acciones' y Orden de Botones (Programar Flota)":
+   mismo criterio visual que .sede-dropdown-menu button.disabled / .segmented button.disabled -- permite que
+   button.row-menu-toggle (ej. #btnProgAcciones en Hoy) quede siempre visible pero deshabilitado en vez de
+   ocultarse por completo, sin perder su estilo lila propio. */
+button.row-menu-toggle.disabled, button.row-menu-toggle[disabled]{opacity:.5;cursor:not-allowed;}
+button.row-menu-toggle.disabled:hover, button.row-menu-toggle[disabled]:hover{background:#EFEEFC;color:#635BFF;}
 
 /* Menú "⋮" de acciones secundarias de fila (ver rowMenuToggleHtml/toggleRowMenu en app.js) — mismo tratamiento
    visual que el selector de bodega del Header (sede-dropdown-menu): siempre claro, independiente del tema. */
