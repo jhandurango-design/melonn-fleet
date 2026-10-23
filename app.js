@@ -171,21 +171,40 @@ const CUOTAS_SEED = (function () {
   addRange('Ciudad de México #1', 'MexPaq Distribución', 'Moto', '12:30', 2, CUOTAS_DIAS);
   return rows;
 })();
-/* Calendarios estáticos de festivos oficiales — solo cubren 2026 (año de la simulación). Son catálogos de
-   demostración fijos, no una fuente en vivo/API. Dos usos: 1) decidir si el badge visual "Día Crítico" del
-   tablero de Cuotas se traslada de Lunes a Martes esa semana en Colombia (ver cuotasDiaCriticoInfo, solo
-   informativo); 2) con el módulo de Cuotas ACTIVO para el país (ver cuotasActivoPais), cualquier turno
-   programado en una de estas fechas requiere aprobación de Planner/Admin (ver evaluarAprobacionCuota) —
-   ahí sí participa del motor de estados (route.pendienteAprobacionPlanner / computeEstado). */
+/* Calendarios estáticos de festivos oficiales — catálogos de demostración fijos (sin llamadas externas a
+   internet, ver requerimiento "Ajuste y Validación Integral de Días Festivos"), calculados a mano aplicando
+   la Ley 51 de 1983 (Ley Emiliani, Colombia: festivos no fijos se trasladan al lunes siguiente si no caen ya
+   en lunes) sobre el Domingo de Pascua real de cada año (algoritmo de Gauss/Meeus) -- Pascua 2026 = 5 de
+   abril, Pascua 2027 = 28 de marzo. México usa sus propios festivos oficiales de la Ley Federal del Trabajo
+   (fijos + "primer/tercer lunes de [mes]" para Constitución/Natalicio de Juárez/Revolución). Un año nuevo que
+   entre en vigor (ej. 2028) solo necesita su propio const CO_FESTIVOS_20XX/MX_FESTIVOS_20XX agregado al
+   concat de abajo -- recomendable verificar cada año contra la resolución oficial vigente (DIAN/Mintrabajo),
+   ya que un decreto presidencial puntual podría desviarse del cálculo estándar.
+   Dos usos de esFestivo(): 1) decidir si el badge visual "Día Crítico" del tablero de Cuotas se traslada de
+   Lunes a Martes esa semana en Colombia (ver cuotasDiaCriticoInfo, solo informativo); 2) con el módulo de
+   Cuotas ACTIVO para el país (ver cuotasActivoPais), cualquier turno programado en una de estas fechas
+   requiere aprobación de Planner/Admin (ver evaluarAprobacionCuota) — ahí sí participa del motor de estados
+   (route.pendienteAprobacionPlanner / computeEstado) y del Cierre Automático Nocturno de Cuotas (ver
+   cierreCuotasNocturnoSweep, que ahora omite un festivo en vez de generar turnos fantasma). */
 const CO_FESTIVOS_2026 = [
   '2026-01-01', '2026-01-12', '2026-03-23', '2026-04-02', '2026-04-03', '2026-05-01', '2026-05-18',
   '2026-06-08', '2026-06-15', '2026-06-29', '2026-07-20', '2026-08-07', '2026-08-17', '2026-10-12',
   '2026-11-02', '2026-11-16', '2026-12-08', '2026-12-25',
 ];
+const CO_FESTIVOS_2027 = [
+  '2027-01-01', '2027-01-11', '2027-03-22', '2027-03-25', '2027-03-26', '2027-05-01', '2027-05-10',
+  '2027-05-31', '2027-06-07', '2027-07-05', '2027-07-20', '2027-08-07', '2027-08-16', '2027-10-18',
+  '2027-11-01', '2027-11-15', '2027-12-08', '2027-12-25',
+];
 const MX_FESTIVOS_2026 = [
   '2026-01-01', '2026-02-02', '2026-03-16', '2026-05-01', '2026-09-16', '2026-11-16', '2026-12-25',
 ];
-function esFestivo(fechaStr, country) { return (country === 'MX' ? MX_FESTIVOS_2026 : CO_FESTIVOS_2026).indexOf(fechaStr) !== -1; }
+const MX_FESTIVOS_2027 = [
+  '2027-01-01', '2027-02-01', '2027-03-15', '2027-05-01', '2027-09-16', '2027-11-15', '2027-12-25',
+];
+const CO_FESTIVOS_TODOS = CO_FESTIVOS_2026.concat(CO_FESTIVOS_2027);
+const MX_FESTIVOS_TODOS = MX_FESTIVOS_2026.concat(MX_FESTIVOS_2027);
+function esFestivo(fechaStr, country) { return (country === 'MX' ? MX_FESTIVOS_TODOS : CO_FESTIVOS_TODOS).indexOf(fechaStr) !== -1; }
 function fmtDateYMD(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 /* Lunes de la semana operativa "vigente" a partir de una fecha: si esa fecha cae en Domingo (no operativo,
    fuera de CUOTAS_DIAS), se toma el Lunes siguiente (la semana que arranca mañana); en cualquier otro día,
@@ -3786,6 +3805,14 @@ function cierreCuotasNocturnoSweep() {
     if (c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (esFlotaPropia(c.aliado)) return;
+    /* Ver requerimiento "Ajuste y Validación Integral de Días Festivos", Corrección Crítica: TOMORROW_STR
+       festivo (por país de la sede, nunca un único país global -- una misma noche puede ser festivo en
+       Colombia y no en México) no debe generar turnos "Pendiente/Por Confirmar" fantasma -- el Aliado no
+       incumple nada por no operar un festivo (ver evaluarAprobacionCuota, que ya trata festivo como su propia
+       causal, nunca como "cupo excedido"). Sin este chequeo, estos turnos sintéticos escalaban solos (FSM de
+       pendienteAsignacion) hasta Incumplimiento Confirmado, contaminando incumplimientosConfirmados/
+       posicionamientoPct en aliadoMetricas() por un día que nunca debió exigir cuota. */
+    if (esFestivo(TOMORROW_STR, countryForSede(c.sede))) return;
     var key = c.sede + '|' + c.aliado;
     if (vistos[key]) return;
     vistos[key] = true;
