@@ -26,6 +26,16 @@
       <p class="login-sub" data-i18n="login.subtitle">Control y Programación de Flota</p>
       <h1 data-i18n="login.title">Inicia sesión</h1>
 
+      <!-- Ver requerimiento "Banner de Ventana de Actualizaciones (Login)": aviso estático, sin lógica JS --
+           reutiliza el componente ya estandarizado .cutoff-banner (mismo que usan los avisos de "ventana
+           cerrada" en Programar Flota/Cuotas), variante informativa (lila, no .danger) porque es un aviso
+           programado, no un bloqueo ni un error. Quitar este bloque manualmente una vez pase la ventana
+           (martes 27 de octubre, 9:00 a.m.) -- no se oculta solo por fecha. -->
+      <div class="cutoff-banner" id="loginVentanaActualizacionBanner">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <span><strong>Ventana de actualizaciones.</strong> La plataforma permanecerá en mantenimiento programado hasta el martes 27 de octubre, 9:00 a.m.</span>
+      </div>
+
       <form id="loginForm" class="login-form" autocomplete="off">
         <div class="field">
           <label for="loginEmail" data-i18n="login.emailLabel">Correo</label>
