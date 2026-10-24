@@ -13432,6 +13432,12 @@ function nextUserId() {
    Guardar/Cancelar en su lugar; confirmarToggleUsuario() aplica de verdad la lógica existente de
    toggleUsuarioActivo(). */
 function usuarioRowHtml(u) {
+  /* FIX "Crash de Gestión de Usuarios por fila sin .roles": una fila huérfana/mal formada (p. ej. un registro
+     de prueba insertado directo contra Supabase, sin pasar por el formulario #formUsuario que sí exige
+     roles.length > 0) rompía TODA la tabla de Usuarios para cualquier Admin -- u.roles.indexOf/.map sobre
+     undefined. Se normaliza aquí, igual que el resto de accesores defensivos del archivo, para que una sola
+     fila corrupta nunca vuelva a tumbar la vista completa. */
+  var roles = Array.isArray(u.roles) ? u.roles : [];
   var asign = u.sede || u.aliado || '—';
   /* Ver requerimiento "Eliminación del Sistema de Activación por Enlace/Token": ya no existe el estado
      PENDING_ACTIVATION -- todo usuario nuevo nace ACTIVO de inmediato (ver creación en #formUsuario), así
@@ -13454,11 +13460,11 @@ function usuarioRowHtml(u) {
     /* Ver requerimiento "Prompt Consolidador Maestro...", Bloque 1: "Establecer Contraseña" sigue siendo una
        acción de RESET exclusiva de BODEGA sobre una cuenta ya existente (ver establecerPasswordBodegaDirecta)
        -- independiente de cómo se activó originalmente, sin cambios por este requerimiento. */
-    if (u.roles.indexOf('BODEGA') !== -1) acciones += '<button data-act="establecer-password-bodega" data-id="' + u.id + '">Establecer Contraseña</button>';
+    if (roles.indexOf('BODEGA') !== -1) acciones += '<button data-act="establecer-password-bodega" data-id="' + u.id + '">Establecer Contraseña</button>';
   }
   return '<tr>' +
     '<td><div class="courier"><div><div class="courier-name">' + u.nombre + '</div><div class="courier-sub">' + u.email + '</div></div></div></td>' +
-    '<td>' + u.roles.map(function (r) { return '<span class="user-role role-' + r + '">' + r + '</span>'; }).join(' ') + '</td>' +
+    '<td>' + roles.map(function (r) { return '<span class="user-role role-' + r + '">' + r + '</span>'; }).join(' ') + '</td>' +
     '<td>' + asign + '</td>' +
     '<td>' + estadoBadge + '</td>' +
     '<td><div class="row-actions">' + acciones + '</div></td>' +
@@ -13470,7 +13476,7 @@ function renderUsuarios() {
   var qEstado = document.getElementById('userFilterEstado').value;
   var list = state.users.filter(function (u) {
     if (q && u.nombre.toLowerCase().indexOf(q) === -1 && u.email.toLowerCase().indexOf(q) === -1) return false;
-    if (qRol && u.roles.indexOf(qRol) === -1) return false;
+    if (qRol && (!Array.isArray(u.roles) || u.roles.indexOf(qRol) === -1)) return false;
     if (qEstado === 'activo' && !u.activo) return false;
     if (qEstado === 'inactivo' && u.activo) return false;
     return true;
@@ -13567,7 +13573,7 @@ function openPermisosModal(userId) {
   var adicionales = (u.modulosAdicionales || []).filter(function (viewId) { return base.indexOf(viewId) === -1; });
   var disabled = u.modulosDeshabilitados || [];
   document.getElementById('permisosUserId').value = userId;
-  document.getElementById('permisosNote').textContent = u.nombre + ' · ' + u.roles.map(function (r) { return ROLE_LABEL_ES[r] || r; }).join(' + ') + ' — desmarca un módulo para ocultarlo de su barra lateral, o agrega módulos adicionales fuera de su rol base.';
+  document.getElementById('permisosNote').textContent = u.nombre + ' · ' + (Array.isArray(u.roles) ? u.roles : []).map(function (r) { return ROLE_LABEL_ES[r] || r; }).join(' + ') + ' — desmarca un módulo para ocultarlo de su barra lateral, o agrega módulos adicionales fuera de su rol base.';
   document.getElementById('permisosList').innerHTML =
     base.map(function (viewId) { return permisosModuloRowHtml(viewId, disabled.indexOf(viewId) === -1, false); }).join('') +
     adicionales.map(function (viewId) { return permisosModuloRowHtml(viewId, disabled.indexOf(viewId) === -1, true); }).join('');
@@ -16234,7 +16240,7 @@ function volverAPantallaLoginDesdeRecuperacion() {
 function abrirModalEstablecerPasswordBodega(userId) {
   if (!canDo('users.manage')) return;
   var u = state.users.find(function (x) { return x.id === userId; });
-  if (!u || u.roles.indexOf('BODEGA') === -1) return;
+  if (!u || !Array.isArray(u.roles) || u.roles.indexOf('BODEGA') === -1) return;
   document.getElementById('formEstablecerPasswordBodega').reset();
   document.getElementById('establecerPasswordUserId').value = userId;
   document.getElementById('establecerPasswordNote').textContent = 'Cuenta operativa de Bodega: ' + u.nombre + ' (' + u.sede + ') — ' + u.email + '.';
@@ -16243,7 +16249,7 @@ function abrirModalEstablecerPasswordBodega(userId) {
 function establecerPasswordBodegaDirecta(userId, nuevaPassword) {
   if (!canDo('users.manage')) return;
   var u = state.users.find(function (x) { return x.id === userId; });
-  if (!u || u.roles.indexOf('BODEGA') === -1) return;
+  if (!u || !Array.isArray(u.roles) || u.roles.indexOf('BODEGA') === -1) return;
   if (!nuevaPassword || nuevaPassword.length < 6) { toast('warn', 'Contraseña muy corta', 'Debe tener al menos 6 caracteres.'); return; }
   hashPassword(nuevaPassword).then(function (hashed) {
   u.password = hashed;
@@ -16331,7 +16337,7 @@ function seguridadUsuarioRowHtml(u) {
   acciones += '</div>';
   return '<tr>' +
     '<td><div class="courier"><div><div class="courier-name">' + u.nombre + '</div><div class="courier-sub">' + u.email + '</div></div></div></td>' +
-    '<td>' + u.roles.map(function (r) { return '<span class="user-role role-' + r + '">' + r + '</span>'; }).join(' ') + '</td>' +
+    '<td>' + (Array.isArray(u.roles) ? u.roles : []).map(function (r) { return '<span class="user-role role-' + r + '">' + r + '</span>'; }).join(' ') + '</td>' +
     '<td>' + estadoHtml + '</td>' +
     '<td>' + intentos + '</td>' +
     '<td>' + acciones + '</td>' +
