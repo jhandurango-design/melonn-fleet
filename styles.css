@@ -94,6 +94,19 @@ a{color:inherit;}
   opacity:0.96;transform:scale(0.93);transform-origin:top right;
   filter:brightness(0) invert(1);
 }
+/* Ver requerimiento "Banner de Ventana de Actualizaciones (Login) -- Reubicación Superior": franja fija de
+   ancho completo (fuera del grid de .login-screen, mismo criterio que .login-footer-ribbon abajo) -- ya no
+   vive dentro de la tarjeta, así que no afecta su alto ni puede quedar sobrepuesta con la cinta inferior.
+   z-index:20 (por encima de .login-corner-logo, que arranca en top:58px -- esta franja mide bastante menos
+   que eso de alto, sin solaparse). */
+.login-top-banner{
+  position:fixed;top:0;left:0;right:0;z-index:20;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  background:#EDE4FF;color:#5B21B6;
+  padding:10px 24px;font-size:12.5px;font-weight:500;text-align:center;
+  box-shadow:0 2px 10px rgba(0,0,0,.18);
+}
+.login-top-banner svg{flex-shrink:0;}
 .login-fleet-art{
   position:absolute;right:0;bottom:70px;z-index:0;max-width:min(560px,46vw);max-height:340px;
   pointer-events:none;

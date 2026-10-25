@@ -13,6 +13,19 @@
 <section id="loginScreen" class="login-screen">
   <div class="login-bg-pattern" aria-hidden="true"></div>
 
+  <!-- Ver requerimiento "Banner de Ventana de Actualizaciones (Login) -- Reubicación Superior": el usuario
+       pidió sacarlo de la tarjeta de login (ahí alargaba la tarjeta y la hacía quedar sobrepuesta con la
+       cinta negra inferior, que debe quedarse al fondo tal cual está) y ponerlo como franja fija arriba de
+       TODA la pantalla -- ya no reutiliza .cutoff-banner (pensado para vivir inline dentro de una tarjeta/
+       panel, con su propio min-height/margin) sino una clase propia de franja de ancho completo, mismo
+       criterio que .login-footer-ribbon (fixed, fuera del grid, no afecta el layout de columnas). Quitar
+       este bloque manualmente una vez pase la ventana (martes 27 de octubre, 9:00 a.m.) -- no se oculta solo
+       por fecha. -->
+  <div class="login-top-banner" id="loginVentanaActualizacionBanner">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+    <span><strong>Ventana de actualizaciones.</strong> La plataforma permanecerá en mantenimiento programado hasta el martes 27 de octubre, 9:00 a.m.</span>
+  </div>
+
   <img class="login-corner-logo" src="assets/logo-melonn.png" alt="melonn" aria-hidden="true">
 
   <!-- Espacio reservado para una ilustración de flota (PNG/SVG). Sin src: no renderiza nada hasta
@@ -36,16 +49,6 @@
           <div class="login-brand-text"><span class="login-brand-main">melonn</span><span class="login-brand-suffix">fleet</span></div>
           <p class="login-sub" data-i18n="login.subtitle">Control y Programación de Flota</p>
           <h1 data-i18n="login.title">Inicia sesión</h1>
-
-          <!-- Ver requerimiento "Banner de Ventana de Actualizaciones (Login)": aviso estático, sin lógica JS --
-               reutiliza el componente ya estandarizado .cutoff-banner (mismo que usan los avisos de "ventana
-               cerrada" en Programar Flota/Cuotas), variante informativa (lila, no .danger) porque es un aviso
-               programado, no un bloqueo ni un error. Quitar este bloque manualmente una vez pase la ventana
-               (martes 27 de octubre, 9:00 a.m.) -- no se oculta solo por fecha. -->
-          <div class="cutoff-banner" id="loginVentanaActualizacionBanner">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-            <span><strong>Ventana de actualizaciones.</strong> La plataforma permanecerá en mantenimiento programado hasta el martes 27 de octubre, 9:00 a.m.</span>
-          </div>
 
           <form id="loginForm" class="login-form" autocomplete="off">
             <div class="field">
