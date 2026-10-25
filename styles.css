@@ -291,6 +291,12 @@ a{color:inherit;}
 }
 .letra-animada{display:inline-block;opacity:0;animation:letraFadeIn .4s cubic-bezier(.16,1,.3,1) forwards;}
 #banderaCo{opacity:0;animation:letraFadeIn .4s cubic-bezier(.16,1,.3,1) forwards;}
+/* El "Ajuste fino tipográfico" global (mas abajo en este archivo: body,p,span,td,input,select{font-size:12px
+   !important;font-weight:500;...}) le gana a CUALQUIER <span>, incluido el nuevo wrapper del título
+   (#aliadosTituloTexto) y cada .letra-animada -- antes de envolver el texto en spans, el h3 no tenia ningun
+   span dentro y por eso heredaba su propio font-size:14px/font-weight:700 sin problema. Se restaura aqui
+   explicitamente para que el título anime SIN perder el tamaño/negrilla original. */
+#aliadosTituloTexto,.letra-animada{font-size:14px !important;font-weight:700 !important;}
 .login-form .field-required-msg{display:none;font-size:12px !important;color:#e53e3e;font-style:italic;margin-top:4px;}
 .login-form .field.error label{color:#e53e3e;}
 .login-form .field.error input{border:1px solid #e53e3e;}
