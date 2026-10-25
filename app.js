@@ -13631,6 +13631,17 @@ function openModal(id) {
   document.getElementById(id).classList.add('open');
 }
 function closeModal() {
+  /* Ver requerimiento "Corrección de Casos de Borde y Bugs de la Animación 3D de Login": el modal multirol
+     de PRIMER INGRESO (ver startSession/pendingRoleSelectionUser) no tiene botón Cancelar visible en este
+     caso (ver renderModalSeleccionPerfil), pero backdrop-click y ESC sí pasan por aquí igual -- si se cierra
+     así, sin elegir rol, la sesión nunca llegó a completarse (completarInicioSesion() jamás corrió), así que
+     se aborta explícitamente (pendingRoleSelectionUser=null) y se devuelve la tarjeta de login a su cara
+     frontal; de lo contrario quedaba "pegada" mostrando la cara de éxito sin ninguna sesión real detrás. */
+  var modalPerfil = document.getElementById('modalSeleccionPerfil');
+  if (modalPerfil && modalPerfil.classList.contains('open') && pendingRoleSelectionUser) {
+    pendingRoleSelectionUser = null;
+    resetLoginFormState();
+  }
   document.getElementById('modalOverlay').classList.remove('open');
   document.querySelectorAll('.modal').forEach(function (m) { m.classList.remove('open'); });
 }
@@ -16337,6 +16348,24 @@ function wireGenerarClaveAleatoria(btnId, inputId, toggleBtnId) {
    tarjeta regresa girando a la cara frontal (con shake + los 2 campos marcados en error). Orquestado desde
    estos 3 helpers, llamados SOLO desde los puntos reales de inicio/éxito/fallo de intentarCredenciales/
    resolverCredenciales/mostrarBloqueoLogin -- nunca un timer "a ciegas" independiente del resultado real. */
+/* Ver requerimiento "Corrección de Casos de Borde y Bugs de la Animación 3D de Login": función centralizada
+   que devuelve la tarjeta a su cara frontal (ignora is-authenticating de la versión anterior del morphing,
+   ya retirada, pero se limpia igual por si quedó algo persistido de una sesión vieja en este navegador).
+   Llamada desde los 3 escenarios reales donde la tarjeta podía quedar "pegada" mostrando la cara posterior
+   sin ninguna sesión real detrás: logout() (cierre de sesión explícito o cualquier redirección futura al
+   login por expiración -- único punto real de retorno a la pantalla de login en todo el archivo, ver ese
+   mismo comentario), closeModal() cuando el modal multirol de primer ingreso se cierra sin elegir rol
+   (backdrop/ESC -- ver ese mismo comentario), y loginCardMostrarError() (credenciales incorrectas). */
+function resetLoginFormState() {
+  var wrapper = document.querySelector('#loginScreen .login-card-wrapper');
+  var inner = document.getElementById('loginCardInner');
+  var back = document.getElementById('loginCardBack');
+  if (wrapper) wrapper.classList.remove('is-flipped');
+  if (inner) inner.classList.remove('is-flipped');
+  if (back) back.classList.remove('is-loading', 'is-success');
+  var btn = document.getElementById('loginSubmitBtn');
+  if (btn) btn.disabled = false;
+}
 function loginCardIniciarAutenticando() {
   var wrapper = document.querySelector('#loginScreen .login-card-wrapper');
   var inner = document.getElementById('loginCardInner');
@@ -16356,14 +16385,8 @@ function loginCardIniciarAutenticando() {
   inner.classList.add('is-flipped');
 }
 function loginCardMostrarError() {
-  var wrapper = document.querySelector('#loginScreen .login-card-wrapper');
-  var inner = document.getElementById('loginCardInner');
-  var back = document.getElementById('loginCardBack');
+  resetLoginFormState();
   var front = document.getElementById('loginCardFront');
-  if (!wrapper || !inner) return;
-  wrapper.classList.remove('is-flipped');
-  inner.classList.remove('is-flipped');
-  if (back) back.classList.remove('is-loading', 'is-success');
   if (front) {
     /* .auth-error (no .error): .error dispara el mensaje "Requerido" (ver .field.error .field-required-msg
        en styles.css), pensado solo para campos vacíos -- aquí los campos SÍ tienen contenido, solo son
@@ -19154,6 +19177,11 @@ function logout() {
   document.getElementById('loginForm').reset();
   document.getElementById('loginError').textContent = '';
   document.getElementById('userDropdown').classList.remove('open');
+  /* Ver requerimiento "Corrección de Casos de Borde y Bugs de la Animación 3D de Login": sin esto, cerrar
+     sesión justo después de un login reciente (o cualquier redirección futura al login por expiración de
+     token/inactividad -- logout() es el único punto real de retorno a esta pantalla) podía dejar la tarjeta
+     mostrando "¡Bienvenido de nuevo!" en vez del formulario de credenciales. */
+  resetLoginFormState();
 }
 /* ---------------- Wiring ---------------- */
 document.addEventListener('DOMContentLoaded', function () {
