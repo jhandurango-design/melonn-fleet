@@ -19218,6 +19218,13 @@ document.addEventListener('DOMContentLoaded', function () {
     var aliadosPasoLetra = 0.02;
     aliadosTituloEl.innerHTML = '';
     aliadosTexto.split('').forEach(function (letra, i) {
+      /* Un espacio suelto como ÚNICO contenido de un span display:inline-block se recorta a ancho 0 (el
+         navegador recorta el whitespace inicial/final del contenido de la caja) -- se deja como nodo de
+         texto normal, sin animar, igual que el espacio entre dos <span> cualquiera. */
+      if (letra === ' ') {
+        aliadosTituloEl.appendChild(document.createTextNode(' '));
+        return;
+      }
       var letraSpan = document.createElement('span');
       letraSpan.className = 'letra-animada';
       letraSpan.textContent = letra;
