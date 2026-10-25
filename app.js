@@ -665,6 +665,15 @@ var scTablasConAltaEnVuelo = {};
    su propio aviso específico más claro ("No se pudo confirmar en la nube...") en el propio `.then()` de
    quien la llamó. Con `silencioso`, scNotificarFalloSupabase() ni siquiera se invoca -- el fallo sigue
    quedando en consola (console.warn) y el próximo push periódico lo reintenta normalmente. */
+/* Ver requerimiento "Reintentos Automáticos ante Hipo de Red (scPushRows)" (reporte real en producción:
+   guardado de contraseña obligatorio fallando de forma recurrente para un usuario puntual de una bodega --
+   diagnóstico descartó RLS/datos como causa, dejando un corte de red transitorio en esa conexión como la
+   explicación más probable): antes, un solo timeout/error de red (SC_PUSH_TIMEOUT_MS, 10s) bastaba para
+   reportar el guardado como fallido, sin ningún reintento -- un hipo de 1-2s en una conexión inestable
+   bloqueaba al usuario por completo, obligándolo a reintentar manualmente. Ahora reintenta hasta 2 veces más
+   (3 intentos en total) con una breve espera entre cada uno antes de rendirse -- beneficia a CUALQUIER
+   llamador de scPushRows (50+ puntos en el archivo), no solo al guardado de contraseña. */
+var SC_PUSH_RETRY_DELAYS_MS = [1000, 2000];
 function scPushRows(table, rows, clienteAuthOverride, silencioso) {
   var client = clienteParaTabla(table, clienteAuthOverride);
   if (!client || !rows || !rows.length) return Promise.resolve({ ok: true });
@@ -682,26 +691,37 @@ function scPushRows(table, rows, clienteAuthOverride, silencioso) {
     delete sinRoleEfimero.role;
     return { id: r.id, data: sinRoleEfimero };
   });
-  var upsertPromise;
-  try {
-    upsertPromise = client.from(table).upsert(payload);
-  } catch (e) {
-    console.warn('Supabase: excepción al preparar guardado de ' + table + ':', e);
-    if (!silencioso) scNotificarFalloSupabase(table);
-    liberarAlta();
-    return Promise.resolve({ ok: false, error: e });
+  function intentoUnico() {
+    var upsertPromise;
+    try {
+      upsertPromise = client.from(table).upsert(payload);
+    } catch (e) {
+      return Promise.resolve({ ok: false, error: e });
+    }
+    var timeoutPromise = new Promise(function (resolve) { setTimeout(function () { resolve({ timedOut: true }); }, SC_PUSH_TIMEOUT_MS); });
+    return Promise.race([upsertPromise, timeoutPromise]).then(function (res) {
+      if (res && res.timedOut) return { ok: false, error: 'timeout' };
+      if (res.error) return { ok: false, error: res.error };
+      return { ok: true };
+    }, function (e) {
+      return { ok: false, error: e };
+    });
   }
-  var timeoutPromise = new Promise(function (resolve) { setTimeout(function () { resolve({ timedOut: true }); }, SC_PUSH_TIMEOUT_MS); });
-  return Promise.race([upsertPromise, timeoutPromise]).then(function (res) {
+  function conReintentos(numeroIntento) {
+    return intentoUnico().then(function (res) {
+      if (res.ok || numeroIntento > SC_PUSH_RETRY_DELAYS_MS.length) return res;
+      return new Promise(function (resolve) { setTimeout(resolve, SC_PUSH_RETRY_DELAYS_MS[numeroIntento - 1]); })
+        .then(function () { return conReintentos(numeroIntento + 1); });
+    });
+  }
+  return conReintentos(1).then(function (res) {
     liberarAlta();
-    if (res && res.timedOut) { console.warn('Supabase: tiempo de espera agotado al guardar ' + table); if (!silencioso) scNotificarFalloSupabase(table); return { ok: false, error: 'timeout' }; }
-    if (res.error) { console.warn('Supabase: fallo al guardar ' + table + ':', res.error.message); if (!silencioso) scNotificarFalloSupabase(table); return { ok: false, error: res.error }; }
-    return { ok: true };
-  }, function (e) {
-    liberarAlta();
-    console.warn('Supabase: fallo al guardar ' + table + ':', e);
-    if (!silencioso) scNotificarFalloSupabase(table);
-    return { ok: false, error: e };
+    if (!res.ok) {
+      var motivo = res.error === 'timeout' ? 'tiempo de espera agotado' : (res.error && res.error.message) || res.error;
+      console.warn('Supabase: fallo al guardar ' + table + ' tras reintentos:', motivo);
+      if (!silencioso) scNotificarFalloSupabase(table);
+    }
+    return res;
   });
 }
 /* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota": las 3
@@ -19360,7 +19380,17 @@ document.addEventListener('DOMContentLoaded', function () {
        la carrera. Ver requerimiento "Bug de Persistencia: Cambio de Contraseña Voluntario": scPushRows ya NO
        resuelve ciegamente como éxito ante un fallo real de Supabase (ver su propio comentario) -- hay que
        revisar res.ok antes de avanzar a startSession(), o un push genuinamente fallido (no solo una carrera)
-       dejaría pasar al usuario igual, con la clave viviendo solo en este navegador hasta el próximo pull. */
+       dejaría pasar al usuario igual, con la clave viviendo solo en este navegador hasta el próximo pull.
+       FIX "No se pudo confirmar el cambio en Supabase" (reporte real en producción, Analista de Recaudo
+       Montevideo): app_users exige rol `authenticated` (ver TABLAS_RLS_AUTHENTICATED/clienteParaTabla), y
+       supabaseAuthClient recién se puebla cuando el mint de sessionTokenMintEnVuelo (disparado en
+       resolverCredenciales, con la clave TEMPORAL, justo antes de abrir este modal) termina -- un Edge
+       Function real, ~1-4s de latencia variable (mismo rango ya documentado y corregido para el cambio de
+       rol en caliente, ver fijarSessionTokenConRol). Si el usuario completa y envía este formulario antes de
+       que ese mint resuelva, scPushRows caía al cliente anon (clienteParaTabla cae a supabaseClient cuando
+       supabaseAuthClient sigue null) y RLS lo rechazaba -- exactamente el mismo bug de raíz ya resuelto ahí,
+       nunca portado a este formulario. Se espera sessionTokenMintEnVuelo primero, mismo patrón exacto. */
+    (sessionTokenMintEnVuelo || Promise.resolve()).then(function () {
     scPushRows('app_users', [user]).then(function (res) {
       if (submitBtnObligatoria) submitBtnObligatoria.disabled = false;
       if (!res.ok) {
@@ -19377,6 +19407,7 @@ document.addEventListener('DOMContentLoaded', function () {
          recién definida) -- momento real para pedir un token de sesión firmado. */
       fijarSessionTokenNoBloqueante(user.email, nueva);
       startSession(user);
+    });
     });
     });
   });
