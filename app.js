@@ -19206,6 +19206,29 @@ document.addEventListener('DOMContentLoaded', function () {
   document.querySelectorAll('.partner-logo-card').forEach(function (card) {
     card.addEventListener('animationend', function () { card.classList.add('entrada-lista'); }, { once: true });
   });
+  /* Ver requerimiento "Animación Letra por Letra del Título de Aliados (consistente con la cascada de
+     logos)": reparte el texto de #aliadosTituloTexto en un <span class="letra-animada"> por caracter (ver
+     letraFadeIn en styles.css), cada uno con su propio animation-delay creciente -- arranca junto con la
+     cascada de logos (partner-logo-card, delays .1s-.5s) y termina en ventana similar. La bandera
+     (#banderaCo) usa el mismo keyframe, con un solo delay calculado para que aparezca justo al terminar la
+     última letra, como cierre de la frase. */
+  var aliadosTituloEl = document.getElementById('aliadosTituloTexto');
+  if (aliadosTituloEl) {
+    var aliadosTexto = aliadosTituloEl.textContent;
+    var aliadosPasoLetra = 0.02;
+    aliadosTituloEl.innerHTML = '';
+    aliadosTexto.split('').forEach(function (letra, i) {
+      var letraSpan = document.createElement('span');
+      letraSpan.className = 'letra-animada';
+      letraSpan.textContent = letra;
+      letraSpan.style.animationDelay = (i * aliadosPasoLetra).toFixed(3) + 's';
+      aliadosTituloEl.appendChild(letraSpan);
+    });
+    var banderaCoEl = document.getElementById('banderaCo');
+    if (banderaCoEl) {
+      banderaCoEl.style.animationDelay = (aliadosTexto.length * aliadosPasoLetra + 0.1).toFixed(3) + 's';
+    }
+  }
   state.users = loadPersistedUsers();
   /* Ver nota "Supabase" junto a scPullAll: disparo temprano, sin esperar -- para cuando el usuario termine
      de escribir sus credenciales, state.users ya suele estar refrescado desde la nube (cubre el caso de un

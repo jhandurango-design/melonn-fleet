@@ -92,8 +92,13 @@
   </div>
 
   <div class="login-partners-banner">
-    <h3>Nuestros Aliados de Mensajería en Colombia
-      <svg class="flag-co" viewBox="0 0 3 2" aria-hidden="true" focusable="false">
+    <!-- Ver requerimiento "Animación Letra por Letra del Título de Aliados (consistente con la cascada de
+         logos)": #aliadosTituloTexto se reparte en <span> por caracter vía app.js (DOMContentLoaded, mismo
+         bloque que marca .entrada-lista en los logos) -- cada letra con su propio animation-delay creciente,
+         mismo lenguaje de movimiento (fadeInUpCascade/letraFadeIn) y arrancando junto con la cascada de
+         logos, no antes ni después. La bandera (#banderaCo) revela justo al terminar la última letra. -->
+    <h3><span id="aliadosTituloTexto">Nuestros Aliados de Mensajería en Colombia</span>
+      <svg class="flag-co" id="banderaCo" viewBox="0 0 3 2" aria-hidden="true" focusable="false">
         <rect width="3" height="1" fill="#FCD116"></rect>
         <rect width="3" height="0.5" y="1" fill="#003893"></rect>
         <rect width="3" height="0.5" y="1.5" fill="#CE1126"></rect>

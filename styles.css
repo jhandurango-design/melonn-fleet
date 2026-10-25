@@ -279,6 +279,18 @@ a{color:inherit;}
    abajo sí pueda tomar el control normalmente. */
 .partner-logo-card.entrada-lista{animation:none;opacity:1;}
 .partner-logo-card:hover{transform:translateY(-4px) scale(1.03);box-shadow:0 8px 20px rgba(0,0,0,0.18);transition:transform .2s ease,box-shadow .2s ease;}
+/* Ver requerimiento "Animación Letra por Letra del Título de Aliados": mismo lenguaje de movimiento que
+   fadeInUpCascade (misma curva cubic-bezier) pero con un translateY mas chico y sin scale() -- en un
+   caracter suelto, el scale de 16px de las tarjetas se ve tembloroso/excesivo. app.js (DOMContentLoaded)
+   reparte #aliadosTituloTexto en un <span class="letra-animada"> por caracter con su propio
+   animation-delay inline, arrancando junto con la cascada de logos (mismo rango .1s-.5s aprox). La bandera
+   (#banderaCo) usa el mismo keyframe con un solo delay, justo cuando termina la ultima letra. */
+@keyframes letraFadeIn{
+  from{opacity:0;transform:translateY(6px);}
+  to{opacity:1;transform:translateY(0);}
+}
+.letra-animada{display:inline-block;opacity:0;animation:letraFadeIn .4s cubic-bezier(.16,1,.3,1) forwards;}
+#banderaCo{opacity:0;animation:letraFadeIn .4s cubic-bezier(.16,1,.3,1) forwards;}
 .login-form .field-required-msg{display:none;font-size:12px !important;color:#e53e3e;font-style:italic;margin-top:4px;}
 .login-form .field.error label{color:#e53e3e;}
 .login-form .field.error input{border:1px solid #e53e3e;}
