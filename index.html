@@ -327,7 +327,10 @@
                 <option value="sin_reemplazo">Mensajero no presenta / Sin reemplazo</option>
               </select>
             </div>
-            <button class="btn btn-ghost" id="dfClear" type="button">Limpiar Filtro</button>
+            <div class="filter-bar-actions">
+              <button type="button" class="icon-btn-search" id="dfSearch" aria-label="Buscar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span class="icon-btn-tip">Buscar</span></button>
+              <button class="icon-btn-clear" id="dfClear" type="button" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
+            </div>
           </div>
         </section>
 
@@ -396,7 +399,7 @@
                 <label for="alertasTipo">Tipo de alerta</label>
                 <select id="alertasTipo"></select>
               </div>
-              <button class="btn btn-ghost filter-bar-clear" id="alertasFilterClear" type="button">Limpiar Filtro</button>
+              <button class="icon-btn-clear" id="alertasFilterClear" type="button" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
           </section>
 
@@ -405,7 +408,7 @@
           <section class="table-card">
             <div class="kpi-active-filter-bar" id="alertasKpiActiveBar">
               <span class="kpi-active-filter-bar-text">Filtro activo: <strong class="kpi-active-filter-bar-value"></strong></span>
-              <button type="button" class="btn btn-ghost btn-limpiar-filtro-kpi" id="alertasKpiClear">Limpiar Filtro</button>
+              <button type="button" class="icon-btn-clear" id="alertasKpiClear" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
             <div class="table-head">
               <div>
@@ -463,7 +466,7 @@
                 <label for="alertasHistTipo">Tipo de Alerta</label>
                 <select id="alertasHistTipo"></select>
               </div>
-              <button class="btn btn-ghost filter-bar-clear" id="alertasHistFilterClear" type="button">Limpiar Filtro</button>
+              <button class="icon-btn-clear" id="alertasHistFilterClear" type="button" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
           </section>
 
@@ -562,9 +565,8 @@
                    (donde Desde/Hasta están ocultos, así que queda justo después de Mensajero) como en "Historial
                    del Mes" -- mismo patrón ya usado en Despacho/Seguimiento (ver requerimiento "Mejoras de UI,
                    Auditoría de Trazabilidad y Control de Acceso..."). -->
-              <div class="field filter-bar-clear">
-                <label>&nbsp;</label>
-                <button type="button" class="btn btn-ghost" id="btnLimpiarConsolidadoFiltro">Limpiar Filtro</button>
+              <div class="filter-bar-actions">
+                <button type="button" class="icon-btn-clear" id="btnLimpiarConsolidadoFiltro" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
               </div>
             </div>
             <!-- Ver requerimiento "Ajustes finales de estructura... Avance y Carga T+1", punto 2: la barra de
@@ -588,9 +590,8 @@
                   <option value="pendiente">Pendiente por cargar</option>
                 </select>
               </div>
-              <div class="field filter-bar-clear">
-                <label>&nbsp;</label>
-                <button type="button" class="btn btn-ghost" id="btnLimpiarConsolManFiltro">Limpiar Filtro</button>
+              <div class="filter-bar-actions">
+                <button type="button" class="icon-btn-clear" id="btnLimpiarConsolManFiltro" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
               </div>
             </div>
           </div>
@@ -621,7 +622,7 @@
           <section class="table-card">
             <div class="kpi-active-filter-bar" id="consolKpiActiveBar">
               <span class="kpi-active-filter-bar-text">Filtro activo: <strong class="kpi-active-filter-bar-value"></strong></span>
-              <button type="button" class="btn btn-ghost btn-limpiar-filtro-kpi" id="consolKpiClear" data-i18n="consolidado.clearFilter">Limpiar Filtro</button>
+              <button type="button" class="icon-btn-clear" id="consolKpiClear" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
             <div class="table-head">
               <div>
@@ -757,9 +758,8 @@
                  tanto en "Operación del Día" como en "Historial del Mes" -- antes quedaba a la izquierda de
                  los selectores de fecha en modo Historial. Mismo patrón de "Limpiar Filtro" que Cuotas de
                  Flota (Admin). -->
-            <div class="field filter-bar-clear">
-              <label>&nbsp;</label>
-              <button type="button" class="btn btn-ghost" id="btnLimpiarDespachoFiltro">Limpiar Filtro</button>
+            <div class="filter-bar-actions">
+              <button type="button" class="icon-btn-clear" id="btnLimpiarDespachoFiltro" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
           </div>
         </div>
@@ -775,7 +775,7 @@
         <section class="table-card">
           <div class="kpi-active-filter-bar" id="despachoKpiActiveBar">
             <span class="kpi-active-filter-bar-text">Filtro activo: <strong class="kpi-active-filter-bar-value"></strong></span>
-            <button type="button" class="btn btn-ghost btn-limpiar-filtro-kpi" id="despachoKpiClear">Limpiar Filtro</button>
+            <button type="button" class="icon-btn-clear" id="despachoKpiClear" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
           </div>
           <div class="table-head">
             <div>
@@ -843,7 +843,10 @@
                 <input id="flotaPropiaBuscar" type="text" placeholder="Ej. Rodrigo Salinas o MX-3000" autocomplete="off">
               </div>
             </div>
-            <button class="btn btn-ghost filter-bar-clear" id="flotaPropiaFilterClear" type="button">Limpiar Filtro</button>
+            <div class="filter-bar-actions">
+              <button type="button" class="icon-btn-search" id="flotaPropiaFilterSearch" aria-label="Buscar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span class="icon-btn-tip">Buscar</span></button>
+              <button class="icon-btn-clear" id="flotaPropiaFilterClear" type="button" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
+            </div>
           </div>
         </section>
 
@@ -967,7 +970,7 @@
               <label for="progFiltroMensajero">Mensajero</label>
               <select id="progFiltroMensajero"></select>
             </div>
-            <button class="btn btn-ghost filter-bar-clear" id="progFiltroClear" type="button">Limpiar Filtro</button>
+            <button class="icon-btn-clear" id="progFiltroClear" type="button" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
           </div>
         </section>
 
@@ -1045,9 +1048,8 @@
             <!-- Ver requerimiento "Mejoras de UI, Auditoría de Trazabilidad y Control de Acceso...", punto 2:
                  reubicado al final de la fila (después de Desde/Hasta) para quedar siempre al extremo derecho.
                  Mismo patrón de "Limpiar Filtro" que Cuotas de Flota (Admin). -->
-            <div class="field filter-bar-clear">
-              <label>&nbsp;</label>
-              <button type="button" class="btn btn-ghost" id="btnLimpiarSeguimientoFiltro">Limpiar Filtro</button>
+            <div class="filter-bar-actions">
+              <button type="button" class="icon-btn-clear" id="btnLimpiarSeguimientoFiltro" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
           </div>
         </div>
@@ -1063,7 +1065,7 @@
         <section class="table-card">
           <div class="kpi-active-filter-bar" id="seguimientoKpiActiveBar">
             <span class="kpi-active-filter-bar-text">Filtro activo: <strong class="kpi-active-filter-bar-value"></strong></span>
-            <button type="button" class="btn btn-ghost btn-limpiar-filtro-kpi" id="seguimientoKpiClear">Limpiar Filtro</button>
+            <button type="button" class="icon-btn-clear" id="seguimientoKpiClear" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
           </div>
           <div class="table-head">
             <div>
@@ -1158,7 +1160,7 @@
               <label for="auditMensajero">Mensajero</label>
               <select id="auditMensajero"></select>
             </div>
-            <button class="btn btn-ghost filter-bar-clear" id="auditFilterClear" type="button">Limpiar Filtro</button>
+            <button class="icon-btn-clear" id="auditFilterClear" type="button" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
           </div>
         </section>
 
@@ -1333,7 +1335,10 @@
                   <option value="inactivo">Inactivo</option>
                 </select>
               </div>
-              <button class="btn btn-ghost filter-bar-clear" id="userFilterClear" type="button">Limpiar Filtro</button>
+              <div class="filter-bar-actions">
+                <button type="button" class="icon-btn-search" id="userFilterSearch" aria-label="Buscar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span class="icon-btn-tip">Buscar</span></button>
+                <button class="icon-btn-clear" id="userFilterClear" type="button" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
+              </div>
             </div>
           </section>
           <section class="table-card">
@@ -1592,9 +1597,8 @@
                 </div>
                 <!-- Ver requerimiento "Ajustes UX/UI y Estandarización de Componentes" (3): mismo patrón de
                      "Limpiar Filtro" que Cuotas de Flota (Admin), replicado aquí para Solicitudes Pendientes. -->
-                <div class="field filter-bar-clear">
-                  <label>&nbsp;</label>
-                  <button type="button" class="btn btn-ghost" id="btnLimpiarSolicitudesFiltro">Limpiar Filtro</button>
+                <div class="filter-bar-actions">
+                  <button type="button" class="icon-btn-clear" id="btnLimpiarSolicitudesFiltro" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
                 </div>
               </div>
             </div>
@@ -1689,7 +1693,7 @@
                   <option value="reprogramacion_masiva">Reprogramación Masiva de Ventana</option>
                 </select>
               </div>
-              <button class="btn btn-ghost filter-bar-clear" id="solicitudesHistFilterClear" type="button">Limpiar Filtro</button>
+              <button class="icon-btn-clear" id="solicitudesHistFilterClear" type="button" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
           </section>
 
@@ -1802,7 +1806,7 @@
                 <label for="cumplimientoBodegaMensajero">Mensajero</label>
                 <select id="cumplimientoBodegaMensajero"></select>
               </div>
-              <button class="btn btn-ghost filter-bar-clear" id="cumplimientoBodegaFilterClear" type="button">Limpiar Filtro</button>
+              <button class="icon-btn-clear" id="cumplimientoBodegaFilterClear" type="button" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
             <div class="cumplimiento-filtros-slot" id="cumplimientoAliadoFiltrosSlot" hidden>
               <div class="field">
@@ -1838,7 +1842,7 @@
                 <label for="cumplimientoAliadoMensajero">Mensajero</label>
                 <select id="cumplimientoAliadoMensajero"></select>
               </div>
-              <button class="btn btn-ghost filter-bar-clear" id="cumplimientoAliadoFilterClear" type="button">Limpiar Filtro</button>
+              <button class="icon-btn-clear" id="cumplimientoAliadoFilterClear" type="button" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
           </div>
         </section>
@@ -1867,7 +1871,7 @@
                  oculta por defecto. -->
             <div class="kpi-active-filter-bar" id="cumplimientoBodegaRankingKpiActiveBar">
               <span class="kpi-active-filter-bar-text">Filtro activo: <strong class="kpi-active-filter-bar-value"></strong></span>
-              <button type="button" class="btn btn-ghost btn-limpiar-filtro-kpi" id="cumplimientoBodegaRankingKpiClear">Limpiar Filtro</button>
+              <button type="button" class="icon-btn-clear" id="cumplimientoBodegaRankingKpiClear" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
             <div class="table-head">
               <div>
@@ -1891,7 +1895,7 @@
           <section class="table-card">
             <div class="kpi-active-filter-bar" id="cumplimientoBodegaKpiActiveBar">
               <span class="kpi-active-filter-bar-text">Filtro activo: <strong class="kpi-active-filter-bar-value"></strong></span>
-              <button type="button" class="btn btn-ghost btn-limpiar-filtro-kpi" id="cumplimientoBodegaKpiClear">Limpiar Filtro</button>
+              <button type="button" class="icon-btn-clear" id="cumplimientoBodegaKpiClear" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
             <div class="table-head">
               <div>
@@ -1925,7 +1929,7 @@
           <section class="table-card">
             <div class="kpi-active-filter-bar" id="cumplimientoAliadoRankingKpiActiveBar">
               <span class="kpi-active-filter-bar-text">Filtro activo: <strong class="kpi-active-filter-bar-value"></strong></span>
-              <button type="button" class="btn btn-ghost btn-limpiar-filtro-kpi" id="cumplimientoAliadoRankingKpiClear">Limpiar Filtro</button>
+              <button type="button" class="icon-btn-clear" id="cumplimientoAliadoRankingKpiClear" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
             <div class="table-head">
               <div>
@@ -1975,7 +1979,7 @@
           <section class="table-card">
             <div class="kpi-active-filter-bar" id="cumplimientoAliadoKpiActiveBar">
               <span class="kpi-active-filter-bar-text">Filtro activo: <strong class="kpi-active-filter-bar-value"></strong></span>
-              <button type="button" class="btn btn-ghost btn-limpiar-filtro-kpi" id="cumplimientoAliadoKpiClear">Limpiar Filtro</button>
+              <button type="button" class="icon-btn-clear" id="cumplimientoAliadoKpiClear" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
             <div class="table-head">
               <div>
@@ -2068,9 +2072,8 @@
             </div>
             <!-- Exclusivo Admin (ver requerimiento "Filtro de Cuotas") — restablece Bodega/Ciudad y Aliado a
                  su selección por defecto (state.cuotasSelSede/cuotasSelAliado = null) en un solo clic. -->
-            <div class="field filter-bar-clear" id="cuotasLimpiarFiltroField" hidden>
-              <label>&nbsp;</label>
-              <button type="button" class="btn btn-ghost" id="btnLimpiarCuotasFiltro">Limpiar Filtro</button>
+            <div class="filter-bar-actions" id="cuotasLimpiarFiltroField" hidden>
+              <button type="button" class="icon-btn-clear" id="btnLimpiarCuotasFiltro" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
             </div>
           </div>
         </section>
@@ -2314,7 +2317,10 @@
                 <input type="text" id="comunicadosFiltroTexto" placeholder="Mensaje, autor, bodega, aliado..." autocomplete="off">
               </div>
             </div>
-            <button type="button" class="btn btn-ghost filter-bar-clear" id="btnLimpiarFiltroComunicados">Limpiar Filtro</button>
+            <div class="filter-bar-actions">
+              <button type="button" class="icon-btn-search" id="btnBuscarFiltroComunicados" aria-label="Buscar"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg><span class="icon-btn-tip">Buscar</span></button>
+              <button type="button" class="icon-btn-clear" id="btnLimpiarFiltroComunicados" aria-label="Limpiar filtros"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 3 10 12"/><path d="M10 12 4 15l-1 5 5-1 3-6"/><path d="M6 17l3-3"/></svg><span class="icon-btn-tip">Limpiar filtros</span></button>
+            </div>
           </div>
         </section>
 

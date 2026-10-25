@@ -19623,7 +19623,11 @@ document.addEventListener('DOMContentLoaded', function () {
   ['comunicadosFiltroDia', 'comunicadosFiltroDesde', 'comunicadosFiltroHasta', 'comunicadosFiltroEstado'].forEach(function (id) {
     document.getElementById(id).addEventListener('change', renderComunicacionesHistorial);
   });
-  document.getElementById('comunicadosFiltroTexto').addEventListener('input', renderComunicacionesHistorial);
+  /* Ver requerimiento "Estandarización Global de la Barra de Filtros: Lupa + Escobita": ya no filtra en vivo
+     por tecla -- Enter o el nuevo botón Lupa (#btnBuscarFiltroComunicados) aplican el filtro. Fecha/Estado
+     siguen en 'change' sin cambios (ver forEach de arriba). */
+  document.getElementById('comunicadosFiltroTexto').addEventListener('keydown', function (e) { if (e.key === 'Enter') renderComunicacionesHistorial(); });
+  document.getElementById('btnBuscarFiltroComunicados').addEventListener('click', renderComunicacionesHistorial);
   document.getElementById('btnLimpiarFiltroComunicados').addEventListener('click', function () {
     document.getElementById('comunicadosFiltroDia').value = '';
     document.getElementById('comunicadosFiltroDesde').value = '';
@@ -19726,10 +19730,15 @@ document.addEventListener('DOMContentLoaded', function () {
     syncAndRender(true);
   });
 
-  ['dfRuta', 'dfMensajero', 'dfEstado'].forEach(function (id) {
-    var el = document.getElementById(id);
-    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', renderDashboardTable);
+  /* Ver requerimiento "Estandarización Global de la Barra de Filtros: Lupa + Escobita": dfRuta/dfMensajero
+     dejan de filtrar en vivo con cada tecla -- ahora disparan renderDashboardTable() solo con Enter o con el
+     nuevo botón Lupa (#dfSearch). dfEstado (select) sigue en 'change' sin cambios, igual que todas las
+     demás vistas. */
+  document.getElementById('dfEstado').addEventListener('change', renderDashboardTable);
+  ['dfRuta', 'dfMensajero'].forEach(function (id) {
+    document.getElementById(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') renderDashboardTable(); });
   });
+  document.getElementById('dfSearch').addEventListener('click', renderDashboardTable);
   document.getElementById('dfClear').addEventListener('click', function () {
     document.getElementById('dfRuta').value = ''; document.getElementById('dfMensajero').value = ''; document.getElementById('dfEstado').value = '';
     renderDashboardTable();
@@ -20550,10 +20559,14 @@ document.addEventListener('DOMContentLoaded', function () {
     renderUsuarios();
   });
   document.getElementById('btnPermisosAgregarModulo').addEventListener('click', agregarModuloAdicionalGestion);
-  ['userSearch', 'userFilterRol', 'userFilterEstado'].forEach(function (id) {
-    var el = document.getElementById(id);
-    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', renderUsuarios);
+  /* Ver requerimiento "Estandarización Global de la Barra de Filtros: Lupa + Escobita": userSearch deja de
+     filtrar en vivo por tecla -- Enter o el nuevo botón Lupa (#userFilterSearch) aplican el filtro. Los
+     selects (Rol/Estado) siguen en 'change' sin cambios. */
+  ['userFilterRol', 'userFilterEstado'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', renderUsuarios);
   });
+  document.getElementById('userSearch').addEventListener('keydown', function (e) { if (e.key === 'Enter') renderUsuarios(); });
+  document.getElementById('userFilterSearch').addEventListener('click', renderUsuarios);
   document.getElementById('userFilterClear').addEventListener('click', function () {
     document.getElementById('userSearch').value = ''; document.getElementById('userFilterRol').value = ''; document.getElementById('userFilterEstado').value = '';
     renderUsuarios();
@@ -20840,7 +20853,11 @@ document.addEventListener('DOMContentLoaded', function () {
      al Módulo Bodega". */
   var flotaPropiaBuscarEl = document.getElementById('flotaPropiaBuscar');
   if (flotaPropiaBuscarEl) {
-    flotaPropiaBuscarEl.addEventListener('input', function (e) { state.flotaPropiaFiltro = e.target.value; renderFlotaPropia(); });
+    /* Ver requerimiento "Estandarización Global de la Barra de Filtros: Lupa + Escobita": ya no filtra en
+       vivo con cada tecla -- Enter o el nuevo botón Lupa (#flotaPropiaFilterSearch) aplican el filtro. */
+    function aplicarFiltroFlotaPropia() { state.flotaPropiaFiltro = flotaPropiaBuscarEl.value; renderFlotaPropia(); }
+    flotaPropiaBuscarEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') aplicarFiltroFlotaPropia(); });
+    document.getElementById('flotaPropiaFilterSearch').addEventListener('click', aplicarFiltroFlotaPropia);
     document.getElementById('flotaPropiaFilterClear').addEventListener('click', function () {
       state.flotaPropiaFiltro = '';
       flotaPropiaBuscarEl.value = '';

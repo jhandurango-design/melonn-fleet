@@ -1094,6 +1094,26 @@ button.icon-btn-edit{position:relative;width:30px;height:30px;flex-shrink:0;bord
 button.icon-btn-edit:hover{background:var(--border);}
 .icon-btn-edit .icon-btn-tip{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1F2937;color:#fff;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .12s ease;z-index:30;}
 .icon-btn-edit:hover .icon-btn-tip,.icon-btn-edit:focus-visible .icon-btn-tip{opacity:1;visibility:visible;}
+/* Ver requerimiento "Estandarización Global de la Barra de Filtros: Lupa + Escobita": mismo patrón circular +
+   tooltip oscuro flotante que .icon-btn-edit (arriba), reutilizado para los 2 nuevos icon-buttons de cada
+   barra de filtros -- Lupa (fondo oscuro, dispara la búsqueda explícita en los paneles con texto) y Escobita
+   (fondo lila, reemplaza 1:1 el antiguo botón de texto "Limpiar Filtro" en TODA la plataforma, 25 ubicaciones).
+   Mismos tokens de color ya usados en esta sesión para "Acciones •••" (var(--btn-primary-bg)/.row-menu-toggle)
+   -- cero colores nuevos. Selector "button.icon-btn-search/.icon-btn-clear" (con el tipo de etiqueta) por el
+   mismo motivo ya documentado para .icon-btn-edit/.row-menu-toggle: empatar la especificidad de
+   ".row-actions button" por si algún filtro vive dentro de ese contenedor. */
+button.icon-btn-search{position:relative;width:30px;height:30px;flex-shrink:0;border:none;border-radius:50%;background:var(--btn-primary-bg);color:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+button.icon-btn-search:hover{background:var(--btn-primary-hover);}
+button.icon-btn-clear{position:relative;width:30px;height:30px;flex-shrink:0;border:none;border-radius:50%;background:#EFEEFC;color:#635BFF;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;}
+button.icon-btn-clear:hover{background:#E3E1FB;}
+.icon-btn-search .icon-btn-tip,.icon-btn-clear .icon-btn-tip{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1F2937;color:#fff;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .12s ease;z-index:30;}
+.icon-btn-search:hover .icon-btn-tip,.icon-btn-search:focus-visible .icon-btn-tip,
+.icon-btn-clear:hover .icon-btn-tip,.icon-btn-clear:focus-visible .icon-btn-tip{opacity:1;visibility:visible;}
+/* Reemplaza la pareja .field.filter-bar-clear + <label>&nbsp;</label> que usaban 6 de las 25 ubicaciones
+   (Cuotas/Solicitudes/Consolidado x2/Despacho/Seguimiento) -- ya no hace falta el label fantasma para
+   alinear: align-items:flex-end de .filter-bar/.filter-grid ya alinea estos botones al fondo de la fila por
+   sí solo, igual que las otras 19 ubicaciones que nunca tuvieron ese wrapper. */
+.filter-bar-actions{display:flex;gap:6px;flex:0 0 auto;width:auto;max-width:fit-content;margin-left:0;align-self:flex-end;}
 .config-input{width:90px;border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px !important;font-weight:700;text-align:right;background:var(--muted-soft);color:var(--text-primary);outline:none;}
 .config-input:focus{border-color:var(--lilac-deep);box-shadow:0 0 0 3px var(--lilac-soft);}
 .config-input[type="time"]{width:120px;text-align:left;}
