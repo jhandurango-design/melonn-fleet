@@ -252,6 +252,13 @@ a{color:inherit;}
 .partner-logo-card:nth-child(3){animation-delay:.3s;}
 .partner-logo-card:nth-child(4){animation-delay:.4s;}
 .partner-logo-card:nth-child(5){animation-delay:.5s;}
+/* FIX real detectado al verificar en vivo: una animación con fill-mode:forwards (la de entrada, arriba)
+   sigue "ganando" la cascada sobre `transform` para siempre, incluso ya terminada -- así que la transición
+   de :hover sobre esa misma propiedad nunca llegaba a aplicarse (confirmado: el transform no cambiaba en
+   absoluto al pasar el cursor). .entrada-lista (agregada por app.js al terminar cada animación, ver
+   'animationend') quita `animation` por completo -- libera `transform` para que la transición de :hover de
+   abajo sí pueda tomar el control normalmente. */
+.partner-logo-card.entrada-lista{animation:none;opacity:1;}
 .partner-logo-card:hover{transform:translateY(-4px) scale(1.03);box-shadow:0 8px 20px rgba(0,0,0,0.18);transition:transform .2s ease,box-shadow .2s ease;}
 @media (prefers-reduced-motion: reduce){
   .partner-logo-card{opacity:1;animation:none;}

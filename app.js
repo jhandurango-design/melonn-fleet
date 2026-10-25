@@ -19185,6 +19185,14 @@ function logout() {
 }
 /* ---------------- Wiring ---------------- */
 document.addEventListener('DOMContentLoaded', function () {
+  /* Ver requerimiento "Animación de Entrada Escalonada en Cascada (Staggered Fade-In) — Aliados de
+     Mensajería": marca cada tarjeta como .entrada-lista justo al terminar su propia animación de entrada
+     (ver fadeInUpCascade/animationend en styles.css) -- libera `transform` de la animación (fill-mode:
+     forwards lo retenía para siempre, incluso terminada) para que la transición de :hover vuelva a poder
+     tomar el control normalmente. { once: true } por tarjeta -- no hace falta repetirlo nunca más. */
+  document.querySelectorAll('.partner-logo-card').forEach(function (card) {
+    card.addEventListener('animationend', function () { card.classList.add('entrada-lista'); }, { once: true });
+  });
   state.users = loadPersistedUsers();
   /* Ver nota "Supabase" junto a scPullAll: disparo temprano, sin esperar -- para cuando el usuario termine
      de escribir sus credenciales, state.users ya suele estar refrescado desde la nube (cubre el caso de un
