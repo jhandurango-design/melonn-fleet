@@ -19043,10 +19043,23 @@ function completarInicioSesion(user) {
 /* Construye el modal de Selección de Perfil -- un botón por rol disponible, y oculta "Cancelar" mientras sea
    un gate obligatorio de login (pendingRoleSelectionUser activo); en el cambio en caliente desde el Header
    SÍ se puede cancelar (el usuario conserva el rol con el que ya estaba operando). */
+/* Ver requerimiento "Rediseño del Modal de Selección de Perfil (Role Cards, sin íconos)": subtexto
+   descriptivo fijo por rol -- no depende de ningún dato del usuario, solo documenta en una frase corta qué
+   cubre cada rol dentro de la plataforma. */
+var ROLE_SUBTEXT_ES = {
+  ADMIN: 'Acceso total y configuración',
+  PLANNER: 'Programación y despacho global',
+  BODEGA: 'Gestión operativa en sede',
+  ALIADO: 'Asignación de flota externa',
+  AUDITOR: 'Supervisión y calidad de rutas'
+};
 function renderModalSeleccionPerfil(user) {
   document.getElementById('seleccionPerfilNombre').textContent = user.nombre;
   document.getElementById('seleccionPerfilBotones').innerHTML = user.roles.map(function (r) {
-    return '<button type="button" class="btn btn-primary" data-act="seleccionar-perfil" data-role="' + r + '">' + (ROLE_LABEL_ES[r] || r) + '</button>';
+    return '<button type="button" class="role-card" data-act="seleccionar-perfil" data-role="' + r + '">' +
+      '<div class="role-card-title">' + (ROLE_LABEL_ES[r] || r) + '</div>' +
+      '<div class="role-card-sub">' + (ROLE_SUBTEXT_ES[r] || '') + '</div>' +
+      '</button>';
   }).join('');
   document.getElementById('btnSeleccionPerfilCancelar').hidden = !!pendingRoleSelectionUser;
 }

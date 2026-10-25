@@ -1136,8 +1136,23 @@ button.row-menu-toggle:hover{background:#E3E1FB;color:#635BFF;}
 .regularizacion-fila-form label{font-size:12px;font-weight:600;color:var(--text-secondary);}
 .regularizacion-fila-form input,.regularizacion-fila-form textarea{border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;font-family:inherit;}
 .regularizacion-fila-form-botones{display:flex;gap:8px;}
-.perfil-opciones{display:flex;flex-direction:column;gap:8px;margin:14px 0;}
-.perfil-opciones button{width:100%;}
+/* Ver requerimiento "Rediseño del Modal de Selección de Perfil (Role Cards, sin íconos)": reemplaza los
+   botones oscuros de ancho completo apilados por un grid de 2 columnas de tarjetas claras -- mismo
+   data-act="seleccionar-perfil"/data-role de siempre (ver renderModalSeleccionPerfil/confirmarSeleccionPerfil
+   en app.js), solo cambia el markup/estilo de cada opción. */
+#modalSeleccionPerfil{max-width:500px;}
+.perfil-opciones{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:14px 0;}
+.role-card{
+  background:#F8F9FC;border:1px solid #E5E7EB;border-radius:10px;padding:14px 16px;
+  text-align:left;transition:all .2s ease;cursor:pointer;display:block;width:100%;
+}
+.role-card:hover,.role-card:focus-visible{
+  background:#EEEAFB;border-color:#635BFF;transform:translateY(-2px);
+  box-shadow:0 4px 12px rgba(99,91,255,.12);outline:none;
+}
+.role-card[disabled]{opacity:.6;cursor:not-allowed;transform:none;}
+.role-card-title{font-weight:600;font-size:15px;color:#14095B;margin-bottom:4px;}
+.role-card-sub{font-size:11px;color:#6B7280;}
 .checkbox-group{display:flex;flex-wrap:wrap;gap:10px 16px;}
 
 .confirmar-aviso-resumen{display:flex;flex-direction:column;gap:10px;margin-bottom:14px;}
