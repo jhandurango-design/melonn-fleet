@@ -205,6 +205,25 @@ a{color:inherit;}
 .login-forgot:hover{text-decoration:underline;}
 .login-error{color:var(--danger);font-size:12px;margin:-6px 0 0;min-height:14px;}
 .btn-block{width:100%;justify-content:center;padding:11px 16px;font-size:13px;}
+/* Ver requerimiento "Correccion visual cinta inferior": z-index de 10 a 1 -- la cinta es puramente
+   decorativa (aria-hidden="true") y no deberia tapar ningun otro elemento fijo/flotante que pueda caer sobre
+   su franja de 38px (ej. el badge oficial de reCAPTCHA, abajo a la derecha). El badge de Google ya trae su
+   propio z-index muy alto por defecto, pero bajar este a 1 lo deja sin ambiguedad por debajo de cualquier
+   elemento real de la interfaz, conservando el mismo fondo/tipografia/espaciado. Restaurada a pedido del
+   usuario (ver "Nuevo Fondo de Login (Ilustración de Logística)") tras una prueba sin ella. */
+.login-footer-ribbon{
+  position:fixed !important;left:0 !important;right:0 !important;bottom:0 !important;z-index:0 !important;
+  background-color:#111111 !important;padding:1px !important;height:38px !important;display:flex !important;
+  align-items:center !important;overflow:hidden !important;white-space:nowrap !important;
+}
+.login-footer-track{display:flex;width:max-content;animation:loginFooterScroll 26s linear infinite;}
+.login-footer-item{
+  margin:10px 10px 8px 10px !important;white-space:nowrap !important;
+  font-size:13px !important;font-weight:700 !important;color:#ffffff !important;
+}
+@keyframes loginFooterScroll{from{transform:translateX(0);}to{transform:translateX(-50%);}}
+
+@media (prefers-reduced-motion: reduce){.login-footer-track{animation:none;}}
 /* Ver requerimiento "Bug de reCAPTCHA persistente en la app": el badge oficial de Google solo aplica a las
    rutas públicas de autenticación (Login/Recuperación) -- app.js agrega .app-authenticated a <body> justo al
    entrar a la plataforma (startSession) y la quita al salir (logout), así que esta regla por selector cubre
