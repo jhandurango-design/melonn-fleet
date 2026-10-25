@@ -1101,10 +1101,18 @@ button.icon-btn-edit:hover{background:var(--border);}
    .icon-btn-edit. Selector "button.icon-btn-search/.icon-btn-clear" (con el tipo de etiqueta) por el mismo
    motivo ya documentado para .icon-btn-edit/.row-menu-toggle: empatar la especificidad de ".row-actions
    button" por si algún filtro vive dentro de ese contenedor. */
-button.icon-btn-search{position:relative;height:36px;min-width:68px;padding:0 22px;flex-shrink:0;border:none;border-radius:8px !important;background:var(--btn-primary-bg);color:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;}
+button.icon-btn-search{position:relative;height:29px;min-width:68px;padding:0 22px;flex-shrink:0;border:none;border-radius:8px !important;background:var(--btn-primary-bg);color:#fff;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;}
 button.icon-btn-search:hover{background:var(--btn-primary-hover);}
-button.icon-btn-clear{position:relative;height:36px;min-width:52px;padding:0 16px;flex-shrink:0;border:none;border-radius:8px !important;background-color:#EEEAFB !important;color:#635BFF;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;}
+button.icon-btn-clear{position:relative;height:29px;min-width:52px;padding:0 16px;flex-shrink:0;border:none;border-radius:8px !important;background-color:#EEEAFB !important;color:#635BFF;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;}
 button.icon-btn-clear:hover{background-color:#E3DDFB !important;}
+/* Ver requerimiento "Estandarización Global de la Barra de Filtros: Lupa + Escobita" -- ícono de la escobita
+   usando directamente el archivo de imagen de referencia del usuario (assets/icon-escobita.png, convertido a
+   transparencia alfa real aquí mismo -- el original tenía fondo blanco sólido, no transparente), en vez de
+   una recreación SVG a mano (2 intentos previos no lograban el match visual exacto). Se recolorea al morado
+   exacto de la plataforma (#635BFF) vía mask-image (no filter -- filter solo aproxima el color, mask lo
+   iguala exacto) -- único ícono de toda la plataforma que es raster en vez de SVG inline, por pedido
+   explícito del usuario tras confirmar que prefiere el match exacto sobre la consistencia vectorial. */
+.icon-btn-clear-img{display:inline-block;width:18px;height:18px;background-color:#635BFF;-webkit-mask-image:url('assets/icon-escobita.png');-webkit-mask-size:contain;-webkit-mask-repeat:no-repeat;-webkit-mask-position:center;mask-image:url('assets/icon-escobita.png');mask-size:contain;mask-repeat:no-repeat;mask-position:center;}
 .icon-btn-search .icon-btn-tip,.icon-btn-clear .icon-btn-tip{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);background:#1F2937;color:#fff;font-size:11px;font-weight:600;padding:5px 9px;border-radius:6px;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .12s ease;z-index:30;}
 .icon-btn-search:hover .icon-btn-tip,.icon-btn-search:focus-visible .icon-btn-tip,
 .icon-btn-clear:hover .icon-btn-tip,.icon-btn-clear:focus-visible .icon-btn-tip{opacity:1;visibility:visible;}
