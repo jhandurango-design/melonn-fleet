@@ -16330,9 +16330,46 @@ function wireGenerarClaveAleatoria(btnId, inputId, toggleBtnId) {
    Seguridad First-Time Login y No Repudio de Credenciales") -- intentarCredenciales() lo fija y abre
    #modalCambioObligatorio en vez de llamar startSession(); el submit de #formCambioObligatorio lo consume y
    recién ahí entra a la sesión. */
+/* Ver requerimiento "Animación Moderna de Transición/Morphing en la Tarjeta de Login": exclusivo de la
+   tarjeta blanca del formulario (#loginScreen .login-card) -- fondo azul, logos de aliados y "Aviso de
+   Plataforma" nunca se tocan. 3 estados (is-authenticating/is-success/is-leaving + shake-error, ver
+   styles.css) orquestados desde estos 3 helpers, llamados desde los puntos reales de inicio/éxito/fallo de
+   intentarCredenciales/resolverCredenciales/mostrarBloqueoLogin -- nunca un timer "a ciegas" independiente
+   del resultado real de la autenticación. */
+function loginCardEl() { return document.querySelector('#loginScreen .login-card'); }
+function loginCardIniciarAutenticando() {
+  var card = loginCardEl();
+  if (!card) return;
+  card.classList.remove('is-success', 'is-leaving', 'shake-error');
+  card.classList.add('is-authenticating');
+}
+function loginCardMostrarError() {
+  var card = loginCardEl();
+  if (!card) return;
+  card.classList.remove('is-authenticating');
+  /* Reinicia la animación si el usuario encadena 2 errores seguidos (forzar reflow entre quitar/agregar la
+     clase -- de lo contrario el navegador no vuelve a dispararla por ser "la misma" clase ya aplicada). */
+  card.classList.remove('shake-error');
+  void card.offsetWidth;
+  card.classList.add('shake-error');
+}
+/* callback: la continuación real (normalmente startSession(user)) -- se dispara al terminar la secuencia
+   visual completa (check con rebote, luego fundido hacia arriba), nunca antes, para que el cambio de vista
+   no se sienta como un salto brusco a mitad de animación. */
+function loginCardMostrarExito(callback) {
+  var card = loginCardEl();
+  if (!card) { callback(); return; }
+  card.classList.remove('is-authenticating');
+  card.classList.add('is-success');
+  setTimeout(function () {
+    card.classList.add('is-leaving');
+    setTimeout(callback, 280);
+  }, 450);
+}
 var pendingFirstLoginUser = null;
 var loginLockInterval = null;
 function mostrarBloqueoLogin(email, lockedUntil) {
+  loginCardMostrarError();
   var errEl = document.getElementById('loginError');
   var btn = document.getElementById('loginSubmitBtn');
   btn.disabled = true;
@@ -19245,6 +19282,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (!humanoVerificado) {
         document.getElementById('loginSubmitBtn').disabled = false;
         document.getElementById('loginError').textContent = 'No pudimos verificar la solicitud. Intenta de nuevo.';
+        loginCardMostrarError();
         return;
       }
       /* FIX "Contraseña recién cambiada en otra sesión se revierte sola tras un login fallido en una pestaña
@@ -19296,6 +19334,7 @@ document.addEventListener('DOMContentLoaded', function () {
       } else {
         var restantesSinUsuario = state.securityConfig.maxIntentos - recSinUsuario.count;
         document.getElementById('loginError').textContent = 'Correo o contraseña incorrectos. Queda ' + restantesSinUsuario + ' intento' + (restantesSinUsuario === 1 ? '' : 's') + ' restante' + (restantesSinUsuario === 1 ? '' : 's') + '.';
+        loginCardMostrarError();
       }
       return;
     }
@@ -19311,11 +19350,13 @@ document.addEventListener('DOMContentLoaded', function () {
         } else {
           var restantes = state.securityConfig.maxIntentos - rec.count;
           document.getElementById('loginError').textContent = 'Correo o contraseña incorrectos. Queda ' + restantes + ' intento' + (restantes === 1 ? '' : 's') + ' restante' + (restantes === 1 ? '' : 's') + '.';
+          loginCardMostrarError();
         }
         return;
       }
       if (!user.activo) {
         document.getElementById('loginError').textContent = 'Este usuario está inactivo. Contacta a un administrador.';
+        loginCardMostrarError();
         return;
       }
       delete state.loginAttempts[email];
@@ -19338,10 +19379,10 @@ document.addEventListener('DOMContentLoaded', function () {
           persistUsers();
           /* Ver nota "Supabase" junto a #formCambioObligatorio: encadenado por el mismo motivo -- startSession()
              dispara scPullAll() justo después. */
-          scPushRows('app_users', [user]).then(function () { startSession(user); });
+          scPushRows('app_users', [user]).then(function () { loginCardMostrarExito(function () { startSession(user); }); });
           return;
         }
-        startSession(user);
+        loginCardMostrarExito(function () { startSession(user); });
       });
     });
   }
@@ -19356,6 +19397,7 @@ document.addEventListener('DOMContentLoaded', function () {
     passwordField.closest('.field').classList.toggle('error', passwordEmpty);
     if (emailEmpty || passwordEmpty) return;
 
+    loginCardIniciarAutenticando();
     intentarCredenciales();
   });
 

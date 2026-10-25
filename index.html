@@ -21,7 +21,18 @@
   <img class="login-fleet-art" id="loginFleetArt" alt="" aria-hidden="true" hidden>
 
   <div class="login-panel-col">
-    <div class="login-panel">
+    <!-- Ver requerimiento "Animación Moderna de Transición/Morphing en la Tarjeta de Login": clase .login-card
+         agregada SOLO aquí (nunca en el .login-panel de #recoveryScreen) -- exclusivo de la tarjeta blanca del
+         formulario de "Inicia sesión", nunca toca el fondo azul, los logos de aliados ni el Aviso de
+         Plataforma. .login-card-loader/.login-card-check son overlays absolutos, ocultos por defecto (ver
+         styles.css), que loginCardIniciarAutenticando()/loginCardMostrarExito() en app.js activan vía clases
+         de estado (is-authenticating/is-success/is-leaving/shake-error) en los puntos reales de inicio/éxito/
+         fallo de intentarCredenciales/resolverCredenciales -- nunca un timer ciego. -->
+    <div class="login-panel login-card">
+      <div class="login-card-loader" aria-hidden="true"></div>
+      <div class="login-card-check" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      </div>
       <div class="login-brand-text"><span class="login-brand-main">melonn</span><span class="login-brand-suffix">fleet</span></div>
       <p class="login-sub" data-i18n="login.subtitle">Control y Programación de Flota</p>
       <h1 data-i18n="login.title">Inicia sesión</h1>
