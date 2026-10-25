@@ -5859,7 +5859,10 @@ function comunicadosFiltrados(lista) {
   var desde = modo === 'rango' ? document.getElementById('comunicadosFiltroDesde').value : '';
   var hasta = modo === 'rango' ? document.getElementById('comunicadosFiltroHasta').value : '';
   var estado = document.getElementById('comunicadosFiltroEstado').value;
-  var texto = document.getElementById('comunicadosFiltroTexto').value.trim().toLowerCase();
+  /* FIX "Filtro de texto seguía aplicándose solo, con ~1s de retraso" (ver mismo fix en renderUsuarios):
+     se lee de state.comunicadosFiltroTextoFiltro (solo lo actualizan Enter/Lupa/Escobita) en vez del valor
+     EN VIVO del input, que gravityTick() volvería a leer en el siguiente tick sin importar el listener. */
+  var texto = (state.comunicadosFiltroTextoFiltro || '').trim().toLowerCase();
   return lista.filter(function (c) {
     var fechaEmision = c.creadoEn ? fmtDateYMD(new Date(c.creadoEn)) : null;
     if (modo === 'dia') {
@@ -7100,8 +7103,11 @@ function rowHtmlDashboard(route) {
 }
 function renderDashboardTable() {
   var routes = routesInScope('today');
-  var qRuta = document.getElementById('dfRuta').value.trim().toLowerCase();
-  var qMensajero = document.getElementById('dfMensajero').value.trim().toLowerCase();
+  /* FIX "Filtro de texto seguía aplicándose solo, con ~1s de retraso" (ver mismo fix en renderUsuarios):
+     se lee de state.dfRutaFiltro/dfMensajeroFiltro (solo los actualizan Enter/Lupa/Escobita) en vez del
+     valor EN VIVO de los inputs, que gravityTick() volvería a leer en el siguiente tick. */
+  var qRuta = (state.dfRutaFiltro || '').trim().toLowerCase();
+  var qMensajero = (state.dfMensajeroFiltro || '').trim().toLowerCase();
   var qEstado = document.getElementById('dfEstado').value;
   var filtered = routes.filter(function (r) {
     var m = getMensajero(r.mensajeroId);
@@ -13491,7 +13497,14 @@ function usuarioRowHtml(u) {
     '</tr>';
 }
 function renderUsuarios() {
-  var q = document.getElementById('userSearch').value.trim().toLowerCase();
+  /* FIX "Filtro de texto seguía aplicándose solo, con ~1s de retraso" (hallazgo al verificar
+     "Estandarización Global de la Barra de Filtros: Lupa + Escobita"): leer el valor EN VIVO del input
+     aquí no bastaba para quitar el filtrado automático -- gravityTick() llama syncAndRender()/renderView()
+     cada segundo sin importar qué disparó el cambio, así que el siguiente tick volvía a leer lo que el
+     usuario ya hubiera tecleado, aunque el listener 'input' ya no estuviera. Se lee de state.userSearchFiltro
+     (solo lo actualizan Enter/Lupa/Escobita, ver wiring) en vez del DOM en vivo -- mismo criterio que ya
+     usaba correctamente Flota Propia (state.flotaPropiaFiltro). */
+  var q = (state.userSearchFiltro || '').trim().toLowerCase();
   var qRol = document.getElementById('userFilterRol').value;
   var qEstado = document.getElementById('userFilterEstado').value;
   var list = state.users.filter(function (u) {
@@ -19626,14 +19639,16 @@ document.addEventListener('DOMContentLoaded', function () {
   /* Ver requerimiento "Estandarización Global de la Barra de Filtros: Lupa + Escobita": ya no filtra en vivo
      por tecla -- Enter o el nuevo botón Lupa (#btnBuscarFiltroComunicados) aplican el filtro. Fecha/Estado
      siguen en 'change' sin cambios (ver forEach de arriba). */
-  document.getElementById('comunicadosFiltroTexto').addEventListener('keydown', function (e) { if (e.key === 'Enter') renderComunicacionesHistorial(); });
-  document.getElementById('btnBuscarFiltroComunicados').addEventListener('click', renderComunicacionesHistorial);
+  function aplicarFiltroComunicados() { state.comunicadosFiltroTextoFiltro = document.getElementById('comunicadosFiltroTexto').value; renderComunicacionesHistorial(); }
+  document.getElementById('comunicadosFiltroTexto').addEventListener('keydown', function (e) { if (e.key === 'Enter') aplicarFiltroComunicados(); });
+  document.getElementById('btnBuscarFiltroComunicados').addEventListener('click', aplicarFiltroComunicados);
   document.getElementById('btnLimpiarFiltroComunicados').addEventListener('click', function () {
     document.getElementById('comunicadosFiltroDia').value = '';
     document.getElementById('comunicadosFiltroDesde').value = '';
     document.getElementById('comunicadosFiltroHasta').value = '';
     document.getElementById('comunicadosFiltroEstado').value = '';
     document.getElementById('comunicadosFiltroTexto').value = '';
+    state.comunicadosFiltroTextoFiltro = '';
     renderComunicacionesHistorial();
   });
   document.getElementById('avisoPlantilla').addEventListener('change', function () {
@@ -19735,12 +19750,18 @@ document.addEventListener('DOMContentLoaded', function () {
      nuevo botón Lupa (#dfSearch). dfEstado (select) sigue en 'change' sin cambios, igual que todas las
      demás vistas. */
   document.getElementById('dfEstado').addEventListener('change', renderDashboardTable);
+  function aplicarFiltroDashboard() {
+    state.dfRutaFiltro = document.getElementById('dfRuta').value;
+    state.dfMensajeroFiltro = document.getElementById('dfMensajero').value;
+    renderDashboardTable();
+  }
   ['dfRuta', 'dfMensajero'].forEach(function (id) {
-    document.getElementById(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') renderDashboardTable(); });
+    document.getElementById(id).addEventListener('keydown', function (e) { if (e.key === 'Enter') aplicarFiltroDashboard(); });
   });
-  document.getElementById('dfSearch').addEventListener('click', renderDashboardTable);
+  document.getElementById('dfSearch').addEventListener('click', aplicarFiltroDashboard);
   document.getElementById('dfClear').addEventListener('click', function () {
     document.getElementById('dfRuta').value = ''; document.getElementById('dfMensajero').value = ''; document.getElementById('dfEstado').value = '';
+    state.dfRutaFiltro = ''; state.dfMensajeroFiltro = '';
     renderDashboardTable();
   });
 
@@ -20565,10 +20586,12 @@ document.addEventListener('DOMContentLoaded', function () {
   ['userFilterRol', 'userFilterEstado'].forEach(function (id) {
     document.getElementById(id).addEventListener('change', renderUsuarios);
   });
-  document.getElementById('userSearch').addEventListener('keydown', function (e) { if (e.key === 'Enter') renderUsuarios(); });
-  document.getElementById('userFilterSearch').addEventListener('click', renderUsuarios);
+  function aplicarFiltroUsuarios() { state.userSearchFiltro = document.getElementById('userSearch').value; renderUsuarios(); }
+  document.getElementById('userSearch').addEventListener('keydown', function (e) { if (e.key === 'Enter') aplicarFiltroUsuarios(); });
+  document.getElementById('userFilterSearch').addEventListener('click', aplicarFiltroUsuarios);
   document.getElementById('userFilterClear').addEventListener('click', function () {
     document.getElementById('userSearch').value = ''; document.getElementById('userFilterRol').value = ''; document.getElementById('userFilterEstado').value = '';
+    state.userSearchFiltro = '';
     renderUsuarios();
   });
 
