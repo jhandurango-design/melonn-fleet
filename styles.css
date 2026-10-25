@@ -105,31 +105,50 @@ a{color:inherit;}
   background:var(--bg-card);padding:40px;display:flex;flex-direction:column;
   width:440px;max-width:100%;margin:0 auto;border-radius:20px;box-shadow:var(--shadow-lg);
 }
-/* Ver requerimiento "Animación Moderna de Transición/Morphing en la Tarjeta de Login": exclusivo de
-   .login-card (SOLO la tarjeta blanca del formulario de "Inicia sesión", ver index.html -- nunca el fondo
-   azul, los logos de aliados ni el Aviso de Plataforma). position:relative necesario para los overlays
-   absolutos del loader/check. 3 estados reales (is-authenticating/is-success/is-leaving/shake-error),
-   activados desde app.js (loginCardIniciarAutenticando/loginCardMostrarError/loginCardMostrarExito) en los
-   puntos reales de inicio/éxito/fallo de intentarCredenciales/resolverCredenciales/mostrarBloqueoLogin. */
-.login-card{position:relative;transition:transform .4s cubic-bezier(.16,1,.3,1),opacity .3s ease,filter .3s ease;}
-.login-card.is-authenticating{transform:scale(.97);}
-.login-card.is-authenticating>*:not(.login-card-loader):not(.login-card-check){opacity:.25;filter:blur(1px);pointer-events:none;transition:opacity .3s ease,filter .3s ease;}
-.login-card-loader{
-  position:absolute;top:50%;left:50%;width:42px;height:42px;margin:-21px 0 0 -21px;border-radius:50%;
-  border:3px solid rgba(20,9,91,.15);border-top-color:#14095B;opacity:0;pointer-events:none;
-  transition:opacity .25s ease;
+/* Ver requerimiento "Transición de Alto Nivel tipo Card Flip/Sheet Slide (Login)": exclusivo de esta tarjeta
+   (nunca el .login-panel de #recoveryScreen, nunca el fondo azul/logos de aliados/Aviso de Plataforma).
+   .login-card-wrapper da la perspectiva 3D + tamaño/centrado (lo que antes tenía .login-panel directamente);
+   .login-card-inner es el objeto real que gira (preserve-3d + rotateY vía .is-flipped); .card-front/.card-back
+   son sus 2 caras, backface-visibility:hidden, superpuestas exactas (position:absolute en .card-back) sobre
+   el tamaño natural que .card-front establece en flujo normal (nunca una altura fija a mano, que se
+   desalinearía si el contenido del front cambia, p. ej. al quitar el banner de ventana de actualizaciones). */
+.login-card-wrapper{
+  position:relative;width:440px;max-width:100%;margin:0 auto;perspective:1200px;
+  transition:filter .6s ease;filter:drop-shadow(0 10px 25px rgba(20,9,91,.18));
 }
-.login-card.is-authenticating .login-card-loader{opacity:1;animation:loginCardSpin .8s linear infinite;}
+.login-card-wrapper.is-flipped{filter:drop-shadow(0 26px 55px rgba(20,9,91,.42));}
+.login-card-inner{
+  position:relative;width:100%;transform-style:preserve-3d;
+  transition:transform .6s cubic-bezier(.4,0,.2,1);
+}
+.login-card-inner.is-flipped{transform:rotateY(180deg);}
+.card-front,.card-back{backface-visibility:hidden;-webkit-backface-visibility:hidden;border-radius:20px;box-shadow:none;}
+/* .card-front REUTILIZA .login-panel tal cual (mismo fondo/padding/radio) -- solo neutraliza el
+   width/margin propios de .login-panel (440px/auto), ya resueltos por .login-card-wrapper, y agrega
+   position:relative para quedar en flujo normal (establece la altura real de .login-card-inner). */
+.card-front.login-panel{width:100%;max-width:none;margin:0;position:relative;}
+.card-back{
+  position:absolute;inset:0;width:100%;height:100%;transform:rotateY(180deg);
+  background:linear-gradient(150deg,#14095B 0%,#2E1E8C 55%,#5B4FD9 100%);color:#fff;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  padding:40px;text-align:center;
+}
+.card-back .login-card-loader{
+  width:44px;height:44px;border-radius:50%;border:3px solid rgba(255,255,255,.28);border-top-color:#fff;
+  opacity:0;transition:opacity .2s ease;
+}
+.card-back.is-loading .login-card-loader{opacity:1;animation:loginCardSpin .8s linear infinite;}
 @keyframes loginCardSpin{to{transform:rotate(360deg);}}
-.login-card-check{
-  position:absolute;top:50%;left:50%;width:52px;height:52px;margin:-26px 0 0 -26px;border-radius:50%;
-  background:#14095B;display:flex;align-items:center;justify-content:center;opacity:0;transform:scale(.5);
-  pointer-events:none;transition:opacity .25s ease,transform .3s cubic-bezier(.34,1.56,.64,1);
+.card-back .login-card-check{
+  width:56px;height:56px;border-radius:50%;background:rgba(255,255,255,.16);
+  display:flex;align-items:center;justify-content:center;opacity:0;transform:scale(.5);
+  transition:opacity .25s ease,transform .3s cubic-bezier(.34,1.56,.64,1);
 }
-.login-card.is-success .login-card-check{opacity:1;transform:scale(1.02);}
-.login-card.is-leaving{transform:translateY(-20px);opacity:0;}
+.card-back.is-success .login-card-check{opacity:1;transform:scale(1.02);}
+.card-back-message{margin:0;font-size:17px;font-weight:700;opacity:0;transform:translateY(6px);transition:opacity .3s ease .1s,transform .3s ease .1s;}
+.card-back.is-success .card-back-message{opacity:1;transform:translateY(0);}
 @keyframes loginCardShake{10%,90%{transform:translateX(-1px);}20%,80%{transform:translateX(2px);}30%,50%,70%{transform:translateX(-4px);}40%,60%{transform:translateX(4px);}}
-.login-card.shake-error{animation:loginCardShake .45s ease;}
+.card-front.shake-error{animation:loginCardShake .45s ease;}
 .login-brand-text{display:flex;align-items:baseline;gap:8px;margin-bottom:6px;text-transform:lowercase;letter-spacing:-0.01em;}
 .login-brand-main{font-size:30px !important;font-weight:800;color:#110b52;}
 .login-brand-suffix{font-size:30px !important;font-weight:800;color:#110b52;}
@@ -222,6 +241,11 @@ a{color:inherit;}
 .login-form .field.error label{color:#e53e3e;}
 .login-form .field.error input{border:1px solid #e53e3e;}
 .login-form .field.error .field-required-msg{display:block;}
+/* Ver requerimiento "Transición de Alto Nivel tipo Card Flip/Sheet Slide (Login)", punto 3 ("indicando el
+   error en el input"): mismo tratamiento visual que .field.error (borde/label rojo) pero SIN el mensaje
+   "Requerido" -- aquí los campos sí tienen contenido, solo resultaron incorrectos. */
+.login-form .field.auth-error label{color:#e53e3e;}
+.login-form .field.auth-error input{border:1px solid #e53e3e;}
 .login-forgot{align-self:flex-start;background:none;border:none;padding:0;margin-top:-10px;color:var(--btn-primary-bg);font-size:11.5px;font-weight:600;cursor:pointer;}
 .login-forgot:hover{text-decoration:underline;}
 .login-error{color:var(--danger);font-size:12px;margin:-6px 0 0;min-height:14px;}

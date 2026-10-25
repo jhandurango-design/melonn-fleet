@@ -16330,41 +16330,65 @@ function wireGenerarClaveAleatoria(btnId, inputId, toggleBtnId) {
    Seguridad First-Time Login y No Repudio de Credenciales") -- intentarCredenciales() lo fija y abre
    #modalCambioObligatorio en vez de llamar startSession(); el submit de #formCambioObligatorio lo consume y
    recién ahí entra a la sesión. */
-/* Ver requerimiento "Animación Moderna de Transición/Morphing en la Tarjeta de Login": exclusivo de la
-   tarjeta blanca del formulario (#loginScreen .login-card) -- fondo azul, logos de aliados y "Aviso de
-   Plataforma" nunca se tocan. 3 estados (is-authenticating/is-success/is-leaving + shake-error, ver
-   styles.css) orquestados desde estos 3 helpers, llamados desde los puntos reales de inicio/éxito/fallo de
-   intentarCredenciales/resolverCredenciales/mostrarBloqueoLogin -- nunca un timer "a ciegas" independiente
-   del resultado real de la autenticación. */
-function loginCardEl() { return document.querySelector('#loginScreen .login-card'); }
+/* Ver requerimiento "Transición de Alto Nivel tipo Card Flip/Sheet Slide (Login)": exclusivo de la tarjeta
+   de #loginScreen -- fondo azul, logos de aliados y "Aviso de Plataforma" nunca se tocan. Al enviar el
+   formulario, la tarjeta gira (flip 3D) mostrando su cara posterior con un loader; si la autenticación real
+   resulta exitosa, el loader cede paso a un check + "¡Bienvenido de nuevo!" antes de continuar; si falla, la
+   tarjeta regresa girando a la cara frontal (con shake + los 2 campos marcados en error). Orquestado desde
+   estos 3 helpers, llamados SOLO desde los puntos reales de inicio/éxito/fallo de intentarCredenciales/
+   resolverCredenciales/mostrarBloqueoLogin -- nunca un timer "a ciegas" independiente del resultado real. */
 function loginCardIniciarAutenticando() {
-  var card = loginCardEl();
-  if (!card) return;
-  card.classList.remove('is-success', 'is-leaving', 'shake-error');
-  card.classList.add('is-authenticating');
+  var wrapper = document.querySelector('#loginScreen .login-card-wrapper');
+  var inner = document.getElementById('loginCardInner');
+  var back = document.getElementById('loginCardBack');
+  var front = document.getElementById('loginCardFront');
+  if (!wrapper || !inner || !back) return;
+  if (front) {
+    front.classList.remove('shake-error');
+    ['loginEmail', 'loginPassword'].forEach(function (id) {
+      var f = document.getElementById(id).closest('.field');
+      if (f) f.classList.remove('auth-error');
+    });
+  }
+  back.classList.remove('is-success');
+  back.classList.add('is-loading');
+  wrapper.classList.add('is-flipped');
+  inner.classList.add('is-flipped');
 }
 function loginCardMostrarError() {
-  var card = loginCardEl();
-  if (!card) return;
-  card.classList.remove('is-authenticating');
-  /* Reinicia la animación si el usuario encadena 2 errores seguidos (forzar reflow entre quitar/agregar la
-     clase -- de lo contrario el navegador no vuelve a dispararla por ser "la misma" clase ya aplicada). */
-  card.classList.remove('shake-error');
-  void card.offsetWidth;
-  card.classList.add('shake-error');
+  var wrapper = document.querySelector('#loginScreen .login-card-wrapper');
+  var inner = document.getElementById('loginCardInner');
+  var back = document.getElementById('loginCardBack');
+  var front = document.getElementById('loginCardFront');
+  if (!wrapper || !inner) return;
+  wrapper.classList.remove('is-flipped');
+  inner.classList.remove('is-flipped');
+  if (back) back.classList.remove('is-loading', 'is-success');
+  if (front) {
+    /* .auth-error (no .error): .error dispara el mensaje "Requerido" (ver .field.error .field-required-msg
+       en styles.css), pensado solo para campos vacíos -- aquí los campos SÍ tienen contenido, solo son
+       incorrectos, así que usa su propia clase con el mismo tratamiento visual (borde/label rojo) pero sin
+       ese mensaje engañoso. */
+    ['loginEmail', 'loginPassword'].forEach(function (id) {
+      var f = document.getElementById(id).closest('.field');
+      if (f) f.classList.add('auth-error');
+    });
+    /* Reinicia la animación si el usuario encadena 2 errores seguidos (forzar reflow entre quitar/agregar la
+       clase -- de lo contrario el navegador no vuelve a dispararla por ser "la misma" clase ya aplicada). */
+    front.classList.remove('shake-error');
+    void front.offsetWidth;
+    front.classList.add('shake-error');
+  }
 }
 /* callback: la continuación real (normalmente startSession(user)) -- se dispara al terminar la secuencia
-   visual completa (check con rebote, luego fundido hacia arriba), nunca antes, para que el cambio de vista
-   no se sienta como un salto brusco a mitad de animación. */
+   visual completa de la cara posterior (loader -> check con rebote + mensaje), nunca antes, para que el
+   cambio de vista no se sienta como un salto brusco a mitad de animación. */
 function loginCardMostrarExito(callback) {
-  var card = loginCardEl();
-  if (!card) { callback(); return; }
-  card.classList.remove('is-authenticating');
-  card.classList.add('is-success');
-  setTimeout(function () {
-    card.classList.add('is-leaving');
-    setTimeout(callback, 280);
-  }, 450);
+  var back = document.getElementById('loginCardBack');
+  if (!back) { callback(); return; }
+  back.classList.remove('is-loading');
+  back.classList.add('is-success');
+  setTimeout(callback, 650);
 }
 var pendingFirstLoginUser = null;
 var loginLockInterval = null;
@@ -19241,7 +19265,7 @@ document.addEventListener('DOMContentLoaded', function () {
   ['loginEmail', 'loginPassword'].forEach(function (id) {
     var el = document.getElementById(id);
     el.addEventListener('input', function () {
-      this.closest('.field').classList.remove('error');
+      this.closest('.field').classList.remove('error', 'auth-error');
     });
     el.addEventListener('blur', function () {
       this.closest('.field').classList.toggle('error', !this.value.trim());

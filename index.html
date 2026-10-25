@@ -21,56 +21,65 @@
   <img class="login-fleet-art" id="loginFleetArt" alt="" aria-hidden="true" hidden>
 
   <div class="login-panel-col">
-    <!-- Ver requerimiento "Animación Moderna de Transición/Morphing en la Tarjeta de Login": clase .login-card
-         agregada SOLO aquí (nunca en el .login-panel de #recoveryScreen) -- exclusivo de la tarjeta blanca del
-         formulario de "Inicia sesión", nunca toca el fondo azul, los logos de aliados ni el Aviso de
-         Plataforma. .login-card-loader/.login-card-check son overlays absolutos, ocultos por defecto (ver
-         styles.css), que loginCardIniciarAutenticando()/loginCardMostrarExito() en app.js activan vía clases
-         de estado (is-authenticating/is-success/is-leaving/shake-error) en los puntos reales de inicio/éxito/
-         fallo de intentarCredenciales/resolverCredenciales -- nunca un timer ciego. -->
-    <div class="login-panel login-card">
-      <div class="login-card-loader" aria-hidden="true"></div>
-      <div class="login-card-check" aria-hidden="true">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-      </div>
-      <div class="login-brand-text"><span class="login-brand-main">melonn</span><span class="login-brand-suffix">fleet</span></div>
-      <p class="login-sub" data-i18n="login.subtitle">Control y Programación de Flota</p>
-      <h1 data-i18n="login.title">Inicia sesión</h1>
+    <!-- Ver requerimiento "Transición de Alto Nivel tipo Card Flip/Sheet Slide (Login)": reemplaza la
+         animación de morphing in-place anterior por un flip 3D real de 2 caras -- exclusivo de esta tarjeta
+         (nunca el .login-panel de #recoveryScreen, nunca el fondo azul/logos de aliados/Aviso de Plataforma).
+         .login-card-wrapper da la perspectiva 3D; .login-card-inner es el objeto que gira (rotateY) al
+         agregarle la clase is-flipped; .card-front (el formulario de siempre, reutiliza .login-panel tal
+         cual) y .card-back (loader -> check + "¡Bienvenido de nuevo!") son sus 2 caras, backface-visibility:
+         hidden, superpuestas exactas vía position:absolute sobre el tamaño natural que .card-front establece
+         (ver styles.css). Orquestado desde app.js (loginCardIniciarAutenticando/MostrarError/MostrarExito) en
+         los puntos reales de inicio/éxito/fallo -- nunca un timer ciego. -->
+    <div class="login-card-wrapper">
+      <div class="login-card-inner" id="loginCardInner">
+        <div class="card-front login-panel" id="loginCardFront">
+          <div class="login-brand-text"><span class="login-brand-main">melonn</span><span class="login-brand-suffix">fleet</span></div>
+          <p class="login-sub" data-i18n="login.subtitle">Control y Programación de Flota</p>
+          <h1 data-i18n="login.title">Inicia sesión</h1>
 
-      <!-- Ver requerimiento "Banner de Ventana de Actualizaciones (Login)": aviso estático, sin lógica JS --
-           reutiliza el componente ya estandarizado .cutoff-banner (mismo que usan los avisos de "ventana
-           cerrada" en Programar Flota/Cuotas), variante informativa (lila, no .danger) porque es un aviso
-           programado, no un bloqueo ni un error. Quitar este bloque manualmente una vez pase la ventana
-           (martes 27 de octubre, 9:00 a.m.) -- no se oculta solo por fecha. -->
-      <div class="cutoff-banner" id="loginVentanaActualizacionBanner">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-        <span><strong>Ventana de actualizaciones.</strong> La plataforma permanecerá en mantenimiento programado hasta el martes 27 de octubre, 9:00 a.m.</span>
-      </div>
-
-      <form id="loginForm" class="login-form" autocomplete="off">
-        <div class="field">
-          <label for="loginEmail" data-i18n="login.emailLabel">Correo</label>
-          <input type="email" id="loginEmail" placeholder="nombre@melonn.com">
-          <span class="field-required-msg">Requerido</span>
-        </div>
-        <div class="field">
-          <label for="loginPassword" data-i18n="login.passwordLabel">Contraseña</label>
-          <div class="password-field-wrap">
-            <input type="password" id="loginPassword" placeholder="••••••••">
-            <button type="button" class="password-toggle-btn" id="loginPasswordToggle" aria-label="Mostrar contraseña">
-              <svg class="icon-eye" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-              <svg class="icon-eye-off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
-            </button>
+          <!-- Ver requerimiento "Banner de Ventana de Actualizaciones (Login)": aviso estático, sin lógica JS --
+               reutiliza el componente ya estandarizado .cutoff-banner (mismo que usan los avisos de "ventana
+               cerrada" en Programar Flota/Cuotas), variante informativa (lila, no .danger) porque es un aviso
+               programado, no un bloqueo ni un error. Quitar este bloque manualmente una vez pase la ventana
+               (martes 27 de octubre, 9:00 a.m.) -- no se oculta solo por fecha. -->
+          <div class="cutoff-banner" id="loginVentanaActualizacionBanner">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+            <span><strong>Ventana de actualizaciones.</strong> La plataforma permanecerá en mantenimiento programado hasta el martes 27 de octubre, 9:00 a.m.</span>
           </div>
-          <span class="field-required-msg">Requerido</span>
+
+          <form id="loginForm" class="login-form" autocomplete="off">
+            <div class="field">
+              <label for="loginEmail" data-i18n="login.emailLabel">Correo</label>
+              <input type="email" id="loginEmail" placeholder="nombre@melonn.com">
+              <span class="field-required-msg">Requerido</span>
+            </div>
+            <div class="field">
+              <label for="loginPassword" data-i18n="login.passwordLabel">Contraseña</label>
+              <div class="password-field-wrap">
+                <input type="password" id="loginPassword" placeholder="••••••••">
+                <button type="button" class="password-toggle-btn" id="loginPasswordToggle" aria-label="Mostrar contraseña">
+                  <svg class="icon-eye" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                  <svg class="icon-eye-off" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>
+                </button>
+              </div>
+              <span class="field-required-msg">Requerido</span>
+            </div>
+            <button type="button" class="login-forgot" id="btnOlvidePassword" data-i18n="login.forgot">¿Olvidaste tu contraseña?</button>
+            <p class="login-error" id="loginError"></p>
+            <button type="submit" class="btn btn-primary btn-block" id="loginSubmitBtn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
+              <span data-i18n="login.submit">Iniciar sesión</span>
+            </button>
+          </form>
         </div>
-        <button type="button" class="login-forgot" id="btnOlvidePassword" data-i18n="login.forgot">¿Olvidaste tu contraseña?</button>
-        <p class="login-error" id="loginError"></p>
-        <button type="submit" class="btn btn-primary btn-block" id="loginSubmitBtn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><polyline points="10 17 15 12 10 7"></polyline><line x1="15" y1="12" x2="3" y2="12"></line></svg>
-          <span data-i18n="login.submit">Iniciar sesión</span>
-        </button>
-      </form>
+        <div class="card-back" id="loginCardBack">
+          <div class="login-card-loader" aria-hidden="true"></div>
+          <div class="login-card-check" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          </div>
+          <p class="card-back-message">¡Bienvenido de nuevo!</p>
+        </div>
+      </div>
     </div>
 
     <p class="login-site-link">
