@@ -17353,6 +17353,29 @@ function refreshCuotasAliadoOptions() {
    para MX — ver requerimiento "Vista México — Resumida") y, al eliminar, las filas de cuotasMatriz/cuotasMatrizProxima
    de esa franja puntual EN ESE PAÍS — nunca cuotaAsignada, turnosProgramadosCount, checkCuotaExceso ni el motor
    de estados. */
+/* Captura/restauración de cantidades sin guardar (ver requerimiento "Preservar Edición en Curso al
+   Agregar/Eliminar Franja o Tipología"): agregar o eliminar una franja/tipología cambia el HTML calculado de
+   la tabla (una fila aparece o desaparece), lo que obliga a renderMetricsIfChanged (ver renderCuotasMatriz) a
+   reescribir #cuotasMatrizTable de verdad -- y con eso, a destruir cualquier <input data-cuota-cell> con una
+   cantidad tecleada que el Admin aún no había guardado. Se captura el valor de cada input ANTES del
+   renderCuotas() que sigue a la mutación, y se repone DESPUÉS en los inputs reconstruidos que coincidan por
+   día+franja+vehículo. Nunca toca cuotasMatriz/cuotasMatrizProxima -- ese commit real sigue siendo exclusivo
+   de guardarCuotasMatriz(), así que "Cancelar Edición" conserva su comportamiento de descartar todo. */
+function capturarCuotasInputsDOM() {
+  var valores = {};
+  document.querySelectorAll('#cuotasMatrizTable [data-cuota-cell]').forEach(function (input) {
+    var v = parseInt(input.value, 10) || 0;
+    if (v > 0) valores[input.dataset.dia + '|' + input.dataset.franja + '|' + input.dataset.vehiculo] = v;
+  });
+  return valores;
+}
+function restaurarCuotasInputsDOM(valores) {
+  if (!valores) return;
+  document.querySelectorAll('#cuotasMatrizTable [data-cuota-cell]').forEach(function (input) {
+    var key = input.dataset.dia + '|' + input.dataset.franja + '|' + input.dataset.vehiculo;
+    if (valores[key] !== undefined) input.value = valores[key];
+  });
+}
 function agregarCuotaFranja(hhmm, country) {
   if (!canDo('users.manage')) return;
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(hhmm || '')) { toast('warn', 'Hora inválida', 'Usa el formato HH:MM, por ejemplo 14:30.'); return; }
@@ -17363,7 +17386,9 @@ function agregarCuotaFranja(hhmm, country) {
   if (country === 'MX') { state.cuotasFranjasMX = franjas; persistCuotasFranjasMX(); }
   else { state.cuotasFranjas = franjas; persistCuotasFranjas(); }
   toast('ok', 'Franja agregada', 'Se agregó la franja ' + fmtTime12(hhmm) + ' a la matriz.');
+  var valoresSinGuardar = capturarCuotasInputsDOM();
   renderCuotas();
+  restaurarCuotasInputsDOM(valoresSinGuardar);
 }
 function eliminarCuotaFranja(franja, country) {
   if (!canDo('users.manage')) return;
@@ -17381,7 +17406,9 @@ function eliminarCuotaFranja(franja, country) {
       persistCuotasMatriz();
       persistCuotasMatrizProxima();
       toast('warn', 'Franja eliminada', 'Se eliminó la franja ' + fmtTime12(franja) + ' de la matriz.');
+      var valoresSinGuardar = capturarCuotasInputsDOM();
       renderCuotas();
+      restaurarCuotasInputsDOM(valoresSinGuardar);
     }
   });
 }
@@ -17433,7 +17460,9 @@ function agregarCuotaVehiculoEnFranja(franja, vehiculo) {
     state.cuotasFilasForzadas.push({ sede: sede, aliado: aliado, esProxima: esProxima, franja: franja, vehiculo: vehiculo });
   }
   toast('ok', 'Tipología agregada', cuotasVehiculoLabel(vehiculo, countryForSede(sede)) + ' está lista para asignarle cantidad en la franja ' + fmtTime12(franja) + ' — recuerda Guardar Cambios.');
+  var valoresSinGuardar = capturarCuotasInputsDOM();
   renderCuotas();
+  restaurarCuotasInputsDOM(valoresSinGuardar);
 }
 /* Elimina SOLO una combinación Franja+Vehículo puntual (todos los días) — a diferencia de eliminarCuotaFranja
    (arriba), que elimina la franja completa con todas sus tipologías, para todas las bodegas/aliados del país. */
@@ -17456,7 +17485,9 @@ function eliminarCuotaVehiculoEnFranja(franja, vehiculo) {
         persistCuotasMatriz();
       }
       toast('warn', 'Tipología eliminada', cuotasVehiculoLabel(vehiculo, country) + ' se eliminó de la franja ' + fmtTime12(franja) + '.');
+      var valoresSinGuardar = capturarCuotasInputsDOM();
       renderCuotas();
+      restaurarCuotasInputsDOM(valoresSinGuardar);
     }
   });
 }
