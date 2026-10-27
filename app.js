@@ -2107,9 +2107,20 @@ const state = {
      requerimiento "Unificación y Estandarización Módulo de Programación": Bodega ve [Aliado][Mensajero],
      nunca [Bodega], por tener su sede fija). */
   despachoFiltroMensajero: '',
+  /* Filtro por Franja/Hora de citación y por Estado del turno (ver requerimiento "Filtros de Franja y
+     Estado en Programación en Vivo"): mismo patrón cascada que despachoFiltroMensajero -- encadenados
+     DESPUÉS de Bodega/Aliado/Mensajero (ver renderDespacho/refreshFranjaFilterOptions/
+     refreshEstadoFilterOptions), con opciones que se repueblan en cada render a partir de lo que de verdad
+     queda en el alcance ya filtrado hasta ese punto. */
+  despachoFiltroFranja: '',
+  despachoFiltroEstado: '',
   /* Programación (ALIADO) — Seguimiento en vivo: mismo filtro estandarizado, encadenado con el modo
      Día/Historial activo (ver renderSeguimiento). */
   seguimientoFiltroMensajero: '',
+  /* Mismos 2 filtros que despachoFiltroFranja/despachoFiltroEstado, ver ese comentario -- aquí encadenados
+     después de Bodega/Mensajero (ver renderSeguimiento). */
+  seguimientoFiltroFranja: '',
+  seguimientoFiltroEstado: '',
   /* Rango de fechas de la pestaña Historial de Seguimiento — mismo patrón que consolHistDesde/Hasta
      (sustituye al selector de Mes fijo anterior). */
   seguimientoHistDesde: null,
@@ -8104,6 +8115,13 @@ function renderDespacho() {
   } else {
     state.despachoFiltroMensajero = '';
   }
+  /* Filtro por Franja/Hora de citación y por Estado del turno (ver requerimiento "Filtros de Franja y
+     Estado en Programación en Vivo") -- encadenados después de Bodega/Aliado/Mensajero, para los 3 roles con
+     acceso a esta vista (PLANNER/BODEGA/AUDITOR). */
+  state.despachoFiltroFranja = refreshFranjaFilterOptions('despachoFiltroFranja', routes, state.despachoFiltroFranja);
+  if (state.despachoFiltroFranja) routes = routes.filter(function (r) { return r.hora === state.despachoFiltroFranja; });
+  state.despachoFiltroEstado = refreshEstadoFilterOptions('despachoFiltroEstado', routes, state.despachoFiltroEstado);
+  if (state.despachoFiltroEstado) routes = routes.filter(function (r) { return computeEstado(r).code === state.despachoFiltroEstado; });
   /* Ver requerimiento "Confirmación de Entregable Anterior...", punto 4: "Exportar Programación" -- mismo
      criterio que state.consolExportCache (ver renderConsolidado): SIEMPRE a partir de los Filtros
      Principales Superiores ya aplicados a `routes` en este punto, nunca del sub-filtro de tarjeta KPI. */
@@ -9365,6 +9383,11 @@ function renderSeguimiento() {
      período/sede elegidos. */
   state.seguimientoFiltroMensajero = refreshMensajeroFilterOptions('seguimientoFiltroMensajero', routes, state.seguimientoFiltroMensajero, 'Todos mis mensajeros');
   if (state.seguimientoFiltroMensajero) routes = routes.filter(function (r) { return r.mensajeroId === state.seguimientoFiltroMensajero; });
+  /* Mismos 2 filtros que renderDespacho (ver ese comentario), encadenados después de Bodega/Mensajero. */
+  state.seguimientoFiltroFranja = refreshFranjaFilterOptions('seguimientoFiltroFranja', routes, state.seguimientoFiltroFranja);
+  if (state.seguimientoFiltroFranja) routes = routes.filter(function (r) { return r.hora === state.seguimientoFiltroFranja; });
+  state.seguimientoFiltroEstado = refreshEstadoFilterOptions('seguimientoFiltroEstado', routes, state.seguimientoFiltroEstado);
+  if (state.seguimientoFiltroEstado) routes = routes.filter(function (r) { return computeEstado(r).code === state.seguimientoFiltroEstado; });
   /* Ver requerimiento "Confirmación de Entregable Anterior...", punto 4: mismo criterio que
      state.despachoExportCache/state.consolExportCache -- a partir de los Filtros Principales Superiores ya
      aplicados a `routes`, nunca del sub-filtro de tarjeta KPI. */
@@ -9873,6 +9896,43 @@ function refreshAliadoFilterOptions(selId, bodegaFieldId, bodegaSelId) {
   var current = sel.value;
   sel.innerHTML = '<option value="">Todos los aliados</option>' + list.map(function (a) { return '<option value="' + a + '">' + a + '</option>'; }).join('');
   sel.value = list.indexOf(current) !== -1 ? current : '';
+}
+/* Filtro por Franja/Hora de citación (ver requerimiento "Filtros de Franja y Estado en Programación en
+   Vivo") -- mismo patrón de cascada que refreshMensajeroFilterOptions (ver comentario de esa función, justo
+   abajo): se repuebla en cada render a partir de routesEnAlcance (ya filtradas por Bodega/Aliado/Mensajero en
+   ese punto), nunca de la malla completa del día, así que solo ofrece horas de citación que de verdad tienen
+   algún turno en el alcance actual. Devuelve el valor resuelto (el mismo si sigue siendo válido, o '' si ya
+   no aplica) para que el llamador lo guarde de vuelta en su propio campo de state. */
+function refreshFranjaFilterOptions(selId, routesEnAlcance, currentValue) {
+  var sel = document.getElementById(selId);
+  if (!sel) return currentValue;
+  var vistos = {}, list = [];
+  routesEnAlcance.forEach(function (r) { if (!vistos[r.hora]) { vistos[r.hora] = true; list.push(r.hora); } });
+  list.sort();
+  sel.innerHTML = '<option value="">Todas las franjas</option>' + list.map(function (h) { return '<option value="' + h + '">' + fmtTime12(h) + '</option>'; }).join('');
+  var resolved = list.indexOf(currentValue) !== -1 ? currentValue : '';
+  sel.value = resolved;
+  return resolved;
+}
+/* Filtro por Estado del turno (ver mismo requerimiento) -- usa el código de computeEstado()/ESTADOS, EL
+   MISMO que ya pinta la columna "Estado"/"Estado Actual" de cada tabla, para que el texto del desplegable
+   coincida siempre con lo que la fila realmente muestra (ver ESTADOS más arriba en este archivo). Igual que
+   el filtro de Franja, se repuebla a partir de routesEnAlcance -- solo lista estados que de verdad ocurren
+   hoy en el alcance ya filtrado, nunca el catálogo completo (que incluye códigos sintéticos exclusivos de
+   Historial de Alertas/Solicitudes que computeEstado nunca produce en vivo). */
+function refreshEstadoFilterOptions(selId, routesEnAlcance, currentValue) {
+  var sel = document.getElementById(selId);
+  if (!sel) return currentValue;
+  var vistos = {}, list = [];
+  routesEnAlcance.forEach(function (r) {
+    var code = computeEstado(r).code;
+    if (!vistos[code]) { vistos[code] = true; list.push(code); }
+  });
+  list.sort(function (a, b) { return estadoLabel(a).localeCompare(estadoLabel(b), 'es', { sensitivity: 'base' }); });
+  sel.innerHTML = '<option value="">Todos los estados</option>' + list.map(function (code) { return '<option value="' + code + '">' + escapeHtml(estadoLabel(code)) + '</option>'; }).join('');
+  var resolved = list.indexOf(currentValue) !== -1 ? currentValue : '';
+  sel.value = resolved;
+  return resolved;
 }
 /* Filtro de Mensajero, estandarizado en TODAS las vistas de tabla de Programación — Consolidado y Programación
    (Despacho) para PLANNER, Programar Flota y Seguimiento para ALIADO (ver requerimiento "Adoptar Filtro
@@ -17478,15 +17538,19 @@ function limpiarFiltroDespacho() {
   refreshDespachoAliadoOptions();
   document.getElementById('despachoFiltroAliado').value = '';
   state.despachoFiltroMensajero = '';
+  state.despachoFiltroFranja = '';
+  state.despachoFiltroEstado = '';
   renderDespacho();
-  toast('ok', 'Filtro restablecido', 'Bodega, Aliado y Mensajero volvieron a "Todos".');
+  toast('ok', 'Filtro restablecido', 'Bodega, Aliado, Mensajero, Franja y Estado volvieron a "Todos".');
 }
 function limpiarFiltroSeguimiento() {
   state.seguimientoFiltroBodega = '';
   document.getElementById('seguimientoFiltroBodega').value = '';
   state.seguimientoFiltroMensajero = '';
+  state.seguimientoFiltroFranja = '';
+  state.seguimientoFiltroEstado = '';
   renderSeguimiento();
-  toast('ok', 'Filtro restablecido', 'Bodega y Mensajero volvieron a "Todos".');
+  toast('ok', 'Filtro restablecido', 'Bodega, Mensajero, Franja y Estado volvieron a "Todos".');
 }
 function limpiarFiltroSolicitudesPendientes() {
   state.solicitudesFiltroBodega = '';
@@ -20221,6 +20285,14 @@ document.addEventListener('DOMContentLoaded', function () {
     state.despachoFiltroMensajero = e.target.value;
     renderDespacho();
   });
+  document.getElementById('despachoFiltroFranja').addEventListener('change', function (e) {
+    state.despachoFiltroFranja = e.target.value;
+    renderDespacho();
+  });
+  document.getElementById('despachoFiltroEstado').addEventListener('change', function (e) {
+    state.despachoFiltroEstado = e.target.value;
+    renderDespacho();
+  });
   document.getElementById('btnLimpiarDespachoFiltro').addEventListener('click', limpiarFiltroDespacho);
 
   refreshCalculadorBodegaOptions();
@@ -21160,6 +21232,14 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   document.getElementById('seguimientoFiltroMensajero').addEventListener('change', function (e) {
     state.seguimientoFiltroMensajero = e.target.value;
+    renderSeguimiento();
+  });
+  document.getElementById('seguimientoFiltroFranja').addEventListener('change', function (e) {
+    state.seguimientoFiltroFranja = e.target.value;
+    renderSeguimiento();
+  });
+  document.getElementById('seguimientoFiltroEstado').addEventListener('change', function (e) {
+    state.seguimientoFiltroEstado = e.target.value;
     renderSeguimiento();
   });
   document.getElementById('btnLimpiarSeguimientoFiltro').addEventListener('click', limpiarFiltroSeguimiento);

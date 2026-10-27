@@ -784,6 +784,19 @@
               <label for="despachoFiltroMensajero">Mensajero</label>
               <select id="despachoFiltroMensajero"></select>
             </div>
+            <!-- Ver requerimiento "Filtros de Franja y Estado en Programación en Vivo": 2 desplegables
+                 adicionales, visibles para los 3 roles de esta vista (Planner/Bodega/Auditor) sin importar
+                 el resto de filtros de arriba -- opciones repobladas en cada render (ver
+                 refreshFranjaFilterOptions/refreshEstadoFilterOptions en app.js) a partir de lo que de
+                 verdad queda en el alcance ya filtrado por Bodega/Aliado/Mensajero. -->
+            <div class="field" id="despachoFranjaField" style="min-width:170px;">
+              <label for="despachoFiltroFranja">Franja / Hora</label>
+              <select id="despachoFiltroFranja"></select>
+            </div>
+            <div class="field" id="despachoEstadoField" style="min-width:220px;">
+              <label for="despachoFiltroEstado">Estado</label>
+              <select id="despachoFiltroEstado"></select>
+            </div>
             <!-- Ver requerimiento "Mejoras de UI, Auditoría de Trazabilidad y Control de Acceso...", punto 2:
                  reubicado al final de la fila (después de Desde/Hasta) para quedar siempre al extremo derecho,
                  tanto en "Operación del Día" como en "Historial del Mes" -- antes quedaba a la izquierda de
@@ -1075,6 +1088,17 @@
             <div class="field" id="seguimientoMensajeroField" style="min-width:220px;">
               <label for="seguimientoFiltroMensajero">Mensajero</label>
               <select id="seguimientoFiltroMensajero"></select>
+            </div>
+            <!-- Ver requerimiento "Filtros de Franja y Estado en Programación en Vivo": mismos 2
+                 desplegables que #view-despacho (ver ese comentario) -- aquí encadenados después de
+                 Bodega/Mensajero (ver refreshFranjaFilterOptions/refreshEstadoFilterOptions en app.js). -->
+            <div class="field" id="seguimientoFranjaField" style="min-width:170px;">
+              <label for="seguimientoFiltroFranja">Franja / Hora</label>
+              <select id="seguimientoFiltroFranja"></select>
+            </div>
+            <div class="field" id="seguimientoEstadoField" style="min-width:220px;">
+              <label for="seguimientoFiltroEstado">Estado</label>
+              <select id="seguimientoFiltroEstado"></select>
             </div>
             <!-- Ver requerimiento "Mejoras de UI, Auditoría de Trazabilidad y Control de Acceso...", punto 2:
                  reubicado al final de la fila (después de Desde/Hasta) para quedar siempre al extremo derecho.
