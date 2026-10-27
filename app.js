@@ -5072,8 +5072,12 @@ function openModalNovedadTransporte(routeId, modo) {
   document.getElementById('ntCedula').value = '';
   document.getElementById('ntPlaca').value = '';
   document.getElementById('ntCorreo').value = '';
+  /* Ver requerimiento "Limpieza de Adicionales en Selectores de Vehículo": este selector de reemplazo
+     (Novedad de Transporte) es de elección real para el usuario -- igual que Nuevo Turno/Nueva Solicitud,
+     nunca debe ofrecer las categorías "Adicional X" (de facturación/cuota, no tipologías operativas que se
+     declaren a mano, ver vehiculosBaseForCountry). */
   var vehSelNt = document.getElementById('ntVehiculo');
-  vehSelNt.innerHTML = vehiculosForCountry(countryForSede(route.sede)).map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
+  vehSelNt.innerHTML = vehiculosBaseForCountry(countryForSede(route.sede)).map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
   vehSelNt.value = route.vehiculo;
   // Bloques visibles según el modo.
   document.getElementById('ntReemplazoModoSegment').hidden = modo !== 'reemplazo_cancelacion';
@@ -13623,8 +13627,11 @@ function refreshNsFieldsForTipo() {
   if (esCambioMensajero) {
     var routeCmNs = state.turnos.find(function (r) { return r.id === document.getElementById('nsRuta').value; });
     var countryCmNs = routeCmNs ? countryForSede(routeCmNs.sede) : countryForAliado(state.user.aliado);
+    /* Ver requerimiento "Limpieza de Adicionales en Selectores de Vehículo": mismo criterio que
+       vehiculosBaseForCountry ya aplica en #nsNtVehiculo/#turnoVehiculo -- "Cambio de Mensajero" tampoco
+       debe ofrecer las categorías "Adicional X". */
     var vehSelCmNs = document.getElementById('nsCmVehiculo');
-    vehSelCmNs.innerHTML = vehiculosForCountry(countryCmNs).map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
+    vehSelCmNs.innerHTML = vehiculosBaseForCountry(countryCmNs).map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
     if (routeCmNs) vehSelCmNs.value = routeCmNs.vehiculo;
   }
   /* Nuevo Turno/Cupo Adicional no referencian un turno existente -- oculta Bodega/Mensajero-Turno (esos 2
@@ -16471,15 +16478,26 @@ function tipologiasVehiculosDefaults() {
     { nombre: 'Moto xs', pais: 'CO', capacidad: '40 kg', activa: true },
     { nombre: 'Moto Estándar o periferia', pais: 'CO', capacidad: '50 kg', activa: true },
     { nombre: 'Van´s', pais: 'CO', capacidad: '800 kg', activa: true },
-    /* Ver requerimiento "Corrección Directa: Tipología 'Dedicado Rappi' como Tipología Estándar para
-       Colombia": tipología ESTÁNDAR de Colombia, disponible en todas las bodegas y para todos los aliados
-       del país -- exactamente igual que "Moto xs"/"Van´s" de arriba, sin ningún filtro adicional por bodega
-       o aliado (ver historial de este archivo: una versión anterior la restringía a Cordiandina en
-       Barranquilla vía un mapa aparte, retirado por este mismo requerimiento al bloquear su visibilidad en
-       la interfaz). Capacidad asumida igual a "Moto Estándar o periferia" (servicio dedicado sobre vehículo
-       tipo moto) al no tener un valor de negocio explícito -- Admin puede ajustarla en Gestión de Vehículos
-       como cualquier otra tipología. */
-    { nombre: 'Dedicado Rappi', pais: 'CO', capacidad: '50 kg', activa: true },
+    /* Ver requerimiento "Extensión de Tipología 'Dedicado Rappi'": la tipología única se divide en 2
+       modalidades explícitas -- "Dedicado Rappi Moto" y "Dedicado Rappi Van" -- para que el Aliado declare
+       cuál de las 2 está citando, en vez de un "Dedicado Rappi" ambiguo. REGLA CLAVE: ambas heredan
+       EXACTAMENTE el mismo comportamiento que ya tenía "Dedicado Rappi" (tipología ESTÁNDAR de Colombia,
+       disponible en todas las bodegas y para todos los aliados del país, sin ningún filtro especial, ver
+       requerimiento previo "Corrección Directa..." más abajo en el historial) -- no existe NINGÚN check en
+       app.js que distinga por nombre de tipología salvo el genérico f.vehiculo/t.nombre ya usado por
+       cualquier otra tipología (checkCuotaExceso/tipologiaHabilitada/evaluarAprobacionCuota/maleta/celular),
+       así que ninguno de los 2 necesita lógica nueva ni condición especial -- "Van" en el nombre NO activa
+       isVanCategory() (ese helper solo reconoce los literales 'Van´s'/'Adicional Van´s', nunca un nombre que
+       simplemente contenga "Van"). Capacidad igual a la que ya tenía "Dedicado Rappi" (50 kg) en ambas --
+       no se le asume la capacidad real de un Van´s (800 kg) precisamente porque la regla clave pide CERO
+       condiciones especiales, ni siquiera de capacidad sugerida; Admin puede ajustarla en Gestión de
+       Vehículos como cualquier otra tipología. La tipología vieja "Dedicado Rappi" (CO) se desactiva -- no
+       se borra -- en loadPersistedTipologiasVehiculos() para cualquier catálogo ya persistido en un
+       navegador real (ver esa función): un turno histórico que ya tenga vehiculo:'Dedicado Rappi' sigue
+       resolviendo su capacidad con normalidad (CAPACIDAD_POR_TIPO conserva tipologías inactivas), solo deja
+       de ofrecerse como opción nueva en ningún selector. */
+    { nombre: 'Dedicado Rappi Moto', pais: 'CO', capacidad: '50 kg', activa: true },
+    { nombre: 'Dedicado Rappi Van', pais: 'CO', capacidad: '50 kg', activa: true },
     { nombre: 'Moto', pais: 'MX', capacidad: '50 kg', activa: true },
     { nombre: 'Auto', pais: 'MX', capacidad: '300 kg', activa: true },
     { nombre: 'Sedán', pais: 'MX', capacidad: '250 kg', activa: true },
@@ -16511,6 +16529,15 @@ function loadPersistedTipologiasVehiculos() {
       tipologiasVehiculosDefaults().forEach(function (def) {
         var existe = saved.some(function (t) { return t.pais === def.pais && t.nombre === def.nombre; });
         if (!existe) saved.push(def);
+      });
+      /* Migración de catálogo (ver requerimiento "Extensión de Tipología 'Dedicado Rappi'"): la tipología
+         vieja, sin dividir, se desactiva -- nunca se borra -- en cualquier catálogo ya persistido que la
+         tuviera. No-destructivo, mismo criterio que las 2 migraciones de arriba: se deja la fila (y su
+         capacidad en CAPACIDAD_POR_TIPO, ver syncVehiculosDesdeTipologias) para que un turno histórico con
+         vehiculo:'Dedicado Rappi' siga resolviendo su capacidad con normalidad -- solo deja de ofrecerse
+         como opción nueva en los selectores (que filtran por activa). */
+      saved.forEach(function (t) {
+        if (t.pais === 'CO' && t.nombre === 'Dedicado Rappi') t.activa = false;
       });
       return saved;
     }
