@@ -976,13 +976,6 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
               Nuevo Turno
             </button>
-            <!-- Ver requerimiento "Carga Masiva de Programación vía Excel/CSV": visible solo en "Mañana"
-                 (mismo criterio que #btnProgAcciones/Cargar Flota Recurrente -- ver renderProgramacion), al
-                 lado de "+ Nuevo Turno". Abre #modalCargaMasiva (ver abrirModalCargaMasiva en app.js). -->
-            <button class="btn btn-ghost" id="btnCargaMasiva" hidden>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M21 21H3"/></svg>
-              Carga Masiva
-            </button>
           </div>
         </div>
 
@@ -1048,8 +1041,17 @@
           </div>
         </section>
 
-        <!-- Ver requerimiento "Confirmación de Entregable Anterior...", punto 4. -->
+        <!-- Ver requerimiento "Confirmación de Entregable Anterior...", punto 4 + "Reubicación del Botón
+             'Carga Masiva'": "Carga Masiva" se movió aquí desde la cabecera superior, junto a "Exportar
+             Programación" -- mismo bloque de acciones de archivos (.cumplimiento-export-fab), visible solo
+             en "Mañana" (ver renderProgramacion/app.js, que sigue ocultándolo/mostrándolo por id sin
+             depender de su posición en el DOM). Abre #modalCargaMasiva (ver abrirModalCargaMasiva en
+             app.js). -->
         <div class="cumplimiento-export-fab" id="progExportBar">
+          <button class="btn btn-ghost" id="btnCargaMasiva" hidden>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M21 21H3"/></svg>
+            Carga Masiva
+          </button>
           <button class="btn btn-primary" id="btnDescargarProg">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
             Exportar Programación
