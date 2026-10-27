@@ -4712,24 +4712,6 @@ function cancelarSolicitudPropia(rowId, isRoute, motivo) {
   }
   syncAndRender(true);
 }
-function noUbicaRecurso(routeId, motivo) {
-  var route = state.turnos.find(function (r) { return r.id === routeId; });
-  if (!route || !route.pendienteAsignacion) return;
-  var penal = computeCancelPenalty(route);
-  var motivoFinal = motivo || 'No se ubicó mensajero de reemplazo para el turno pendiente.';
-  route.solicitud = {
-    tipo: 'cancelacion', estado: 'aceptada', motivo: motivoFinal, horaAnterior: route.hora, nuevaHora: null,
-    solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), fecha: TODAY_STR,
-    resueltoEn: fmtClock(state.now), resueltoFecha: TODAY_STR,
-    origen: 'aliado', penalizacion: penal
-  };
-  route.pendienteAsignacion = false;
-  route.sinReemplazoAusencia = true;
-  registrarHistorialCambio(route, { tipo: 'cancelacion', accion: 'aprobada', motivo: motivoFinal, horaAnterior: route.hora, horaPropuesta: null, por: state.user.nombre });
-  toast('warn', 'Turno cerrado sin recurso', route.id + ' quedó cancelado por falta de mensajero disponible.');
-  syncAndRender(true);
-  pushRouteConAviso(route, 'Cierre no confirmado en la nube');
-}
 /* El turno aún no registra ingreso en bodega ni fue despachado/cancelado — único momento válido para notificar llegada.
    Se excluye explícitamente 'afectacion_confirmada' (Incumplimiento Confirmado): el ciclo ya cerró automáticamente y
    queda bloqueado para el Aliado hasta que Planner lo exonere (ver rowHtmlSeguimiento). */
@@ -4992,32 +4974,105 @@ function alertaConfirmarReemplazoElegible(route) {
   if (route.retiroEvidenciaPendiente) return false;
   return code === 'critical' || (code === 'retirado' && (!!route.reemplazoPendienteTrasRetiro || !!route.recursoExtraordinarioPendiente));
 }
-function openAlertaConfirmarReemplazoModal(routeId) {
+/* Ver plan "Estandarización de Solicitudes del Aliado", Fase 3: punto único de apertura del modal unificado
+   "Novedad de Transporte" (#modalNovedadTransporte) -- reemplaza openAlertaConfirmarReemplazoModal,
+   openCancelarModal y la apertura de #modalNuevaSolicitud para cambio_mensajero/cancelación. modo determina
+   qué bloques se muestran y, en el submit, a qué función/destino real se llama -- el modo SIEMPRE lo decide
+   el contexto de apertura (código de alerta, fila de Seguimiento, botón "Reportar Novedad"), nunca un
+   selector libre dentro del modal:
+   - 'reemplazo_alerta': turno en 'critical' o 'retirado' (con reemplazoPendienteTrasRetiro/
+     recursoExtraordinarioPendiente) -- solo campos de reemplazo, sin el toggle "aún no tengo reemplazo"
+     (idéntico a como funcionaba openAlertaConfirmarReemplazoModal).
+   - 'reemplazo_cancelacion': turno en 'cancelado_pendiente_reemplazo'/'sustitucion_riesgo'/'sin_reemplazo'
+     (botón "Reasignar" en Alertas Activas) o ya marcado route.reemplazoPendiente (botón "Confirmar Reemplazo"
+     en Seguimiento) -- campos de reemplazo CON el toggle "Tengo reemplazo listo"/"Aún no tengo reemplazo"
+     (idéntico a como funcionaba openCancelarModal).
+   - 'novedad_sana': turno SANO, vía el nuevo botón de fila "Reportar Novedad" -- primera elección entre
+     "Cambiar mensajero" (route.solicitud directo, tipo cambio_mensajero) y "Cancelar el turno" (route.solicitud
+     directo, tipo cancelacion, sin reemplazo -- ver CORRECCIÓN del plan: "tengo reemplazo" nunca se ofrece
+     aquí, es la 2ª etapa una vez la cancelación escala a alerta). */
+function openModalNovedadTransporte(routeId, modo) {
   if (!canDo('schedule.aliado.manage')) return;
   var route = state.turnos.find(function (r) { return r.id === routeId; });
   if (!route) return;
-  /* Doble barrera de alcance/estado (mismo criterio que openCancelarModal): el botón de la fila ya solo
-     aparece para el propio aliado y en un estado elegible, pero se revalida aquí por si cambió entre el
-     render y el clic (p. ej. otra pestaña resolvió la alerta primero). */
   if (getMensajero(route.mensajeroId).aliado !== state.user.aliado) return;
-  if (!alertaConfirmarReemplazoElegible(route)) {
-    toast('warn', 'No disponible', route.id + ' ya no está en un estado que requiera reemplazo.');
-    return;
+  if (modo === 'reemplazo_alerta') {
+    if (!alertaConfirmarReemplazoElegible(route)) {
+      toast('warn', 'No disponible', route.id + ' ya no está en un estado que requiera reemplazo.');
+      return;
+    }
+    var pendienteAlerta = state.solicitudesGenerales.some(function (s) { return s.tipo === 'reemplazo_alerta' && s.estado === 'pendiente' && s.detalle && s.detalle.routeId === routeId; });
+    if (pendienteAlerta) { toast('warn', 'Ya enviado', 'Ya hay un reemplazo para ' + route.id + ' pendiente de aprobación por Planner.'); return; }
+  } else if (modo === 'reemplazo_cancelacion') {
+    /* Mismas 2 barreras que ya tenía openCancelarModal. */
+    if (computeEstado(route).code === 'afectacion_confirmada') {
+      toast('warn', 'No disponible', route.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite gestión de reemplazo.');
+      return;
+    }
+    if (route.solicitudEdicionPendiente) {
+      toast('warn', 'Ya enviado', route.id + ' ya tiene una cancelación/reemplazo pendiente de aprobación por Planner.');
+      return;
+    }
+  } else if (modo === 'novedad_sana') {
+    if (route.solicitud && route.solicitud.estado === 'pendiente') { toast('warn', 'Solicitud ya enviada', route.id + ' ya tiene una solicitud pendiente de respuesta.'); return; }
+    var codeSana = computeEstado(route).code;
+    if (codeSana === 'afectacion_confirmada' || codeSana === 'sin_reemplazo') { toast('warn', 'Turno cerrado', route.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite gestión de novedades.'); return; }
   }
-  var pendiente = state.solicitudesGenerales.some(function (s) { return s.tipo === 'reemplazo_alerta' && s.estado === 'pendiente' && s.detalle && s.detalle.routeId === routeId; });
-  if (pendiente) { toast('warn', 'Ya enviado', 'Ya hay un reemplazo para ' + route.id + ' pendiente de aprobación por Planner.'); return; }
   var m = getMensajero(route.mensajeroId);
-  document.getElementById('alertaReemplazoRouteId').value = routeId;
-  document.getElementById('alertaReemplazoNote').textContent = route.id + ' · ' + m.nombre + ' · ' + route.vehiculo + ' · ' + fmtTime12(route.hora) + ' · ' + route.sede;
-  document.getElementById('alertaReemplazoNombre').value = '';
-  document.getElementById('alertaReemplazoTelefono').value = '';
-  document.getElementById('alertaReemplazoCedula').value = '';
-  document.getElementById('alertaReemplazoPlaca').value = '';
-  document.getElementById('alertaReemplazoCorreo').value = '';
-  var vehSel = document.getElementById('alertaReemplazoVehiculo');
-  vehSel.innerHTML = vehiculosForCountry(countryForSede(route.sede)).map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
-  vehSel.value = route.vehiculo;
-  openModal('modalAlertaReemplazo');
+  document.getElementById('ntRouteId').value = routeId;
+  document.getElementById('ntModo').value = modo;
+  document.getElementById('ntNote').textContent = route.id + ' · ' + m.nombre + ' · ' + route.vehiculo + ' · ' + fmtTime12(route.hora) + ' · ' + route.sede;
+  document.getElementById('ntTitulo').textContent = modo === 'novedad_sana' ? 'Novedad de Transporte' : 'Confirmar Reemplazo';
+  document.getElementById('ntSubmitBtn').textContent = modo === 'reemplazo_alerta' ? 'Enviar a Planner' : (modo === 'reemplazo_cancelacion' ? 'Confirmar Reemplazo' : 'Enviar solicitud');
+  // Reset de campos de reemplazo (compartidos por los 3 modos que los usan).
+  document.getElementById('ntNombre').value = '';
+  document.getElementById('ntTelefono').value = '';
+  document.getElementById('ntCedula').value = '';
+  document.getElementById('ntPlaca').value = '';
+  document.getElementById('ntCorreo').value = '';
+  var vehSelNt = document.getElementById('ntVehiculo');
+  vehSelNt.innerHTML = vehiculosForCountry(countryForSede(route.sede)).map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
+  vehSelNt.value = route.vehiculo;
+  document.getElementById('ntMotivo').value = '';
+  // Bloques visibles según el modo.
+  document.getElementById('ntOpcionSanaField').hidden = modo !== 'novedad_sana';
+  document.getElementById('ntReemplazoModoSegment').hidden = modo !== 'reemplazo_cancelacion';
+  document.querySelectorAll('#ntReemplazoModoSegment button').forEach(function (b) { b.classList.toggle('active', b.dataset.modo === 'reemplazo'); });
+  document.querySelectorAll('#ntOpcionSanaSegment button').forEach(function (b) { b.classList.toggle('active', b.dataset.opcion === 'cambio_mensajero'); });
+  document.getElementById('ntPendienteNote').hidden = true;
+  refreshNovedadTransporteCampos();
+  openModal('modalNovedadTransporte');
+}
+/* Muestra/oculta los campos de reemplazo/motivo según el modo y, para 'novedad_sana'/'reemplazo_cancelacion',
+   según la opción elegida dentro del modal (segmentos ntOpcionSanaSegment/ntReemplazoModoSegment). Se llama al
+   abrir el modal y cada vez que esos segmentos cambian (ver wiring en DOMContentLoaded). */
+function refreshNovedadTransporteCampos() {
+  var modo = document.getElementById('ntModo').value;
+  var mostrarReemplazoFields; // campos Nombre/Teléfono/Cédula/Placa/Vehículo/Correo
+  var mostrarMotivo = false; // textarea de cancelación simple
+  if (modo === 'reemplazo_alerta') {
+    mostrarReemplazoFields = true;
+  } else if (modo === 'reemplazo_cancelacion') {
+    var modoReemplazo = document.querySelector('#ntReemplazoModoSegment .active');
+    var esPendiente = modoReemplazo && modoReemplazo.dataset.modo === 'pendiente';
+    mostrarReemplazoFields = !esPendiente;
+    document.getElementById('ntGobernanzaNote').hidden = esPendiente;
+    document.getElementById('ntPendienteNote').hidden = !esPendiente;
+    document.getElementById('ntSubmitBtn').textContent = esPendiente ? 'Guardar como Pendiente' : 'Confirmar Reemplazo';
+  } else { // novedad_sana
+    var opcionSana = document.querySelector('#ntOpcionSanaSegment .active');
+    var esCancelacion = opcionSana && opcionSana.dataset.opcion === 'cancelacion';
+    mostrarReemplazoFields = !esCancelacion;
+    mostrarMotivo = esCancelacion;
+    document.getElementById('ntSubmitBtn').textContent = 'Enviar solicitud';
+  }
+  document.getElementById('ntReemplazoFields').hidden = !mostrarReemplazoFields;
+  document.getElementById('ntMotivoField').hidden = !mostrarMotivo;
+  /* La nota de gobernanza ("queda Pendiente de Aprobación por Planner") aplica a TODO lo que termina en una
+     solicitud real -- reemplazo_alerta, ambas opciones de novedad_sana (cambio_mensajero Y cancelación
+     simple, las 2 pasan por Planner) -- solo se oculta en el único caso que NO genera ninguna solicitud:
+     "Aún no tengo reemplazo" dentro de reemplazo_cancelacion (marcarPendienteReemplazo, resuelto arriba). */
+  if (modo !== 'reemplazo_cancelacion') { document.getElementById('ntGobernanzaNote').hidden = false; document.getElementById('ntPendienteNote').hidden = true; }
 }
 /* Guardado del Aliado en "Confirmar Reemplazo" (Alertas Activas): esta acción NO toca la Malla de inmediato —
    crea una solicitud pendiente en la Bandeja Unificada de Solicitudes ("Reemplazo Pendiente de Aprobación",
@@ -5225,45 +5280,6 @@ function solicitarCancelacionReemplazo(routeId, payload) {
   scPushRows('app_turnos', [route]);
   syncAndRender(true);
 }
-function openCancelarModal(routeId) {
-  if (!canDo('schedule.aliado.manage')) return;
-  var route = state.turnos.find(function (r) { return r.id === routeId; });
-  if (!route) return;
-  /* Bloqueo total de acciones extemporáneas: un turno ya cerrado en Incumplimiento Confirmado no admite
-     Cancelar (ni buscar reemplazo) — segunda barrera, ya que rowHtmlSeguimiento tampoco ofrece el botón
-     "Cancelar" en ese estado. No se excluye 'sin_reemplazo' aquí porque esta misma función también sirve al
-     flujo legítimo de Reasignar sobre una alerta de sustitución ya vencida (ver alertRowHtml/resolverAlerta),
-     que es un caso distinto y no debe bloquearse. */
-  if (computeEstado(route).code === 'afectacion_confirmada') {
-    toast('warn', 'No disponible', route.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite Cancelar.');
-    return;
-  }
-  /* Segunda barrera de duplicado: el botón de la fila ya se oculta detrás de "Cambio Pendiente de Aprobación
-     por Planner" mientras route.solicitudEdicionPendiente esté activo (ver rowHtmlSeguimiento), pero se
-     revalida aquí por si cambió entre el render y el clic. */
-  if (route.solicitudEdicionPendiente) {
-    toast('warn', 'Ya enviado', route.id + ' ya tiene una cancelación/reemplazo pendiente de aprobación por Planner.');
-    return;
-  }
-  var m = getMensajero(route.mensajeroId);
-  document.getElementById('cancelarRouteId').value = routeId;
-  document.getElementById('cancelarNote').textContent = route.id + ' · ' + m.nombre + ' · ' + route.vehiculo + ' · ' + fmtTime12(route.hora) + ' · ' + route.sede;
-  document.getElementById('cancelarNombre').value = '';
-  document.getElementById('cancelarTelefono').value = '';
-  document.getElementById('cancelarCedula').value = '';
-  document.getElementById('cancelarPlaca').value = '';
-  document.getElementById('cancelarCorreo').value = '';
-  var vehSelCancelar = document.getElementById('cancelarVehiculo');
-  vehSelCancelar.innerHTML = vehiculosForCountry(countryForSede(route.sede)).map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
-  vehSelCancelar.value = route.vehiculo;
-  document.querySelectorAll('#cancelarModoSegment button').forEach(function (b) { b.classList.toggle('active', b.dataset.modo === 'reemplazo'); });
-  document.getElementById('cancelarReemplazoFields').hidden = false;
-  document.getElementById('cancelarReemplazoGobernanzaNote').hidden = false;
-  document.getElementById('cancelarPendienteNote').hidden = true;
-  document.getElementById('cancelarSubmitBtn').textContent = 'Confirmar Reemplazo';
-  openModal('modalCancelarMensajero');
-}
-
 /* Sincroniza los eventos "guionados" de los turnos semilla (llegadaScript/salidaScript, ver TURNOS) contra
    el reloj simulado — requerimiento "Saneamiento de Simulación y Reactividad Dinámica del Reloj", sección 2B.
    route.llegada/route.salida (los campos que YA lee el resto de la plataforma — computeEstado y ~70 puntos
@@ -9266,8 +9282,12 @@ function rowHtmlSeguimiento(route) {
   } else {
     /* Ver requerimiento "Confirmación de Entregable Anterior...", punto 2 ("Rol Aliado"): se retiran
        Reprogramar/Cancelar de la fila -- CONSERVA únicamente "Notificar Ya Llegó" (acción operativa en
-       tiempo real). Cualquier trámite administrativo se redirige a Solicitudes y Cambios. */
+       tiempo real). Cualquier trámite administrativo se redirige a Solicitudes y Cambios.
+       Ver plan "Estandarización de Solicitudes del Aliado", Fase 3: se agrega "Reportar Novedad" (modal
+       unificado, modo 'novedad_sana' -- Cambiar mensajero / Cancelar el turno) como botón de fila directo,
+       en vez de depender únicamente del selector genérico "+ Nueva Solicitud" de la bandeja. */
     primaryActions.push('<button data-act="notificar-llegada" data-id="' + route.id + '">Notificar Ya Llegó</button>');
+    primaryActions.push('<button data-act="reportar-novedad" data-id="' + route.id + '">Reportar Novedad</button>');
   }
   /* Ver requerimiento "Mejoras de UI, Auditoría de Trazabilidad y Control de Acceso...", punto 4: el "ojito"
      (Historial del Turno) queda reservado a roles internos operativos (Planner, Bodega, Auditor) -- ALIADO
@@ -9459,15 +9479,15 @@ function rowHtmlProg(route) {
        que abre (openTurnoModal, modo 'confirm'). */
     actions += '<button data-act="confirmar-mensajero" data-id="' + route.id + '">Confirmar recurso</button>';
     /* Ver requerimiento "Corrección de Flujo: Acciones de Programar Flota según Pestaña (Mañana vs. Hoy)
-       para Turnos Pendientes": "No se ubica recurso" es un evento OPERATIVO del día en curso -- dispara
-       cancelación con penalización e Incumplimiento (ver noUbicaRecurso/sinReemplazoAusencia), impropio
-       todavía en "Mañana" (fase de borrador: el turno ni siquiera ha llegado a su hora de citación). Ahí el
-       Aliado solo necesita poder BORRAR el cupo si cancela -- sin penalización, sin afectación, ver
-       eliminarTurnoPendiente. "Hoy" conserva exactamente el botón y flujo de siempre. */
+       para Turnos Pendientes": "Mañana" (fase de borrador, el turno ni siquiera ha llegado a su hora de
+       citación) deja al Aliado BORRAR el cupo directo si cancela -- sin penalización, sin afectación, ver
+       eliminarTurnoPendiente.
+       Ver plan "Estandarización de Solicitudes del Aliado", Fase 3: "No se ubica recurso" (noUbicaRecurso,
+       cierre inmediato con penalización, sin pasar por aprobación de Planner) se elimina sin reemplazo para
+       "Hoy" -- un "Pendiente / Por Confirmar" sin gestionar se cierra solo vía el barrido de SLA/cierre de
+       jornada ya existente (cierreJornadaSweep), igual que cualquier otro turno sin resolver a tiempo. */
     if (state.progDay === 'tomorrow') {
       actions += '<button data-act="eliminar-turno-pendiente" data-id="' + route.id + '" class="danger">Eliminar mensajero</button>';
-    } else {
-      actions += '<button data-act="no-ubica-recurso" data-id="' + route.id + '" class="danger">No se ubica recurso</button>';
     }
   } else if (!yaEnCiclo) {
     /* Editar ya no depende de state.progDay === 'tomorrow': Hoy y Mañana admiten edición por igual, solo
@@ -10810,7 +10830,7 @@ function resolverAlertaConMotivo(routeId, code, motivoTipo, reemplazoData) {
 function reasignarAlerta(routeId, code) {
   if (canDo('schedule.aliado.manage')) {
     if (code === 'pendiente_asignacion') { openTurnoModal('confirm', routeId); return; }
-    if (code === 'cancelado_pendiente_reemplazo' || code === 'sustitucion_riesgo' || code === 'sin_reemplazo') { openCancelarModal(routeId); return; }
+    if (code === 'cancelado_pendiente_reemplazo' || code === 'sustitucion_riesgo' || code === 'sin_reemplazo') { openModalNovedadTransporte(routeId, 'reemplazo_cancelacion'); return; }
   }
   if (canDo('consolidado.manage')) { openSolicitudModal(routeId, 'reprogramacion'); return; }
 }
@@ -11350,8 +11370,10 @@ function bodegaMetricas(sede, rango, aliadoScope, mensajeroScope) {
    - "Incumplimientos Confirmados" (AMPLIADO): absorbe TODO cupo/mensajero que no cargó y al que NO se le
      colocó un reemplazo -- antes solo contaba 'afectacion_confirmada' (cierre automático por tolerancia +
      gestión vencidas); ahora también absorbe 'sin_reemplazo' (ventana de sustitución de una cancelación
-     vencida sin reemplazo confirmado) y sinReemplazoAusencia (cierre explícito por falta de recurso, ver
-     noUbicaRecurso) -- exactamente el bucket que antes alimentaba en solitario la tarjeta "Ausentismo /
+     vencida sin reemplazo confirmado) y sinReemplazoAusencia (cierre explícito por falta de recurso -- campo
+     histórico: su único setter, noUbicaRecurso, se eliminó en el plan "Estandarización de Solicitudes del
+     Aliado", Fase 3; turnos cerrados antes de ese cambio lo conservan, pero ninguno nuevo vuelve a fijarlo)
+     -- exactamente el bucket que antes alimentaba en solitario la tarjeta "Ausentismo /
      Pendientes" ya retirada.
    - "Ausentismo" (NUEVO, más amplio que Incumplimientos Confirmados): mide a TODO mensajero citado que no
      cargó, "independientemente de si fue reemplazado o no" -- Incumplimientos Confirmados (aún sin cobertura)
@@ -13394,11 +13416,10 @@ function refreshNsRutaOptions() {
    mantenerse dentro de la misma bodega. */
 function refreshNsFieldsForTipo() {
   var tipo = document.getElementById('nsTipo').value;
-  var esReprog = tipo === 'reprogramacion', esCambioMensajero = tipo === 'cambio_mensajero', esEnroque = tipo === 'enroque';
+  var esReprog = tipo === 'reprogramacion', esEnroque = tipo === 'enroque';
   var esNuevoTurno = tipo === 'nuevo_turno';
   document.getElementById('nsHoraField').hidden = !esReprog;
   document.getElementById('nsNuevaHora').required = esReprog;
-  document.getElementById('nsCambioMensajeroFields').hidden = !esCambioMensajero;
   document.getElementById('nsEnroqueField').hidden = !esEnroque;
   /* Nuevo Turno/Cupo Adicional no referencian un turno existente -- oculta Bodega/Mensajero-Turno (esos 2
      campos son para los otros 4 tipos) y muestra sus propios campos (Bodega/Vehículo/Hora deseada). */
@@ -13451,12 +13472,11 @@ function openNuevaSolicitudModal(presetRouteId, presetTipo) {
   var sel = document.getElementById('nsRuta');
   var esReprog = false;
   if (presetRoute) { sel.value = presetRoute.id; esReprog = true; }
-  document.getElementById('nsTipo').value = esNuevoTurnoPreset ? presetTipo : (esReprog ? 'reprogramacion' : 'cancelacion');
+  /* Ver plan "Estandarización de Solicitudes del Aliado", Fase 3: 'cancelacion' ya no es una opción de este
+     selector (se movió al modal "Novedad de Transporte") -- el default genérico (sin preset de ruta) pasa a
+     ser 'reprogramacion', la única opción que no depende de un turno específico ya elegido. */
+  document.getElementById('nsTipo').value = esNuevoTurnoPreset ? presetTipo : 'reprogramacion';
   document.getElementById('nsNuevaHora').value = '';
-  document.getElementById('nsCmNombre').value = '';
-  document.getElementById('nsCmTelefono').value = '';
-  document.getElementById('nsCmCedula').value = '';
-  document.getElementById('nsCmPlaca').value = '';
   /* Mismo catálogo que openTurnoModal (turnoSede/turnoVehiculo): sedes activas y vehículos del país del
      Aliado -- siempre se repuebla (no "si está vacío") por si cambió de sesión/país entre aperturas. */
   var myCountryNt = countryForAliado(state.user.aliado);
@@ -14273,14 +14293,6 @@ function initTimePicker(inputId) {
   document.addEventListener('click', function (e) {
     if (!panel.hidden && !wrap.contains(e.target)) cerrar();
   });
-}
-function openNoUbicaModal(routeId) {
-  var route = state.turnos.find(function (r) { return r.id === routeId; });
-  if (!route || !route.pendienteAsignacion) return;
-  document.getElementById('noUbicaRouteId').value = routeId;
-  document.getElementById('noUbicaNote').textContent = route.id + ' · ' + route.sede + ' · ' + route.vehiculo + ' · ' + fmtTime12(route.hora);
-  document.getElementById('noUbicaMotivo').value = '';
-  openModal('modalNoUbica');
 }
 /* FIX "Ajustes de UX para RappiBoy" (feedback instantáneo al primer clic): antes, el botón "Guardar turno"
    solo se deshabilitaba justo antes del push final -- TODA la validación de arriba (duplicados, ventana de
@@ -15266,8 +15278,10 @@ function cancelarSolicitudesHuerfanasFlota(mensajeroId, sede, fecha, hora) {
    Turnos Pendientes": a diferencia de desasignarMensajero() (quita un mensajero YA asignado), esta acción es
    para un cupo que NUNCA llegó a tener mensajero real -- el Aliado simplemente cancela el cupo en fase de
    borrador. Sin penalización, sin afectación, sin Solicitud de Cambio: "Mañana" sigue siendo edición libre
-   mientras no se haya cerrado la ventana de programación. Exclusivo de la pestaña "Mañana" -- en "Hoy" la
-   acción correspondiente sigue siendo "No se ubica recurso" (ver rowHtmlProg/noUbicaRecurso). */
+   mientras no se haya cerrado la ventana de programación. Exclusivo de la pestaña "Mañana" -- en "Hoy" ya no
+   hay acción equivalente (ver plan "Estandarización de Solicitudes del Aliado", Fase 3: "No se ubica
+   recurso"/noUbicaRecurso se eliminó sin reemplazo; un "Pendiente / Por Confirmar" de Hoy sin gestionar se
+   cierra solo vía el barrido de SLA/cierre de jornada). */
 function eliminarTurnoPendiente(routeId) {
   if (!canDo('schedule.aliado.manage')) return;
   var route = state.turnos.find(function (r) { return r.id === routeId; });
@@ -20669,22 +20683,11 @@ document.addEventListener('DOMContentLoaded', function () {
        Solicitud nueva que entre a la bandeja del Planner, ni siquiera si el <select> llegó a tener ese valor
        preseleccionado. */
     var codeNs = computeEstado(route).code;
-    if (codeNs === 'afectacion_confirmada' || codeNs === 'sin_reemplazo') { toast('warn', 'Turno cerrado', route.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite Cancelar, Reprogramar, Cambio de Mensajero ni Intercambio de Turno.'); closeModal(); return; }
+    if (codeNs === 'afectacion_confirmada' || codeNs === 'sin_reemplazo') { toast('warn', 'Turno cerrado', route.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite Reprogramar ni Intercambio de Turno.'); closeModal(); return; }
     var motivo = document.getElementById('nsMotivo').value.trim();
     if (!motivo) return;
     var nuevaHora = tipo === 'reprogramacion' ? document.getElementById('nsNuevaHora').value : null;
     if (tipo === 'reprogramacion' && !nuevaHora) return;
-    var mensajeroPropuesto = null;
-    if (tipo === 'cambio_mensajero') {
-      mensajeroPropuesto = {
-        nombre: document.getElementById('nsCmNombre').value.trim(), telefono: document.getElementById('nsCmTelefono').value.trim(),
-        cedula: document.getElementById('nsCmCedula').value.trim(), placa: document.getElementById('nsCmPlaca').value.trim(),
-        sede: route.sede, vehiculo: route.vehiculo
-      };
-      if (!mensajeroPropuesto.nombre || !mensajeroPropuesto.telefono || !mensajeroPropuesto.cedula || !mensajeroPropuesto.placa) {
-        toast('warn', 'Completa los datos del mensajero propuesto', 'Nombre, teléfono, cédula y placa son obligatorios.'); return;
-      }
-    }
     var enroqueConRouteId = null;
     if (tipo === 'enroque') {
       enroqueConRouteId = document.getElementById('nsEnroqueRuta').value;
@@ -20692,7 +20695,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     var solicitud = {
       tipo: tipo, estado: 'pendiente', motivo: motivo, horaAnterior: route.hora, nuevaHora: nuevaHora,
-      mensajeroPropuesto: mensajeroPropuesto, enroqueConRouteId: enroqueConRouteId,
+      mensajeroPropuesto: null, enroqueConRouteId: enroqueConRouteId,
       solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), solicitadaDesdeHM: fmtTimeHM(state.now), fecha: TODAY_STR, origen: 'aliado'
     };
     /* Clasificación de antelación (ver reprogramacionClasificacion): se calcula ANTES de asignar route.solicitud,
@@ -20703,7 +20706,7 @@ document.addEventListener('DOMContentLoaded', function () {
     route.solicitud = solicitud;
     registrarHistorialCambio(route, { tipo: tipo, accion: 'solicitada', motivo: motivo, horaAnterior: route.hora, horaPropuesta: nuevaHora, por: state.user.nombre });
     var toastMsgReprog = solicitud.evaluacionAntelacion ? (' (' + solicitud.evaluacionAntelacion.label + ')') : '';
-    var tipoToastLabel = { reprogramacion: 'Solicitud de reprogramación enviada', cancelacion: 'Solicitud de cancelación enviada', cambio_mensajero: 'Solicitud de cambio de mensajero enviada', enroque: 'Solicitud de intercambio de turno enviada' }[tipo];
+    var tipoToastLabel = { reprogramacion: 'Solicitud de reprogramación enviada', enroque: 'Solicitud de intercambio de turno enviada' }[tipo];
     toast('warn', tipoToastLabel, route.id + toastMsgReprog + ' — a la espera de respuesta del equipo Melonn.');
     closeModal();
     syncAndRender(true);
@@ -21297,13 +21300,6 @@ document.addEventListener('DOMContentLoaded', function () {
     wrap.style.opacity = e.target.checked ? '0.45' : '1';
   });
   initTimePicker('turnoHora');
-  document.getElementById('formNoUbica').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var routeId = document.getElementById('noUbicaRouteId').value;
-    var motivo = document.getElementById('noUbicaMotivo').value.trim();
-    noUbicaRecurso(routeId, motivo);
-    closeModal();
-  });
   document.getElementById('formObservacionBodega').addEventListener('submit', function (e) {
     e.preventDefault();
     var routeId = document.getElementById('obsBodegaRouteId').value;
@@ -21321,48 +21317,99 @@ document.addEventListener('DOMContentLoaded', function () {
     closeModal();
   });
 
-  document.querySelectorAll('#cancelarModoSegment button').forEach(function (b) {
+  /* Ver plan "Estandarización de Solicitudes del Aliado", Fase 3: wiring único del modal "Novedad de
+     Transporte" -- reemplaza el wiring de #cancelarModoSegment/#formCancelarReemplazo/#formAlertaReemplazo/
+     #formNoUbica. Los 2 segmentos (ntReemplazoModoSegment para reemplazo_cancelacion, ntOpcionSanaSegment
+     para novedad_sana) solo re-muestran/ocultan campos vía refreshNovedadTransporteCampos() -- el modo
+     (ntModo, fijado al abrir, nunca editable aquí) sigue siendo lo único que decide el destino real. */
+  document.querySelectorAll('#ntReemplazoModoSegment button').forEach(function (b) {
     b.addEventListener('click', function () {
-      document.querySelectorAll('#cancelarModoSegment button').forEach(function (x) { x.classList.remove('active'); });
+      document.querySelectorAll('#ntReemplazoModoSegment button').forEach(function (x) { x.classList.remove('active'); });
       b.classList.add('active');
-      var esPendiente = b.dataset.modo === 'pendiente';
-      document.getElementById('cancelarReemplazoFields').hidden = esPendiente;
-      document.getElementById('cancelarReemplazoGobernanzaNote').hidden = esPendiente;
-      document.getElementById('cancelarPendienteNote').hidden = !esPendiente;
-      document.getElementById('cancelarSubmitBtn').textContent = esPendiente ? 'Guardar como Pendiente' : 'Confirmar Reemplazo';
+      refreshNovedadTransporteCampos();
     });
   });
-  document.getElementById('formCancelarReemplazo').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var routeId = document.getElementById('cancelarRouteId').value;
-    var modo = document.querySelector('#cancelarModoSegment .active').dataset.modo;
-    if (modo === 'pendiente') {
-      marcarPendienteReemplazo(routeId);
-    } else {
-      var nombre = document.getElementById('cancelarNombre').value.trim();
-      var telefono = document.getElementById('cancelarTelefono').value.trim();
-      var cedula = document.getElementById('cancelarCedula').value.trim();
-      var placa = document.getElementById('cancelarPlaca').value.trim();
-      var vehiculo = document.getElementById('cancelarVehiculo').value;
-      var correo = document.getElementById('cancelarCorreo').value.trim();
-      if (!nombre || !telefono || !cedula || !placa || !correo) { toast('warn', 'Completa los datos del reemplazo', 'Nombre, teléfono, cédula, placa y correo electrónico son obligatorios.'); return; }
-      solicitarCancelacionReemplazo(routeId, { nombre: nombre, telefono: telefono, cedula: cedula, placa: placa, vehiculo: vehiculo, correo: correo });
-    }
-    closeModal();
+  document.querySelectorAll('#ntOpcionSanaSegment button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('#ntOpcionSanaSegment button').forEach(function (x) { x.classList.remove('active'); });
+      b.classList.add('active');
+      refreshNovedadTransporteCampos();
+    });
   });
-
-  document.getElementById('formAlertaReemplazo').addEventListener('submit', function (e) {
+  document.getElementById('formNovedadTransporte').addEventListener('submit', function (e) {
     e.preventDefault();
-    var routeId = document.getElementById('alertaReemplazoRouteId').value;
-    var nombre = document.getElementById('alertaReemplazoNombre').value.trim();
-    var telefono = document.getElementById('alertaReemplazoTelefono').value.trim();
-    var cedula = document.getElementById('alertaReemplazoCedula').value.trim();
-    var placa = document.getElementById('alertaReemplazoPlaca').value.trim();
-    var vehiculo = document.getElementById('alertaReemplazoVehiculo').value;
-    var correo = document.getElementById('alertaReemplazoCorreo').value.trim();
-    if (!nombre || !telefono || !cedula || !placa || !correo) { toast('warn', 'Completa los datos del reemplazo', 'Nombre, teléfono, cédula, placa y correo electrónico son obligatorios.'); return; }
-    solicitarReemplazoAlerta(routeId, { nombre: nombre, telefono: telefono, cedula: cedula, placa: placa, vehiculo: vehiculo, correo: correo });
-    closeModal();
+    var routeId = document.getElementById('ntRouteId').value;
+    var modo = document.getElementById('ntModo').value;
+    if (modo === 'reemplazo_alerta') {
+      var nombreRa = document.getElementById('ntNombre').value.trim();
+      var telefonoRa = document.getElementById('ntTelefono').value.trim();
+      var cedulaRa = document.getElementById('ntCedula').value.trim();
+      var placaRa = document.getElementById('ntPlaca').value.trim();
+      var vehiculoRa = document.getElementById('ntVehiculo').value;
+      var correoRa = document.getElementById('ntCorreo').value.trim();
+      if (!nombreRa || !telefonoRa || !cedulaRa || !placaRa || !correoRa) { toast('warn', 'Completa los datos del reemplazo', 'Nombre, teléfono, cédula, placa y correo electrónico son obligatorios.'); return; }
+      solicitarReemplazoAlerta(routeId, { nombre: nombreRa, telefono: telefonoRa, cedula: cedulaRa, placa: placaRa, vehiculo: vehiculoRa, correo: correoRa });
+      closeModal();
+    } else if (modo === 'reemplazo_cancelacion') {
+      var modoReemplazo = document.querySelector('#ntReemplazoModoSegment .active').dataset.modo;
+      if (modoReemplazo === 'pendiente') {
+        marcarPendienteReemplazo(routeId);
+      } else {
+        var nombreRc = document.getElementById('ntNombre').value.trim();
+        var telefonoRc = document.getElementById('ntTelefono').value.trim();
+        var cedulaRc = document.getElementById('ntCedula').value.trim();
+        var placaRc = document.getElementById('ntPlaca').value.trim();
+        var vehiculoRc = document.getElementById('ntVehiculo').value;
+        var correoRc = document.getElementById('ntCorreo').value.trim();
+        if (!nombreRc || !telefonoRc || !cedulaRc || !placaRc || !correoRc) { toast('warn', 'Completa los datos del reemplazo', 'Nombre, teléfono, cédula, placa y correo electrónico son obligatorios.'); return; }
+        solicitarCancelacionReemplazo(routeId, { nombre: nombreRc, telefono: telefonoRc, cedula: cedulaRc, placa: placaRc, vehiculo: vehiculoRc, correo: correoRc });
+      }
+      closeModal();
+    } else if (modo === 'novedad_sana') {
+      var routeNs = state.turnos.find(function (r) { return r.id === routeId; });
+      if (!routeNs) { closeModal(); return; }
+      /* Mismas 2 barreras que ya tenía formNuevaSolicitud para estos 2 tipos -- revalidadas aquí por si el
+         estado cambió entre abrir el modal y enviar. */
+      if (routeNs.solicitud && routeNs.solicitud.estado === 'pendiente') { toast('warn', 'Solicitud ya enviada', routeNs.id + ' ya tiene una solicitud pendiente de respuesta.'); closeModal(); return; }
+      var codeNs = computeEstado(routeNs).code;
+      if (codeNs === 'afectacion_confirmada' || codeNs === 'sin_reemplazo') { toast('warn', 'Turno cerrado', routeNs.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite gestión de novedades.'); closeModal(); return; }
+      var opcionSana = document.querySelector('#ntOpcionSanaSegment .active').dataset.opcion;
+      if (opcionSana === 'cambio_mensajero') {
+        var mensajeroPropuestoNs = {
+          nombre: document.getElementById('ntNombre').value.trim(), telefono: document.getElementById('ntTelefono').value.trim(),
+          cedula: document.getElementById('ntCedula').value.trim(), placa: document.getElementById('ntPlaca').value.trim(),
+          vehiculo: document.getElementById('ntVehiculo').value, correo: document.getElementById('ntCorreo').value.trim(),
+          sede: routeNs.sede
+        };
+        if (!mensajeroPropuestoNs.nombre || !mensajeroPropuestoNs.telefono || !mensajeroPropuestoNs.cedula || !mensajeroPropuestoNs.placa) {
+          toast('warn', 'Completa los datos del mensajero propuesto', 'Nombre, teléfono, cédula y placa son obligatorios.'); return;
+        }
+        var motivoCm = 'Cambio de mensajero solicitado por el Aliado desde Seguimiento — ' + routeNs.id + '.';
+        routeNs.solicitud = {
+          tipo: 'cambio_mensajero', estado: 'pendiente', motivo: motivoCm, horaAnterior: routeNs.hora, nuevaHora: null,
+          mensajeroPropuesto: mensajeroPropuestoNs, enroqueConRouteId: null,
+          solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), solicitadaDesdeHM: fmtTimeHM(state.now), fecha: TODAY_STR, origen: 'aliado'
+        };
+        registrarHistorialCambio(routeNs, { tipo: 'cambio_mensajero', accion: 'solicitada', motivo: motivoCm, horaAnterior: routeNs.hora, horaPropuesta: null, por: state.user.nombre });
+        toast('warn', 'Solicitud de cambio de mensajero enviada', routeNs.id + ' — a la espera de respuesta del equipo Melonn.');
+        closeModal();
+        syncAndRender(true);
+        pushRouteConAviso(routeNs, 'Solicitud no confirmada en la nube');
+      } else {
+        var motivoCancel = document.getElementById('ntMotivo').value.trim();
+        if (!motivoCancel) { toast('warn', 'Motivo requerido', 'Indica el motivo de la cancelación.'); return; }
+        routeNs.solicitud = {
+          tipo: 'cancelacion', estado: 'pendiente', motivo: motivoCancel, horaAnterior: routeNs.hora, nuevaHora: null,
+          mensajeroPropuesto: null, enroqueConRouteId: null,
+          solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), solicitadaDesdeHM: fmtTimeHM(state.now), fecha: TODAY_STR, origen: 'aliado'
+        };
+        registrarHistorialCambio(routeNs, { tipo: 'cancelacion', accion: 'solicitada', motivo: motivoCancel, horaAnterior: routeNs.hora, horaPropuesta: null, por: state.user.nombre });
+        toast('warn', 'Solicitud de cancelación enviada', routeNs.id + ' — a la espera de respuesta del equipo Melonn.');
+        closeModal();
+        syncAndRender(true);
+        pushRouteConAviso(routeNs, 'Solicitud no confirmada en la nube');
+      }
+    }
   });
 
   document.getElementById('formLlegada').addEventListener('submit', function (e) {
@@ -21684,7 +21731,6 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'flota-propia-editar') openFlotaPropiaEditModal(id);
     else if (act === 'flota-propia-eliminar') eliminarFlotaPropiaMensajero(id);
     else if (act === 'flota-propia-agregar') openFlotaPropiaCrearModal();
-    else if (act === 'no-ubica-recurso') openNoUbicaModal(id);
     else if (act === 'eliminar-turno-pendiente') eliminarTurnoPendiente(id);
     else if (act === 'completar-cuota-pendiente') {
       openTurnoModal('create', null);
@@ -21704,9 +21750,9 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'arribo-sin-llegar') openArriboSinLlegarModal(id);
     else if (act === 'validar-llegada-abrir') openValidarNotificacionLlegadaModal(id);
     else if (act === 'seg-reprogramar') openReprogramarSeguimientoModal(id);
-    else if (act === 'seg-cancelar') openCancelarModal(id);
     else if (act === 'cancelar-solicitud-propia') openCancelarSolicitudPropiaModal(id, btn.dataset.esRuta === '1');
-    else if (act === 'confirmar-reemplazo') openCancelarModal(id);
+    else if (act === 'confirmar-reemplazo') openModalNovedadTransporte(id, 'reemplazo_cancelacion');
+    else if (act === 'reportar-novedad') openModalNovedadTransporte(id, 'novedad_sana');
     else if (act === 'cancelar') {
       if (canDo('schedule.cancel')) {
         openConfirmModal({
@@ -21816,7 +21862,7 @@ document.addEventListener('DOMContentLoaded', function () {
       if (selVehiculo) agregarCuotaVehiculoEnFranja(btn.dataset.franja, selVehiculo.value);
     }
     else if (act === 'alerta-reasignar') reasignarAlerta(id, btn.dataset.code);
-    else if (act === 'alerta-confirmar-reemplazo') openAlertaConfirmarReemplazoModal(id);
+    else if (act === 'alerta-confirmar-reemplazo') openModalNovedadTransporte(id, 'reemplazo_alerta');
     else if (act === 'editar-tipologia-vehiculo') openVehiculoModal(btn.dataset.pais, btn.dataset.nombre);
     else if (act === 'toggle-tipologia-vehiculo') toggleTipologiaVehiculoActiva(btn.dataset.pais, btn.dataset.nombre);
     else if (act === 'eliminar-tipologia-vehiculo') eliminarTipologiaVehiculo(btn.dataset.pais, btn.dataset.nombre);

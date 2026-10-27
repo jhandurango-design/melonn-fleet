@@ -2589,62 +2589,52 @@
     </form>
   </div>
 
-  <div class="modal" id="modalNoUbica">
-    <div class="modal-head"><h3>Cerrar turno sin recurso</h3><button class="modal-close" data-close>&times;</button></div>
-    <form id="formNoUbica" class="modal-body">
-      <input type="hidden" id="noUbicaRouteId">
-      <p class="modal-note" id="noUbicaNote"></p>
-      <div class="field"><label for="noUbicaMotivo">Motivo (opcional)</label><textarea id="noUbicaMotivo" rows="3" placeholder="Ej. Ningún mensajero disponible para este turno."></textarea></div>
+  <!-- Ver plan "Estandarización de Solicitudes del Aliado", Fase 3: modal único que reemplaza
+       #modalAlertaReemplazo + #modalCancelarMensajero + #modalNoUbica (eliminado sin reemplazo, ver abajo) y
+       las opciones cambio_mensajero/cancelación de #modalNuevaSolicitud. ntModo ('reemplazo_alerta' |
+       'reemplazo_cancelacion' | 'novedad_sana', ver openModalNovedadTransporte) determina qué bloques se
+       muestran -- el destino real de los datos (reemplazo_alerta/reemplazo_cancelacion/cambio_mensajero/
+       cancelacion/marcarPendienteReemplazo) lo decide SIEMPRE el contexto de apertura, nunca un selector
+       libre dentro del modal. -->
+  <div class="modal" id="modalNovedadTransporte">
+    <div class="modal-head"><h3 id="ntTitulo">Novedad de Transporte</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="formNovedadTransporte" class="modal-body">
+      <input type="hidden" id="ntRouteId">
+      <input type="hidden" id="ntModo">
+      <p class="modal-note" id="ntNote"></p>
+      <!-- Variante B (ntModo==='novedad_sana'): primera elección sobre un turno SANO -- "Cancelar" nunca
+           ofrece reemplazo aquí (ver corrección del plan: eso es la 2ª etapa, solo disponible una vez la
+           cancelación escala a alerta). -->
+      <div class="field" id="ntOpcionSanaField" hidden>
+        <label>¿Qué necesitas hacer con este turno?</label>
+        <div class="segmented" id="ntOpcionSanaSegment">
+          <button type="button" data-opcion="cambio_mensajero" class="active">Cambiar mensajero</button>
+          <button type="button" data-opcion="cancelacion">Cancelar el turno</button>
+        </div>
+      </div>
+      <!-- Variante A, sub-caso reemplazo_cancelacion (ntModo==='reemplazo_cancelacion'): mismo toggle que
+           ya existía en #modalCancelarMensajero -- reemplazo_alerta (critical/retirado) nunca lo muestra. -->
+      <div class="segmented" id="ntReemplazoModoSegment" hidden>
+        <button type="button" data-modo="reemplazo" class="active">Tengo reemplazo listo</button>
+        <button type="button" data-modo="pendiente">Aún no tengo reemplazo</button>
+      </div>
+      <div class="filter-grid" id="ntReemplazoFields" style="grid-template-columns:1fr 1fr;">
+        <div class="field"><label for="ntNombre">Nombre</label><input type="text" id="ntNombre"></div>
+        <div class="field"><label for="ntTelefono">Teléfono</label><input type="text" id="ntTelefono"></div>
+        <div class="field"><label for="ntCedula">CÉDULA / INE</label><input type="text" id="ntCedula"></div>
+        <div class="field"><label for="ntPlaca">Placa</label><input type="text" id="ntPlaca"></div>
+        <div class="field"><label for="ntVehiculo">Tipo de Vehículo</label><select id="ntVehiculo"></select></div>
+        <div class="field"><label for="ntCorreo">Correo Electrónico</label><input type="email" id="ntCorreo"></div>
+      </div>
+      <div class="field" id="ntMotivoField" hidden>
+        <label for="ntMotivo">Motivo de la cancelación</label>
+        <textarea id="ntMotivo" rows="3" placeholder="Ej. Vehículo en mantenimiento, el mensajero no podrá cumplir el turno..."></textarea>
+      </div>
+      <p class="modal-note" id="ntGobernanzaNote">Esta solicitud queda <strong>Pendiente de Aprobación por Planner</strong> — el mensajero actual se mantiene y la Malla no se actualiza hasta que Planner apruebe.</p>
+      <p class="modal-note" id="ntPendienteNote" hidden>El turno quedará marcado como "Cancelado - Pendiente Reemplazo". Podrás confirmar el reemplazo más tarde desde esta misma tabla. Si la jornada cierra sin reemplazo, quedará registrado como "Mensajero no presenta / Sin reemplazo" para trazabilidad en Auditoría.</p>
       <div class="modal-foot">
         <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
-        <button type="submit" class="btn btn-danger">Cerrar turno sin recurso</button>
-      </div>
-    </form>
-  </div>
-
-  <div class="modal" id="modalCancelarMensajero">
-    <div class="modal-head"><h3>Cancelar mensajero</h3><button class="modal-close" data-close>&times;</button></div>
-    <form id="formCancelarReemplazo" class="modal-body">
-      <input type="hidden" id="cancelarRouteId">
-      <p class="modal-note" id="cancelarNote"></p>
-      <div class="segmented" id="cancelarModoSegment">
-        <button type="button" data-modo="reemplazo" class="active">Ingresar datos de Reemplazo</button>
-        <button type="button" data-modo="pendiente">Pendiente de Reemplazo</button>
-      </div>
-      <div class="filter-grid" id="cancelarReemplazoFields" style="grid-template-columns:1fr 1fr;">
-        <div class="field"><label for="cancelarNombre">Nombre</label><input type="text" id="cancelarNombre"></div>
-        <div class="field"><label for="cancelarTelefono">Teléfono</label><input type="text" id="cancelarTelefono"></div>
-        <div class="field"><label for="cancelarCedula">CÉDULA / INE</label><input type="text" id="cancelarCedula"></div>
-        <div class="field"><label for="cancelarPlaca">Placa</label><input type="text" id="cancelarPlaca"></div>
-        <div class="field"><label for="cancelarVehiculo">Tipo de Vehículo</label><select id="cancelarVehiculo"></select></div>
-        <div class="field"><label for="cancelarCorreo">Correo Electrónico</label><input type="email" id="cancelarCorreo"></div>
-      </div>
-      <p class="modal-note" id="cancelarReemplazoGobernanzaNote">La cancelación y el reemplazo quedan <strong>Pendientes de Aprobación por Planner</strong> — el mensajero actual se mantiene y la Malla no se actualiza hasta que Planner apruebe.</p>
-      <p class="modal-note" id="cancelarPendienteNote" hidden>El turno quedará marcado como "Cancelado - Pendiente Reemplazo". Podrás confirmar el reemplazo más tarde desde esta misma tabla. Si la jornada cierra sin reemplazo, quedará registrado como "Mensajero no presenta / Sin reemplazo" para trazabilidad en Auditoría.</p>
-      <div class="modal-foot">
-        <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
-        <button type="submit" class="btn btn-primary" id="cancelarSubmitBtn">Confirmar Reemplazo</button>
-      </div>
-    </form>
-  </div>
-
-  <div class="modal" id="modalAlertaReemplazo">
-    <div class="modal-head"><h3>Confirmar Reemplazo</h3><button class="modal-close" data-close>&times;</button></div>
-    <form id="formAlertaReemplazo" class="modal-body">
-      <input type="hidden" id="alertaReemplazoRouteId">
-      <p class="modal-note" id="alertaReemplazoNote"></p>
-      <p class="modal-note">Ingresa los datos del mensajero de reemplazo. La asignación queda <strong>Pendiente de Aprobación por Planner</strong> — se aplica a la Malla solo cuando Planner la apruebe.</p>
-      <div class="filter-grid" style="grid-template-columns:1fr 1fr;">
-        <div class="field"><label for="alertaReemplazoNombre">Nombre</label><input type="text" id="alertaReemplazoNombre"></div>
-        <div class="field"><label for="alertaReemplazoTelefono">Teléfono</label><input type="text" id="alertaReemplazoTelefono"></div>
-        <div class="field"><label for="alertaReemplazoCedula">CÉDULA / INE</label><input type="text" id="alertaReemplazoCedula"></div>
-        <div class="field"><label for="alertaReemplazoPlaca">Placa</label><input type="text" id="alertaReemplazoPlaca"></div>
-        <div class="field"><label for="alertaReemplazoVehiculo">Tipo de Vehículo</label><select id="alertaReemplazoVehiculo"></select></div>
-        <div class="field"><label for="alertaReemplazoCorreo">Correo Electrónico</label><input type="email" id="alertaReemplazoCorreo"></div>
-      </div>
-      <div class="modal-foot">
-        <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
-        <button type="submit" class="btn btn-primary">Enviar a Planner</button>
+        <button type="submit" class="btn btn-primary" id="ntSubmitBtn">Enviar a Planner</button>
       </div>
     </form>
   </div>
@@ -3182,11 +3172,14 @@
            Aliado opera en más de una) -- homologa la misma estructura visual que el modal del Planner. -->
       <div class="field" id="nsBodegaField"><label for="nsBodega">Bodega</label><select id="nsBodega"></select></div>
       <div class="field" id="nsRutaField"><label for="nsRuta">Mensajero / Turno</label><select id="nsRuta" required></select></div>
+      <!-- Ver plan "Estandarización de Solicitudes del Aliado", Fase 3: 'cambio_mensajero' y 'cancelacion'
+           se retiraron de aquí -- ahora viven en el modal unificado "Novedad de Transporte"
+           (openModalNovedadTransporte, modo 'novedad_sana'), con sus propios botones de fila en Seguimiento/
+           Programar Flota ("Reportar Novedad"). Este modal queda acotado a reprogramación/enroque (+
+           nuevo_turno oculto, sin tocar). -->
       <div class="field"><label for="nsTipo">Tipo de solicitud</label>
         <select id="nsTipo" required>
-          <option value="cancelacion">Cancelación</option>
           <option value="reprogramacion">Reprogramación de hora</option>
-          <option value="cambio_mensajero">Cambio de Mensajero</option>
           <option value="enroque">Intercambio de Turno</option>
           <!-- Ver requerimiento "Ajustes UI/UX Consolidados...", punto 3: ya no es una opción elegible a mano
                aquí (duplicaba el botón dedicado "+ Solicitar Nuevo Turno" de Programar Flota/Hoy) -- "hidden"
@@ -3200,12 +3193,6 @@
       <div class="field" id="nsHoraField">
         <label for="nsNuevaHora">Nueva hora propuesta</label>
         <input type="time" id="nsNuevaHora">
-      </div>
-      <div class="filter-grid" id="nsCambioMensajeroFields" style="grid-template-columns:1fr 1fr;" hidden>
-        <div class="field"><label for="nsCmNombre">Nombre del nuevo mensajero</label><input type="text" id="nsCmNombre"></div>
-        <div class="field"><label for="nsCmTelefono">Teléfono</label><input type="text" id="nsCmTelefono"></div>
-        <div class="field"><label for="nsCmCedula">CÉDULA / INE</label><input type="text" id="nsCmCedula"></div>
-        <div class="field"><label for="nsCmPlaca">Placa</label><input type="text" id="nsCmPlaca"></div>
       </div>
       <div class="field" id="nsEnroqueField" hidden>
         <label for="nsEnroqueRuta">Turno con el que intercambiar</label>
