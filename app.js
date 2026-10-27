@@ -15146,14 +15146,27 @@ function eliminarFlotaHabitual() {
     }
   });
 }
-function ejecutarCargaFlotaHabitual(plantilla) {
-  /* Ver requerimiento "Menú Desplegable de Acciones para Flota Recurrente": el botón que disparó esta acción
-     ya NO existe en el DOM para cuando esta función corre -- vivía dentro del menú flotante de #btnProgAcciones
-     (ver toggleRowMenu), que se cierra solo al hacer clic en cualquiera de sus ítems, y cargarFlotaHabitual()
-     (el llamador real) además interpone un modal de confirmación de por medio antes de llegar aquí. La
-     protección contra doble ejecución que antes deshabilitaba ese botón ya no aplica (no hay nada que
-     deshabilitar) -- el propio modal de confirmación, que exige una interacción deliberada cada vez, cumple
-     el mismo propósito de no disparar dos cargas en paralelo por un clic accidental repetido. */
+/* Ver requerimiento "Carga Masiva de Programación vía Excel/CSV": núcleo compartido de carga en lote de
+   turnos, extraído de lo que antes era el cuerpo íntegro de ejecutarCargaFlotaHabitual (ver esa función, justo
+   abajo, que ahora es un wrapper de 1 llamada) -- así "Cargar Flota Recurrente" y la carga por archivo Excel/
+   CSV comparten EXACTAMENTE la misma lógica de deduplicación/cuotas/push/rollback, el área con más historial
+   de bugs reales del archivo (ver comentarios "FIX"/"Sección 3A"/"Regla 1" en submitTurno/evaluarAprobacionCuota)
+   -- nunca 2 copias que puedan desalinearse entre sí.
+   entries: array de {sede, vehiculo, hora, nombre, telefono, cedula, placa, correo}, mismo shape que ya usa
+   state.flotaHabitual[aliado]. opciones.modoAdicional: 'omitir' (default -- comportamiento histórico de Flota
+   Recurrente, ver el FIX "satura Solicitudes y Cambios" más abajo: un entry que requiere aprobación de Planner
+   se descarta por completo) o 'crear_pendiente' (comportamiento nuevo de la carga por archivo: se crea igual,
+   como turno real "Pendiente de Aprobación por Planner" -- MISMO shape de campos que ya usa submitTurno en su
+   propia rama aprobacion.requiere, ver turnoPendienteAprobacion ahí). opciones.motivoContexto: texto libre para
+   el Historial/Solicitud ("carga rápida de Flota Habitual" vs. "carga masiva vía archivo Excel/CSV").
+   Siempre exclusivo de "Mañana" (fecha = TOMORROW_STR), igual que hoy. Devuelve una Promise que resuelve
+   DESPUÉS de completar el push (y el rollback si Supabase falla) con {ok, creados, omitidosPorCupo,
+   adicionalesCreados, solicitudes, turnosNuevos, mensajerosNuevos, solicitudesGeneralesNuevas} -- el llamador
+   decide el texto del toast; syncAndRender(true) ya corre aquí dentro cuando hubo algo que empujar. */
+function procesarCargaMasivaTurnos(entries, opciones) {
+  opciones = opciones || {};
+  var modoAdicional = opciones.modoAdicional || 'omitir';
+  var motivoContexto = opciones.motivoContexto || 'carga masiva';
   var fecha = TOMORROW_STR;
   var yaProgramados = {};
   routesInScope('tomorrow').forEach(function (r) {
@@ -15162,18 +15175,18 @@ function ejecutarCargaFlotaHabitual(plantilla) {
   });
   /* Ver requerimiento "Idempotencia / Control de Duplicados en Solicitudes al Planner" (reporte de Easyway/
      Cabify, acumulación masiva de solicitudes pendientes): la rama "fuera de ventana" de abajo (ver
-     solFlotaHabitual) NO crea ningún turno, solo una fila en state.solicitudesGenerales -- así que
-     yaProgramados (que solo mira turnos reales, arriba) nunca detectaba que esa cédula YA tenía una solicitud
-     en curso, y cada clic repetido de "Cargar Flota Recurrente" generaba una solicitud duplicada más para el
-     mismo mensajero/fecha, sin límite. Se suman aquí también las cédulas con una Solicitud General propia
-     todavía 'pendiente' (nuevo_turno/cupo_adicional) para esta misma fecha. */
+     solMasiva) NO crea ningún turno, solo una fila en state.solicitudesGenerales -- así que yaProgramados
+     (que solo mira turnos reales, arriba) nunca detectaba que esa cédula YA tenía una solicitud en curso, y
+     cada carga repetida generaba una solicitud duplicada más para el mismo mensajero/fecha, sin límite. Se
+     suman aquí también las cédulas con una Solicitud General propia todavía 'pendiente' (nuevo_turno/
+     cupo_adicional) para esta misma fecha. */
   state.solicitudesGenerales.forEach(function (s) {
     if (s.estado !== 'pendiente' || s.aliado !== state.user.aliado) return;
     if ((s.tipo === 'nuevo_turno' || s.tipo === 'cupo_adicional') && s.detalle && s.detalle.fecha === fecha && s.detalle.cedula) {
       yaProgramados[s.detalle.cedula] = true;
     }
   });
-  var creados = 0, omitidosPorCupo = 0, solicitudes = 0;
+  var creados = 0, omitidosPorCupo = 0, adicionalesCreados = 0, solicitudes = 0;
   /* Ver nota "Supabase" junto a submitTurno(): esta carga masiva tampoco empujaba nunca a app_turnos --
      se acumulan aquí todos los turnos nuevos de esta pasada para empujarlos juntos en un solo scPushRows
      al final, en vez de depender del autoguardado periódico. */
@@ -15190,107 +15203,150 @@ function ejecutarCargaFlotaHabitual(plantilla) {
     if (idsAntes.indexOf(id) === -1) mensajerosNuevos.push(getMensajero(id));
     return id;
   }
-  plantilla.forEach(function (entry) {
+  entries.forEach(function (entry) {
     if (!entry.cedula || yaProgramados[entry.cedula]) return;
     yaProgramados[entry.cedula] = true;
     var payload = { sede: entry.sede, vehiculo: entry.vehiculo, hora: entry.hora, nombre: entry.nombre, telefono: entry.telefono, cedula: entry.cedula, placa: entry.placa, correo: entry.correo, pendiente: false, fecha: fecha };
     /* Ver requerimiento "Solicitud y Mensajes para Tipología No Habilitada": carga masiva, sin modal
        interactivo por fila (igual que festivo/domingo/cupo en esta misma función) -- se registra
        directamente como Excepción de Tipología pendiente de aprobación. */
-    var tipologiaNoHabilitadaFlota = cuotasActivoPais(countryForSede(entry.sede)) && !esFlotaPropia(state.user.aliado) && !tipologiaHabilitada(entry.sede, state.user.aliado, entry.vehiculo);
-    var aprobacion = tipologiaNoHabilitadaFlota
+    var tipologiaNoHabilitadaMasiva = cuotasActivoPais(countryForSede(entry.sede)) && !esFlotaPropia(state.user.aliado) && !tipologiaHabilitada(entry.sede, state.user.aliado, entry.vehiculo);
+    var aprobacion = tipologiaNoHabilitadaMasiva
       ? { requiere: true, motivo: 'tipologia', detalle: 'Solicitud de Excepción de Tipología: ' + state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(entry.vehiculo, countryForSede(entry.sede)) + ' en ' + entry.sede + '.' }
       : evaluarAprobacionCuota(entry.sede, state.user.aliado, entry.vehiculo, entry.hora, fecha);
     /* FIX "Plantilla de Flota Recurrente satura Solicitudes y Cambios con Pendientes de Aprobación" (reporte
-       Cordiandina, aplica a cualquier Aliado): antes, un entry que excedía cupo/festivo/domingo/tipología se
-       creaba IGUAL como turno real en estado "Pendiente de Aprobación por Planner" -- cada vez que el Aliado
-       repetía "Cargar Flota Recurrente" (p. ej. tras cerrar y reabrir, o por costumbre diaria), se acumulaban
-       más y más turnos bloqueados (sin edición posible, ver openTurnoModal) esperando a Planner, saturando
-       Solicitudes y Cambios. Ahora la carga masiva por plantilla SOLO persiste lo que cabe dentro del cupo
-       configurado -- el excedente se omite por completo (ni turno ni mensajero nuevo), y se informa al
-       Aliado cuántos quedaron fuera para que los gestione manualmente vía "+ Nuevo Turno" si corresponde
-       (ese camino individual sigue yendo a Pendiente de Aprobación, sin cambios -- Planner sigue pudiendo
-       revisarlos ahí, uno por uno, en vez de recibir un lote masivo). */
+       Cordiandina, aplica a cualquier Aliado): por defecto (modoAdicional 'omitir'), un entry que excede
+       cupo/festivo/domingo/tipología se omite por completo (ni turno ni mensajero nuevo), y se informa al
+       Aliado cuántos quedaron fuera para que los gestione manualmente vía "+ Nuevo Turno" si corresponde.
+       'crear_pendiente' (nuevo, ver comentario de la función): el llamador YA decidió incluir este entry
+       (p. ej. el Aliado lo marcó en el preview de la carga por archivo) -- se crea igual, como turno real
+       Pendiente de Aprobación, en vez de omitirse. */
+    var creaComoPendienteAprobacion = false;
     if (aprobacion.requiere) {
-      omitidosPorCupo++;
-      return;
+      if (modoAdicional !== 'crear_pendiente') {
+        omitidosPorCupo++;
+        return;
+      }
+      creaComoPendienteAprobacion = true;
     }
     var ws = progEditWindowState();
     var directo = ws === 'open' || ws === 'alert' || ws === 'closed_extended_active';
     if (directo) {
       var mensajeroId = resolverMensajero(payload);
       var nuevoTurno = { id: nextTurnoId(), sede: entry.sede, fecha: fecha, mensajeroId: mensajeroId, vehiculo: entry.vehiculo, hora: entry.hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: false };
+      if (creaComoPendienteAprobacion) {
+        /* Mismo shape de campos que submitTurno usa en su propia rama aprobacion.requiere (ver
+           turnoPendienteAprobacion ahí) -- para que esta carga masiva no cree un turno "Pendiente de
+           Aprobación" con una forma distinta a la que ya reconoce Planner en Solicitudes y Cambios. */
+        nuevoTurno.pendienteAprobacionPlanner = true;
+        nuevoTurno.pendienteAprobacionMotivo = aprobacion.motivo;
+        nuevoTurno.pendienteAprobacionDetalle = aprobacion.detalle;
+        nuevoTurno.pendienteAprobacionSolicitadoPor = state.user.nombre;
+        nuevoTurno.pendienteAprobacionSolicitadoEn = fmtClock(state.now);
+      }
       state.turnos.push(nuevoTurno);
       registrarCreacionTurno(nuevoTurno, state.user.nombre);
-      if (aprobacion.descalceFranja) {
+      if (creaComoPendienteAprobacion) {
+        adicionalesCreados++;
+        registrarHistorialCambio(nuevoTurno, {
+          tipo: 'aprobacion_cuota', accion: 'solicitado',
+          motivo: cuotaCausalLabel(aprobacion.motivo) + ': ' + aprobacion.detalle + ' (' + motivoContexto + ').',
+          horaAnterior: null, horaPropuesta: null, por: state.user.nombre
+        });
+      } else if (aprobacion.descalceFranja) {
         nuevoTurno.descalceFranjaAlerta = aprobacion.descalceFranja;
         registrarHistorialCambio(nuevoTurno, {
           tipo: 'aprobacion_cuota', accion: 'descalce_franja',
-          motivo: 'Descalce de Franja: ' + aprobacion.descalceFranja.detalle + ' (carga rápida de Flota Habitual).',
+          motivo: 'Descalce de Franja: ' + aprobacion.descalceFranja.detalle + ' (' + motivoContexto + ').',
           horaAnterior: null, horaPropuesta: null, por: state.user.nombre
         });
       }
       turnosNuevos.push(nuevoTurno);
       creados++;
     } else {
-      var solFlotaHabitual = {
+      var solMasiva = {
         id: nextSolicitudGeneralId(), tipo: 'nuevo_turno', estado: 'pendiente', aliado: state.user.aliado,
         solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), fecha: TODAY_STR,
-        motivo: 'Alta de turno (carga rápida de Flota Habitual) enviada fuera del horario de programación.',
+        motivo: 'Alta de turno (' + motivoContexto + ') enviada fuera del horario de programación.',
         creadaEnVivo: true,
         detalle: payload
       };
-      state.solicitudesGenerales.push(solFlotaHabitual);
-      solicitudesGeneralesNuevas.push(solFlotaHabitual);
+      state.solicitudesGenerales.push(solMasiva);
+      solicitudesGeneralesNuevas.push(solMasiva);
       creados++; solicitudes++;
     }
   });
-  if (!creados) {
-    if (omitidosPorCupo) {
-      toast('warn', 'Flota Recurrente', 'Ningún turno se cargó: ' + (omitidosPorCupo === 1 ? 'el único mensajero' : 'los ' + omitidosPorCupo + ' mensajeros') + ' de tu flota recurrente para mañana exced' + (omitidosPorCupo === 1 ? 'e' : 'en') + ' el cupo configurado (o cae' + (omitidosPorCupo === 1 ? '' : 'n') + ' en festivo/domingo/tipología no habilitada). Prográma' + (omitidosPorCupo === 1 ? 'lo' : 'los') + ' manualmente vía "+ Nuevo Turno" si necesitas pedir autorización a Planner.');
-    } else {
-      toast('warn', 'Flota Recurrente', 'Todos los mensajeros de tu flota recurrente ya estaban programados para mañana.');
-    }
-    return;
+  var resultado = {
+    creados: creados, omitidosPorCupo: omitidosPorCupo, adicionalesCreados: adicionalesCreados, solicitudes: solicitudes,
+    turnosNuevos: turnosNuevos, mensajerosNuevos: mensajerosNuevos, solicitudesGeneralesNuevas: solicitudesGeneralesNuevas
+  };
+  var hayAlgoQueEmpujar = !!(mensajerosNuevos.length || turnosNuevos.length || solicitudesGeneralesNuevas.length);
+  if (!hayAlgoQueEmpujar) {
+    resultado.ok = true;
+    return Promise.resolve(resultado);
   }
-  var msg = 'Se cargaron ' + creados + ' turno' + (creados === 1 ? '' : 's') + ' dentro de la cuota disponible.';
-  var extra = [];
-  if (omitidosPorCupo) extra.push((omitidosPorCupo === 1 ? 'El turno adicional fue omitido' : 'Los ' + omitidosPorCupo + ' turnos adicionales fueron omitidos') + ' ya que la plantilla solo permite programar dentro del cupo configurado.');
-  if (solicitudes) extra.push(solicitudes + ' se enviaron como Solicitud de Cambio, fuera del horario de programación.');
-  if (extra.length) msg += ' ' + extra.join(' ');
-  toast('ok', 'Flota Recurrente cargada', msg);
   /* Ver requerimiento "Auditoría Integral de Seguridad", Fase 2, Paso de Reconexión (Fix #3): mismo criterio
      que submitTurno -- el push de mensajerosNuevos se ESPERA primero (en vez de correr en Promise.all en
      paralelo con el de turnosNuevos), porque estos turnos referencian a esos mensajeros por mensajeroId y
      la política de INSERT de app_turnos valida esa relación con un EXISTS contra app_mensajeros. */
-  var pushMensajerosFlotaHabitual = mensajerosNuevos.length ? scPushRows('app_mensajeros', mensajerosNuevos) : Promise.resolve({ ok: true });
-  var hayAlgoQueEmpujarFlotaHabitual = !!(mensajerosNuevos.length || turnosNuevos.length || solicitudesGeneralesNuevas.length);
-  if (hayAlgoQueEmpujarFlotaHabitual) {
-    pushMensajerosFlotaHabitual.then(function (mensajerosResult) {
-      var pushesFlotaHabitual = [Promise.resolve(mensajerosResult)];
-      if (turnosNuevos.length) pushesFlotaHabitual.push(scPushRows('app_turnos', turnosNuevos));
-      if (solicitudesGeneralesNuevas.length) pushesFlotaHabitual.push(scPushRows('app_solicitudes_generales', solicitudesGeneralesNuevas));
-      Promise.all(pushesFlotaHabitual).then(function (results) {
-        if (results.some(function (r) { return r && r.ok === false; })) {
-          /* Ver mismo rollback en submitTurno: deshace SOLO lo que esta llamada acaba de crear, para que un
-             reintento no choque contra fantasmas locales (mensajero/turno/solicitud nunca confirmados en
-             Supabase). */
-          var idsTurnosNuevos = turnosNuevos.map(function (t) { return t.id; });
-          var idsMensajerosNuevos = mensajerosNuevos.map(function (m) { return m.id; });
-          var idsSolicitudesNuevas = solicitudesGeneralesNuevas.map(function (s) { return s.id; });
-          state.turnos = state.turnos.filter(function (t) { return idsTurnosNuevos.indexOf(t.id) === -1; });
-          state.mensajeros = state.mensajeros.filter(function (m) { return idsMensajerosNuevos.indexOf(m.id) === -1; });
-          state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return idsSolicitudesNuevas.indexOf(s.id) === -1; });
-          toast('warn', 'No se pudo confirmar en la nube', 'La carga de Flota Recurrente no se guardó — revisa tu conexión e inténtalo de nuevo.');
-          syncAndRender(true);
-          return;
-        }
+  var pushMensajeros = mensajerosNuevos.length ? scPushRows('app_mensajeros', mensajerosNuevos) : Promise.resolve({ ok: true });
+  return pushMensajeros.then(function (mensajerosResult) {
+    var pushes = [Promise.resolve(mensajerosResult)];
+    if (turnosNuevos.length) pushes.push(scPushRows('app_turnos', turnosNuevos));
+    if (solicitudesGeneralesNuevas.length) pushes.push(scPushRows('app_solicitudes_generales', solicitudesGeneralesNuevas));
+    return Promise.all(pushes).then(function (results) {
+      if (results.some(function (r) { return r && r.ok === false; })) {
+        /* Ver mismo rollback en submitTurno: deshace SOLO lo que esta llamada acaba de crear, para que un
+           reintento no choque contra fantasmas locales (mensajero/turno/solicitud nunca confirmados en
+           Supabase). */
+        var idsTurnosNuevos = turnosNuevos.map(function (t) { return t.id; });
+        var idsMensajerosNuevos = mensajerosNuevos.map(function (m) { return m.id; });
+        var idsSolicitudesNuevas = solicitudesGeneralesNuevas.map(function (s) { return s.id; });
+        state.turnos = state.turnos.filter(function (t) { return idsTurnosNuevos.indexOf(t.id) === -1; });
+        state.mensajeros = state.mensajeros.filter(function (m) { return idsMensajerosNuevos.indexOf(m.id) === -1; });
+        state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return idsSolicitudesNuevas.indexOf(s.id) === -1; });
         syncAndRender(true);
-      });
+        resultado.ok = false;
+        return resultado;
+      }
+      syncAndRender(true);
+      resultado.ok = true;
+      return resultado;
     });
-  } else {
-    syncAndRender(true);
-  }
+  });
+}
+/* Ver requerimiento "Menú Desplegable de Acciones para Flota Recurrente": el botón que disparó esta acción
+   ya NO existe en el DOM para cuando esta función corre -- vivía dentro del menú flotante de #btnProgAcciones
+   (ver toggleRowMenu), que se cierra solo al hacer clic en cualquiera de sus ítems, y cargarFlotaHabitual()
+   (el llamador real) además interpone un modal de confirmación de por medio antes de llegar aquí. La
+   protección contra doble ejecución que antes deshabilitaba ese botón ya no aplica (no hay nada que
+   deshabilitar) -- el propio modal de confirmación, que exige una interacción deliberada cada vez, cumple
+   el mismo propósito de no disparar dos cargas en paralelo por un clic accidental repetido.
+   Ver requerimiento "Carga Masiva de Programación vía Excel/CSV": el cuerpo de esta función se movió a
+   procesarCargaMasivaTurnos (justo arriba) -- este wrapper conserva el texto EXACTO de los toasts que ya
+   mostraba ("Flota Recurrente"/"Flota Recurrente cargada"), ahora construidos a partir del resultado de esa
+   función en vez de calcularlo en línea. */
+function ejecutarCargaFlotaHabitual(plantilla) {
+  procesarCargaMasivaTurnos(plantilla, { modoAdicional: 'omitir', motivoContexto: 'carga rápida de Flota Habitual' }).then(function (resultado) {
+    if (!resultado.creados) {
+      if (resultado.omitidosPorCupo) {
+        toast('warn', 'Flota Recurrente', 'Ningún turno se cargó: ' + (resultado.omitidosPorCupo === 1 ? 'el único mensajero' : 'los ' + resultado.omitidosPorCupo + ' mensajeros') + ' de tu flota recurrente para mañana exced' + (resultado.omitidosPorCupo === 1 ? 'e' : 'en') + ' el cupo configurado (o cae' + (resultado.omitidosPorCupo === 1 ? '' : 'n') + ' en festivo/domingo/tipología no habilitada). Prográma' + (resultado.omitidosPorCupo === 1 ? 'lo' : 'los') + ' manualmente vía "+ Nuevo Turno" si necesitas pedir autorización a Planner.');
+      } else {
+        toast('warn', 'Flota Recurrente', 'Todos los mensajeros de tu flota recurrente ya estaban programados para mañana.');
+      }
+      return;
+    }
+    if (!resultado.ok) {
+      toast('warn', 'No se pudo confirmar en la nube', 'La carga de Flota Recurrente no se guardó — revisa tu conexión e inténtalo de nuevo.');
+      return;
+    }
+    var msg = 'Se cargaron ' + resultado.creados + ' turno' + (resultado.creados === 1 ? '' : 's') + ' dentro de la cuota disponible.';
+    var extra = [];
+    if (resultado.omitidosPorCupo) extra.push((resultado.omitidosPorCupo === 1 ? 'El turno adicional fue omitido' : 'Los ' + resultado.omitidosPorCupo + ' turnos adicionales fueron omitidos') + ' ya que la plantilla solo permite programar dentro del cupo configurado.');
+    if (resultado.solicitudes) extra.push(resultado.solicitudes + ' se enviaron como Solicitud de Cambio, fuera del horario de programación.');
+    if (extra.length) msg += ' ' + extra.join(' ');
+    toast('ok', 'Flota Recurrente cargada', msg);
+  });
 }
 /* CONMUTACIÓN ESTRICTA: libre desasignación pre-cutoff vs. Solicitud de Cambio post-cutoff — mismo criterio
    de ventana que Editar (progWindowState, ver submitTurno), aplicado a una acción más quirúrgica: solo quita
