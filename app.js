@@ -8050,9 +8050,14 @@ function routesForDespacho() {
     return true;
   });
 }
-var DESPACHO_KPI_LABELS = { encola: 'En Cola de Espera', despachados: 'Despachados Hoy', tarde: 'Llegadas Tarde', demorados: 'Demorados en Despacho' };
+/* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'", ajuste de KPIs: 'en_despacho' cuenta los
+   turnos ya en 'con_ruta_asignada' -- NUNCA se mezclan con 'encola' (que representa espera, un turno ya
+   asignado ya no está "esperando") ni con ninguna alerta (es parte normal del flujo de despacho, no una
+   novedad). */
+var DESPACHO_KPI_LABELS = { encola: 'En Cola de Espera', enDespacho: 'En Despacho', despachados: 'Despachados Hoy', tarde: 'Llegadas Tarde', demorados: 'Demorados en Despacho' };
 function despachoKpiMatch(route, key) {
   if (key === 'encola') { var c = computeEstado(route).code; return c === 'in_dock' || c === 'tolerance_arrival' || c === 'late_arrival'; }
+  if (key === 'enDespacho') return computeEstado(route).code === 'con_ruta_asignada';
   if (key === 'despachados') return !!route.salida;
   if (key === 'tarde') return isLlegadaTarde(route);
   if (key === 'demorados') return computeEstado(route).code === 'dock_overdue';
@@ -8228,18 +8233,24 @@ function renderDespachoMetrics(routes) {
      borra la función, ver política de no eliminar código sin uso sin preguntar). */
   var filtro = state.despachoKpiFilter;
   var enCola = routes.filter(function (r) { var c = computeEstado(r).code; return c === 'in_dock' || c === 'tolerance_arrival' || c === 'late_arrival'; }).length;
+  /* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'", ajuste de KPIs: tarjeta propia "En
+     Despacho" (nunca se cuenta dentro de "En Cola de Espera" -- confirmado con el usuario: un turno con ruta
+     ya asignada dejó de estar "esperando" -- ni genera alerta, es parte normal del flujo). */
+  var enDespacho = routes.filter(function (r) { return computeEstado(r).code === 'con_ruta_asignada'; }).length;
   var despachados = routes.filter(function (r) { return !!r.salida; }).length;
   var llegadasTarde = routes.filter(isLlegadaTarde).length;
   var demorados = routes.filter(function (r) { return computeEstado(r).code === 'dock_overdue'; }).length;
   /* Ver requerimiento "Reorganización de Tarjetas KPI de Programación (Bodega/Planner)": orden fijo
-     izquierda->derecha Llegadas Tarde, Demorados en Despacho, En Cola de Espera, Despachados Hoy -- antes
-     era En Cola/Despachados/Tarde/Demorados. Puramente visual (reordena la concatenación del innerHTML que
-     arma renderMetricsIfChanged); data-kpi, el filtro activo y el resto de la lógica de cada tarjeta no
-     cambian. */
+     izquierda->derecha Llegadas Tarde, Demorados en Despacho, En Cola de Espera, En Despacho, Despachados
+     Hoy -- "En Despacho" se agregó justo antes de "Despachados Hoy" (último tramo del flujo real: en cola ->
+     ruta asignada/en despacho -> despachado). Puramente visual en el resto (reordena la concatenación del
+     innerHTML que arma renderMetricsIfChanged); data-kpi, el filtro activo y el resto de la lógica de cada
+     tarjeta no cambian. */
   renderMetricsIfChanged('despachoMetrics',
     kpiCardOpen('tarde', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label">Llegadas Tarde</span>' + metricTip('Llegadas Tarde', 'Mensajeros que registraron su llegada a bodega después de la hora programada.') + '</span><span class="metric-icon" style="background:var(--warn-soft);color:#946200;">' + ICONS.warnT + '</span></div><div class="metric-value">' + llegadasTarde + '</div><div class="metric-foot ' + (llegadasTarde > 0 ? 'warn' : 'ok') + '">' + (llegadasTarde > 0 ? 'Llegada después de la hora pactada' : 'Sin llegadas tarde') + '</div></div>' +
     kpiCardOpen('demorados', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label">Demorados en Despacho</span>' + metricTip('Demorados en Despacho', 'Mensajeros que registraron ingreso pero llevan un tiempo excesivo en área común sin salir a ruta.', true) + '</span><span class="metric-icon" style="background:var(--danger-soft);color:var(--danger);">' + ICONS.critT + '</span></div><div class="metric-value">' + demorados + '</div><div class="metric-foot ' + (demorados > 0 ? 'danger' : 'ok') + '">' + (demorados > 0 ? 'Más de 60 min en bodega' : 'Sin demoras') + '</div></div>' +
     kpiCardOpen('encola', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label">En Cola de Espera</span>' + metricTip('En Cola de Espera', 'Mensajeros que registraron ingreso [Llegó a Bodega] y aguardan turno de despacho en área común.') + '</span><span class="metric-icon" style="background:#E5FBFA;color:var(--cyan-deep);">' + ICONS.dock + '</span></div><div class="metric-value">' + enCola + '</div><div class="metric-foot">En bodega, dentro del tiempo de despacho</div></div>' +
+    kpiCardOpen('enDespacho', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label">En Despacho</span>' + metricTip('En Despacho', 'Mensajeros con ruta ya asignada por Bodega ("Con Ruta Asignada"), listos para el despacho final.') + '</span><span class="metric-icon" style="background:var(--lilac-soft);color:#5B21B6;">' + ICONS.route + '</span></div><div class="metric-value">' + enDespacho + '</div><div class="metric-foot">Ruta asignada, pendiente de despacho final</div></div>' +
     kpiCardOpen('despachados', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label">Despachados Hoy</span>' + metricTip('Despachados Hoy', 'Total de mensajeros que marcaron salida exitosamente hacia ruta.') + '</span><span class="metric-icon" style="background:#E7FBF3;color:var(--green-deep);">' + ICONS.check + '</span></div><div class="metric-value">' + despachados + '</div><div class="metric-foot">Salida registrada hacia ruta</div></div>');
   syncKpiActiveClass('despachoMetrics', filtro);
   renderKpiActiveFilterBar('despachoKpiActiveBar', 'despachoMetrics', filtro);
@@ -9381,11 +9392,15 @@ function rowHtmlSeguimiento(route) {
    llegó). "Incumplimientos Confirmados" reutiliza EXACTAMENTE el mismo criterio ('afectacion_confirmada')
    que la tarjeta homónima de Consolidado (ver consolKpiMatch) para que el mismo nombre signifique lo mismo
    en toda la plataforma. */
-var SEGUIMIENTO_KPI_LABELS = { despachados: 'Despachados Hoy', enCola: 'En Cola de Espera', demoradosPendientes: 'Demorados en Despacho', tardeIncumplimientos: 'Incumplimientos Confirmados' };
+/* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'", ajuste de KPIs: misma tarjeta "En
+   Despacho" (enDespacho) que ya tiene renderDespachoMetrics, aquí también -- 'con_ruta_asignada' nunca
+   cuenta como "En Cola de Espera" (ya no está esperando) ni genera alerta (es parte normal del flujo). */
+var SEGUIMIENTO_KPI_LABELS = { despachados: 'Despachados Hoy', enCola: 'En Cola de Espera', enDespacho: 'En Despacho', demoradosPendientes: 'Demorados en Despacho', tardeIncumplimientos: 'Incumplimientos Confirmados' };
 function seguimientoKpiMatch(route, key) {
   var c = computeEstado(route).code;
   if (key === 'despachados') return !!route.salida;
   if (key === 'enCola') return c === 'in_dock' || c === 'tolerance_arrival' || c === 'late_arrival';
+  if (key === 'enDespacho') return c === 'con_ruta_asignada';
   if (key === 'demoradosPendientes') return c === 'dock_overdue';
   if (key === 'tardeIncumplimientos') return c === 'afectacion_confirmada';
   return true;
@@ -9394,18 +9409,20 @@ function renderSeguimientoMetrics(routes) {
   var filtro = state.seguimientoKpiFilter;
   var despachados = routes.filter(function (r) { return seguimientoKpiMatch(r, 'despachados'); }).length;
   var enCola = routes.filter(function (r) { return seguimientoKpiMatch(r, 'enCola'); }).length;
+  var enDespacho = routes.filter(function (r) { return seguimientoKpiMatch(r, 'enDespacho'); }).length;
   var demoradosPendientes = routes.filter(function (r) { return seguimientoKpiMatch(r, 'demoradosPendientes'); }).length;
   var tardeIncumplimientos = routes.filter(function (r) { return seguimientoKpiMatch(r, 'tardeIncumplimientos'); }).length;
   /* Ver requerimiento "Reorganización de Tarjetas KPI de Programación (Bodega/Planner/Aliado)": mismo orden
-     izquierda->derecha que renderDespachoMetrics, adaptado a las 4 categorías propias de Seguimiento (que no
+     izquierda->derecha que renderDespachoMetrics, adaptado a las 5 categorías propias de Seguimiento (que no
      incluyen una tarjeta "Llegadas Tarde" propiamente dicha -- ver comentario de SEGUIMIENTO_KPI_LABELS más
      arriba): Incumplimientos Confirmados ocupa el lugar que "Llegadas Tarde" tiene en Despacho, seguida de
-     Demorados en Despacho, En Cola de Espera y Despachados Hoy. Antes era Despachados/En Cola/Demorados/
-     Incumplimientos. */
+     Demorados en Despacho, En Cola de Espera, En Despacho y Despachados Hoy. Antes era Despachados/En Cola/
+     Demorados/Incumplimientos. */
   renderMetricsIfChanged('seguimientoMetrics',
     kpiCardOpen('tardeIncumplimientos', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label">Incumplimientos Confirmados</span>' + metricTip('Incumplimientos Confirmados', 'Mensajeros que no llegaron y superaron la ventana de tolerancia + gestión -- ciclo cerrado.', true) + '</span><span class="metric-icon" style="background:var(--danger-soft);color:var(--danger);">' + ICONS.critT + '</span></div><div class="metric-value">' + tardeIncumplimientos + '</div><div class="metric-foot ' + (tardeIncumplimientos > 0 ? 'danger' : 'ok') + '">' + (tardeIncumplimientos > 0 ? 'Con incumplimientos del día' : 'Sin novedades') + '</div></div>' +
     kpiCardOpen('demoradosPendientes', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label">Demorados en Despacho</span>' + metricTip('Demorados en Despacho', 'Mensajeros con más de 60 min en bodega sin despacho.') + '</span><span class="metric-icon" style="background:var(--warn-soft);color:#946200;">' + ICONS.warnT + '</span></div><div class="metric-value">' + demoradosPendientes + '</div><div class="metric-foot ' + (demoradosPendientes > 0 ? 'warn' : 'ok') + '">' + (demoradosPendientes > 0 ? 'Requieren seguimiento' : 'Sin novedades') + '</div></div>' +
     kpiCardOpen('enCola', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label">En Cola de Espera</span>' + metricTip('En Cola de Espera', 'Mensajeros que ya llegaron y aguardan turno de despacho, dentro del tiempo normal.') + '</span><span class="metric-icon" style="background:#E5FBFA;color:var(--cyan-deep);">' + ICONS.dock + '</span></div><div class="metric-value">' + enCola + '</div><div class="metric-foot">En bodega, esperando despacho</div></div>' +
+    kpiCardOpen('enDespacho', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label">En Despacho</span>' + metricTip('En Despacho', 'Mensajeros con ruta ya asignada por Bodega ("Con Ruta Asignada"), listos para el despacho final.') + '</span><span class="metric-icon" style="background:var(--lilac-soft);color:#5B21B6;">' + ICONS.route + '</span></div><div class="metric-value">' + enDespacho + '</div><div class="metric-foot">Ruta asignada, pendiente de despacho final</div></div>' +
     kpiCardOpen('despachados', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label">Despachados Hoy</span>' + metricTip('Despachados Hoy', 'Mensajeros que ya marcaron salida exitosamente hacia ruta.') + '</span><span class="metric-icon" style="background:#E7FBF3;color:var(--green-deep);">' + ICONS.check + '</span></div><div class="metric-value">' + despachados + '</div><div class="metric-foot">Ciclo completo</div></div>');
   syncKpiActiveClass('seguimientoMetrics', filtro);
   renderKpiActiveFilterBar('seguimientoKpiActiveBar', 'seguimientoMetrics', filtro);
