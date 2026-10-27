@@ -3670,14 +3670,15 @@ function resolverSolicitud(routeId, aceptar, motivoRechazo) {
       /* Reasignación de recurso (como 'confirm'), no una corrección de identidad del mensajero actual —
          reutiliza el registro compartido por cédula igual que "Confirmar datos de mensajero", sin necesidad
          de fork/inmutabilidad (ver Hallazgo de Auditoría #1, item 4, que aplica a EDITAR los datos de un
-         mensajero ya asignado, un caso distinto de este). */
+         mensajero ya asignado, un caso distinto de este). Ver Fase 2 "Estandarización de Solicitudes del
+         Aliado": núcleo compartido con reemplazo_alerta/reemplazo_cancelacion
+         (ejecutarReemplazoMensajeroUnificado) -- sin `opciones` aquí (ni ausentismo ni limpieza de flags de
+         retiro/no-autoriza), porque este turno está SANO (nunca en retiro/alerta), así que no necesita
+         ninguno de los efectos adicionales que sí aplican a esos 2 flujos. */
       var aliadoDeLaRuta = getMensajero(route.mensajeroId).aliado;
-      /* Ver verificación "Historial y Reemplazo de Mensajeros": s.motivo (texto libre del Aliado al solicitar
-         el cambio) no garantiza mencionar el mensajero SALIENTE -- se captura aquí, antes de reasignar, para
-         dejar la trazabilidad explícita de saliente/entrante en el Historial (ver más abajo). */
-      mensajeroSalienteNombre = getMensajero(route.mensajeroId).nombre;
-      route.mensajeroId = findOrCreateMensajeroParaAliado(aliadoDeLaRuta, s.mensajeroPropuesto);
-      mensajeroEntranteNombre = getMensajero(route.mensajeroId).nombre;
+      var resultadoCambioMensajero = ejecutarReemplazoMensajeroUnificado(route, aliadoDeLaRuta, s.mensajeroPropuesto);
+      mensajeroSalienteNombre = resultadoCambioMensajero.mensajeroSaliente;
+      mensajeroEntranteNombre = resultadoCambioMensajero.mensajeroEntrante;
     } else if (s.tipo === 'enroque') {
       enroqueRoute2 = state.turnos.find(function (r) { return r.id === s.enroqueConRouteId; });
       if (enroqueRoute2) {
@@ -4251,6 +4252,33 @@ function findOrCreateMensajeroParaAliado(aliadoNombre, payload) {
   state.mensajeros.push({ id: id, nombre: payload.nombre, placa: payload.placa, cedula: payload.cedula, telefono: payload.telefono, correo: payload.correo || '', aliado: aliadoNombre, sede: payload.sede, vehiculo: payload.vehiculo });
   return id;
 }
+/* Ver plan "Estandarización de Solicitudes del Aliado", Fase 2: núcleo compartido de los 3 flujos que
+   reasignan el mensajero de un turno -- 'cambio_mensajero' (resolverSolicitud, sobre un turno SANO) y
+   'reemplazo_alerta'/'reemplazo_cancelacion' (aplicarSolicitudGeneral, sobre un turno YA en alerta/retiro).
+   Reasigna route.mensajeroId reutilizando el registro compartido por cédula (findOrCreateMensajeroParaAliado,
+   igual que "Confirmar datos de mensajero") y devuelve los nombres saliente/entrante para que CADA llamador
+   siga construyendo su propio texto de motivo/Historial -- esos 3 textos son distintos a propósito ("retiro
+   en bodega" / "no autorización" / cambio de mensajero simple) y no se tocan.
+   ALCANCE DELIBERADAMENTE ACOTADO a lo 100% idéntico entre los 3: al leer 'reemplazo_alerta' y
+   'reemplazo_cancelacion' lado a lado para esta Fase 2, encontré que NO son tan simétricas como el plan
+   asumía -- más allá del ausentismo (ya cubierto), difieren en CUÁLES flags de retiro/no-autoriza limpian
+   (reemplazo_cancelacion no toca noAutorizaDesde/retiroAlertaDesde/recursoExtraordinarioPendiente/Desde, y su
+   condición de limpieza es solo `retirado`, nunca `retirado || noAutorizaDespacho`) y en si "tardío" excluye
+   los casos de retiro/no-autoriza (reemplazo_alerta sí, reemplazo_cancelacion lo calcula siempre). El
+   comentario original de reemplazo_cancelacion dice "mismo motor que reemplazo_alerta", así que esto podría
+   ser una omisión real y no una diferencia deliberada -- pero homogenizarlo a ciegas arriesgaría cambiar
+   lógica de cumplimiento/SLA sin que nadie lo haya pedido explícitamente. Por eso esa limpieza de flags
+   SIGUE viviendo, intacta, en cada uno de los 2 call sites (ver abajo) -- esta función solo cubre la
+   reasignación de mensajero en sí, que SÍ es 100% idéntica en los 3 flujos. */
+function ejecutarReemplazoMensajeroUnificado(route, aliado, datosMensajero, opciones) {
+  opciones = opciones || {};
+  var mensajeroSaliente = getMensajero(route.mensajeroId).nombre;
+  if (opciones.registrarAusentismo) registrarAusentismoHistorico(route);
+  route.mensajeroId = findOrCreateMensajeroParaAliado(aliado, datosMensajero);
+  var mensajeroEntrante = getMensajero(route.mensajeroId).nombre;
+  if (datosMensajero.vehiculo) route.vehiculo = datosMensajero.vehiculo;
+  return { mensajeroSaliente: mensajeroSaliente, mensajeroEntrante: mensajeroEntrante };
+}
 /* aliadoOverride: uso exclusivo de aplicarSolicitudGeneral (Planner aprobando una solicitud fuera de
    horario) — su sesión no tiene state.user.aliado, así que sin esto el mensajero quedaba con aliado
    indefinido (bug real encontrado al probar el flujo de "Solicitud de Cupo Adicional" del módulo Cuotas).
@@ -4412,16 +4440,18 @@ function aplicarSolicitudGeneral(sol) {
        registrar el ausentismo histórico del mensajero original, ver registrarAusentismoHistorico -- el
        Camino 2 (recursoExtraordinarioPendiente, demora en despacho previa, causal Melonn) es 0% afectación al
        Aliado: debe quedar completamente excluido del Ausentismo de Cumplimiento y Calidad, no solo de la
-       Auditoría de facturación. */
-    if (!routeRe.recursoExtraordinarioPendiente) registrarAusentismoHistorico(routeRe);
-    /* Ver verificación "Historial y Reemplazo de Mensajeros": capturado ANTES de reasignar mensajeroId --
-       necesario para dejar explícito saliente/entrante en el Historial (ver motivoReemplazoAlerta más abajo). */
-    var mensajeroSalienteReemplazoAlerta = getMensajero(routeRe.mensajeroId).nombre;
-    routeRe.mensajeroId = findOrCreateMensajeroParaAliado(sol.aliado, {
+       Auditoría de facturación.
+       Ver plan "Estandarización de Solicitudes del Aliado", Fase 2: reutiliza ejecutarReemplazoMensajeroUnificado
+       SOLO para la reasignación del mensajero en sí (100% idéntica a los otros 2 flujos) -- la limpieza de
+       flags de retiro/no-autoriza, la inmutabilidad de hora y el cálculo de "tardío" siguen viviendo aquí,
+       intactos, porque difieren de reemplazo_cancelacion (ver comentario de la función, que documenta esas
+       asimetrías encontradas al unificar). */
+    var omitirAusentismoAlerta = !!routeRe.recursoExtraordinarioPendiente;
+    var resultadoReemplazoAlerta = ejecutarReemplazoMensajeroUnificado(routeRe, sol.aliado, {
       nombre: sol.detalle.nombre, telefono: sol.detalle.telefono, cedula: sol.detalle.cedula, placa: sol.detalle.placa,
       correo: sol.detalle.correo, sede: routeRe.sede, vehiculo: sol.detalle.vehiculo || routeRe.vehiculo
-    });
-    if (sol.detalle.vehiculo) routeRe.vehiculo = sol.detalle.vehiculo;
+    }, { registrarAusentismo: !omitirAusentismoAlerta });
+    var mensajeroSalienteReemplazoAlerta = resultadoReemplazoAlerta.mensajeroSaliente;
     /* Ver requerimiento "Implementación y Estandarización de Flujo Integral: Retiro de Mensajero / No Se
        Autoriza Despacho...": el motivo distingue el origen real ANTES de limpiar los flags que lo describen,
        para que el Historial del Turno quede preciso sobre qué se estaba resolviendo. */
@@ -4464,14 +4494,15 @@ function aplicarSolicitudGeneral(sol) {
        cancelación proactiva del Aliado desde Seguimiento, no en una alerta ya activa sobre el turno. */
     var routeCr = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
     if (!routeCr) return { turnos: turnosAfectados, mensajerosNuevos: mensajerosNuevosSolicitud };
-    registrarAusentismoHistorico(routeCr);
-    /* Ver verificación "Historial y Reemplazo de Mensajeros": capturado ANTES de reasignar mensajeroId. */
-    var mensajeroSalienteReemplazoCr = getMensajero(routeCr.mensajeroId).nombre;
-    routeCr.mensajeroId = findOrCreateMensajeroParaAliado(sol.aliado, {
+    /* Ver plan "Estandarización de Solicitudes del Aliado", Fase 2: reutiliza ejecutarReemplazoMensajeroUnificado
+       SOLO para la reasignación del mensajero en sí -- a diferencia de reemplazo_alerta, este flujo SIEMPRE
+       registra Ausentismo (nunca viene de recursoExtraordinarioPendiente), así que no hace falta ninguna
+       opción condicional aquí. El resto (limpieza de flags, tardío) sigue intacto abajo, sin cambios. */
+    var resultadoReemplazoCr = ejecutarReemplazoMensajeroUnificado(routeCr, sol.aliado, {
       nombre: sol.detalle.nombre, telefono: sol.detalle.telefono, cedula: sol.detalle.cedula, placa: sol.detalle.placa,
       correo: sol.detalle.correo, sede: routeCr.sede, vehiculo: sol.detalle.vehiculo || routeCr.vehiculo
-    });
-    if (sol.detalle.vehiculo) routeCr.vehiculo = sol.detalle.vehiculo;
+    }, { registrarAusentismo: true });
+    var mensajeroSalienteReemplazoCr = resultadoReemplazoCr.mensajeroSaliente;
     if (routeCr.retirado) { routeCr.retirado = false; routeCr.llegada = null; routeCr.salida = null; routeCr.retiroTramo = null; desvincularEventoGuionado(routeCr); }
     routeCr.noAutorizaDespacho = false; routeCr.motivoNoAutoriza = null;
     routeCr.reemplazoPendienteTrasRetiro = false;
