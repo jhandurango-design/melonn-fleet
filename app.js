@@ -20270,6 +20270,26 @@ document.addEventListener('DOMContentLoaded', function () {
       banderaCoEl.style.animationDelay = (aliadosTexto.length * aliadosPasoLetra + 0.1).toFixed(3) + 's';
     }
   }
+  /* Ver requerimiento "Aviso de Plataforma Colapsable e Interactivo": nace colapsado (ver styles.css, sin
+     .is-open) -- clic en el botón/icono lo abre con una animación de alto automático; clic de nuevo, el
+     botón de cierre (✕) o Escape lo vuelven a colapsar. toggleLoginInfoBanner(forzar) centraliza las 3
+     entradas para que ninguna se desincronice de aria-expanded. */
+  var loginInfoBannerEl = document.getElementById('loginInfoBanner');
+  var loginInfoToggleBtn = document.getElementById('loginInfoToggle');
+  var loginInfoCloseBtn = document.getElementById('loginInfoClose');
+  function toggleLoginInfoBanner(forzarAbierto) {
+    if (!loginInfoBannerEl || !loginInfoToggleBtn) return;
+    var abrir = typeof forzarAbierto === 'boolean' ? forzarAbierto : !loginInfoBannerEl.classList.contains('is-open');
+    loginInfoBannerEl.classList.toggle('is-open', abrir);
+    loginInfoToggleBtn.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+  }
+  if (loginInfoToggleBtn) loginInfoToggleBtn.addEventListener('click', function () { toggleLoginInfoBanner(); });
+  if (loginInfoCloseBtn) loginInfoCloseBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleLoginInfoBanner(false); });
+  /* Escape cierra el aviso solo si está abierto -- nunca interfiere con otros usos de Escape en la pantalla
+     de login (p. ej. cerrar algún modal propio), que siguen su propio manejador sin tocar este. */
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && loginInfoBannerEl && loginInfoBannerEl.classList.contains('is-open')) toggleLoginInfoBanner(false);
+  });
   state.users = loadPersistedUsers();
   /* Ver nota "Supabase" junto a scPullAll: disparo temprano, sin esperar -- para cuando el usuario termine
      de escribir sus credenciales, state.users ya suele estar refrescado desde la nube (cubre el caso de un

@@ -115,9 +115,25 @@
     </div>
   </div>
 
-  <div class="login-info-banner">
-    <h3>Aviso de Plataforma</h3>
-    <p>Esta es una plataforma externa e independiente a Órbita, de acceso exclusivo para la gestión operativa de aliados y proveedores de mensajería. Melonn fleet está desarrollado a partir de la IA, por el área de transportes de Melonn, su administración y soporte está a cargo de la misma.</p>
+  <!-- Ver requerimiento "Aviso de Plataforma Colapsable e Interactivo": antes mostraba el texto completo
+       siempre desplegado -- ahora nace colapsado como un botón/icono compacto (#loginInfoToggle) y el texto
+       completo (#loginInfoContent) se despliega suavemente al hacer clic, vía la técnica CSS
+       grid-template-rows 0fr->1fr (ver styles.css) para una animación de alto automático sin medir
+       scrollHeight en JS. Clic de nuevo en el botón, clic en el cierre (✕, #loginInfoClose) o Escape lo
+       vuelven a colapsar (ver wiring en app.js). .login-info-banner conserva su fadeInUpCascade de siempre
+       (misma cascada de entrada que el resto de la pantalla) -- solo cambió lo que hay DENTRO. -->
+  <div class="login-info-banner" id="loginInfoBanner">
+    <button type="button" class="login-info-toggle" id="loginInfoToggle" aria-expanded="false" aria-controls="loginInfoContent">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+      <span>Aviso de Plataforma</span>
+      <svg class="login-info-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="login-info-content" id="loginInfoContent">
+      <div class="login-info-content-inner">
+        <button type="button" class="login-info-close" id="loginInfoClose" aria-label="Cerrar aviso">&times;</button>
+        <p>Esta es una plataforma externa e independiente a Órbita, de acceso exclusivo para la gestión operativa de aliados y proveedores de mensajería. Melonn fleet está desarrollado a partir de la IA, por el área de transportes de Melonn, su administración y soporte está a cargo de la misma.</p>
+      </div>
+    </div>
   </div>
 
   <!-- Ver requerimiento "Remover Mock reCAPTCHA y Reasignar Herramienta al Logo de Melonn": se retiró la
