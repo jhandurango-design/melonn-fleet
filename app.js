@@ -4974,23 +4974,21 @@ function alertaConfirmarReemplazoElegible(route) {
   if (route.retiroEvidenciaPendiente) return false;
   return code === 'critical' || (code === 'retirado' && (!!route.reemplazoPendienteTrasRetiro || !!route.recursoExtraordinarioPendiente));
 }
-/* Ver plan "Estandarización de Solicitudes del Aliado", Fase 3: punto único de apertura del modal unificado
-   "Novedad de Transporte" (#modalNovedadTransporte) -- reemplaza openAlertaConfirmarReemplazoModal,
-   openCancelarModal y la apertura de #modalNuevaSolicitud para cambio_mensajero/cancelación. modo determina
-   qué bloques se muestran y, en el submit, a qué función/destino real se llama -- el modo SIEMPRE lo decide
-   el contexto de apertura (código de alerta, fila de Seguimiento, botón "Reportar Novedad"), nunca un
-   selector libre dentro del modal:
+/* Ver plan "Estandarización de Solicitudes del Aliado", Fase 3, y el ajuste de arquitectura posterior: punto
+   único de apertura del modal "Novedad de Transporte" (#modalNovedadTransporte) -- reemplaza
+   openAlertaConfirmarReemplazoModal y openCancelarModal. Solo cubre los 2 modos que dependen de un turno YA
+   en alerta/retirado, disparados ÚNICAMENTE desde Alertas Activas/Seguimiento sobre una fila ya escalada --
+   un turno SANO ya no pasa por aquí (cambiar mensajero/cancelar se canaliza por "+ Nueva Solicitud", ver
+   #formNuevaSolicitud). El modo determina qué bloques se muestran y, en el submit, a qué función se llama --
+   SIEMPRE lo decide el contexto de apertura (código de alerta vigente en la fila), nunca un selector libre
+   dentro del modal:
    - 'reemplazo_alerta': turno en 'critical' o 'retirado' (con reemplazoPendienteTrasRetiro/
      recursoExtraordinarioPendiente) -- solo campos de reemplazo, sin el toggle "aún no tengo reemplazo"
      (idéntico a como funcionaba openAlertaConfirmarReemplazoModal).
    - 'reemplazo_cancelacion': turno en 'cancelado_pendiente_reemplazo'/'sustitucion_riesgo'/'sin_reemplazo'
      (botón "Reasignar" en Alertas Activas) o ya marcado route.reemplazoPendiente (botón "Confirmar Reemplazo"
      en Seguimiento) -- campos de reemplazo CON el toggle "Tengo reemplazo listo"/"Aún no tengo reemplazo"
-     (idéntico a como funcionaba openCancelarModal).
-   - 'novedad_sana': turno SANO, vía el nuevo botón de fila "Reportar Novedad" -- primera elección entre
-     "Cambiar mensajero" (route.solicitud directo, tipo cambio_mensajero) y "Cancelar el turno" (route.solicitud
-     directo, tipo cancelacion, sin reemplazo -- ver CORRECCIÓN del plan: "tengo reemplazo" nunca se ofrece
-     aquí, es la 2ª etapa una vez la cancelación escala a alerta). */
+     (idéntico a como funcionaba openCancelarModal). */
 function openModalNovedadTransporte(routeId, modo) {
   if (!canDo('schedule.aliado.manage')) return;
   var route = state.turnos.find(function (r) { return r.id === routeId; });
@@ -5013,18 +5011,14 @@ function openModalNovedadTransporte(routeId, modo) {
       toast('warn', 'Ya enviado', route.id + ' ya tiene una cancelación/reemplazo pendiente de aprobación por Planner.');
       return;
     }
-  } else if (modo === 'novedad_sana') {
-    if (route.solicitud && route.solicitud.estado === 'pendiente') { toast('warn', 'Solicitud ya enviada', route.id + ' ya tiene una solicitud pendiente de respuesta.'); return; }
-    var codeSana = computeEstado(route).code;
-    if (codeSana === 'afectacion_confirmada' || codeSana === 'sin_reemplazo') { toast('warn', 'Turno cerrado', route.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite gestión de novedades.'); return; }
   }
   var m = getMensajero(route.mensajeroId);
   document.getElementById('ntRouteId').value = routeId;
   document.getElementById('ntModo').value = modo;
   document.getElementById('ntNote').textContent = route.id + ' · ' + m.nombre + ' · ' + route.vehiculo + ' · ' + fmtTime12(route.hora) + ' · ' + route.sede;
-  document.getElementById('ntTitulo').textContent = modo === 'novedad_sana' ? 'Novedad de Transporte' : 'Confirmar Reemplazo';
-  document.getElementById('ntSubmitBtn').textContent = modo === 'reemplazo_alerta' ? 'Enviar a Planner' : (modo === 'reemplazo_cancelacion' ? 'Confirmar Reemplazo' : 'Enviar solicitud');
-  // Reset de campos de reemplazo (compartidos por los 3 modos que los usan).
+  document.getElementById('ntTitulo').textContent = 'Confirmar Reemplazo';
+  document.getElementById('ntSubmitBtn').textContent = modo === 'reemplazo_alerta' ? 'Enviar a Planner' : 'Confirmar Reemplazo';
+  // Reset de campos de reemplazo (compartidos por los 2 modos que los usan).
   document.getElementById('ntNombre').value = '';
   document.getElementById('ntTelefono').value = '';
   document.getElementById('ntCedula').value = '';
@@ -5033,45 +5027,33 @@ function openModalNovedadTransporte(routeId, modo) {
   var vehSelNt = document.getElementById('ntVehiculo');
   vehSelNt.innerHTML = vehiculosForCountry(countryForSede(route.sede)).map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
   vehSelNt.value = route.vehiculo;
-  document.getElementById('ntMotivo').value = '';
   // Bloques visibles según el modo.
-  document.getElementById('ntOpcionSanaField').hidden = modo !== 'novedad_sana';
   document.getElementById('ntReemplazoModoSegment').hidden = modo !== 'reemplazo_cancelacion';
   document.querySelectorAll('#ntReemplazoModoSegment button').forEach(function (b) { b.classList.toggle('active', b.dataset.modo === 'reemplazo'); });
-  document.querySelectorAll('#ntOpcionSanaSegment button').forEach(function (b) { b.classList.toggle('active', b.dataset.opcion === 'cambio_mensajero'); });
   document.getElementById('ntPendienteNote').hidden = true;
   refreshNovedadTransporteCampos();
   openModal('modalNovedadTransporte');
 }
-/* Muestra/oculta los campos de reemplazo/motivo según el modo y, para 'novedad_sana'/'reemplazo_cancelacion',
-   según la opción elegida dentro del modal (segmentos ntOpcionSanaSegment/ntReemplazoModoSegment). Se llama al
-   abrir el modal y cada vez que esos segmentos cambian (ver wiring en DOMContentLoaded). */
+/* Muestra/oculta los campos de reemplazo según el modo y, para 'reemplazo_cancelacion', según la opción
+   elegida dentro del toggle ntReemplazoModoSegment. Se llama al abrir el modal y cada vez que ese toggle
+   cambia (ver wiring en DOMContentLoaded). */
 function refreshNovedadTransporteCampos() {
   var modo = document.getElementById('ntModo').value;
   var mostrarReemplazoFields; // campos Nombre/Teléfono/Cédula/Placa/Vehículo/Correo
-  var mostrarMotivo = false; // textarea de cancelación simple
   if (modo === 'reemplazo_alerta') {
     mostrarReemplazoFields = true;
-  } else if (modo === 'reemplazo_cancelacion') {
+  } else { // reemplazo_cancelacion
     var modoReemplazo = document.querySelector('#ntReemplazoModoSegment .active');
     var esPendiente = modoReemplazo && modoReemplazo.dataset.modo === 'pendiente';
     mostrarReemplazoFields = !esPendiente;
     document.getElementById('ntGobernanzaNote').hidden = esPendiente;
     document.getElementById('ntPendienteNote').hidden = !esPendiente;
     document.getElementById('ntSubmitBtn').textContent = esPendiente ? 'Guardar como Pendiente' : 'Confirmar Reemplazo';
-  } else { // novedad_sana
-    var opcionSana = document.querySelector('#ntOpcionSanaSegment .active');
-    var esCancelacion = opcionSana && opcionSana.dataset.opcion === 'cancelacion';
-    mostrarReemplazoFields = !esCancelacion;
-    mostrarMotivo = esCancelacion;
-    document.getElementById('ntSubmitBtn').textContent = 'Enviar solicitud';
   }
   document.getElementById('ntReemplazoFields').hidden = !mostrarReemplazoFields;
-  document.getElementById('ntMotivoField').hidden = !mostrarMotivo;
-  /* La nota de gobernanza ("queda Pendiente de Aprobación por Planner") aplica a TODO lo que termina en una
-     solicitud real -- reemplazo_alerta, ambas opciones de novedad_sana (cambio_mensajero Y cancelación
-     simple, las 2 pasan por Planner) -- solo se oculta en el único caso que NO genera ninguna solicitud:
-     "Aún no tengo reemplazo" dentro de reemplazo_cancelacion (marcarPendienteReemplazo, resuelto arriba). */
+  /* La nota de gobernanza ("queda Pendiente de Aprobación por Planner") aplica a reemplazo_alerta siempre --
+     solo se oculta en el único caso que NO genera ninguna solicitud: "Aún no tengo reemplazo" dentro de
+     reemplazo_cancelacion (marcarPendienteReemplazo, resuelto arriba). */
   if (modo !== 'reemplazo_cancelacion') { document.getElementById('ntGobernanzaNote').hidden = false; document.getElementById('ntPendienteNote').hidden = true; }
 }
 /* Guardado del Aliado en "Confirmar Reemplazo" (Alertas Activas): esta acción NO toca la Malla de inmediato —
@@ -9282,12 +9264,11 @@ function rowHtmlSeguimiento(route) {
   } else {
     /* Ver requerimiento "Confirmación de Entregable Anterior...", punto 2 ("Rol Aliado"): se retiran
        Reprogramar/Cancelar de la fila -- CONSERVA únicamente "Notificar Ya Llegó" (acción operativa en
-       tiempo real). Cualquier trámite administrativo se redirige a Solicitudes y Cambios.
-       Ver plan "Estandarización de Solicitudes del Aliado", Fase 3: se agrega "Reportar Novedad" (modal
-       unificado, modo 'novedad_sana' -- Cambiar mensajero / Cancelar el turno) como botón de fila directo,
-       en vez de depender únicamente del selector genérico "+ Nueva Solicitud" de la bandeja. */
+       tiempo real). Cualquier trámite administrativo (cambiar mensajero, cancelar, etc.) se canaliza
+       ÚNICAMENTE por "+ Nueva Solicitud" en Solicitudes y Cambios (ver ajuste de arquitectura posterior a
+       la Fase 3: el botón de fila "Reportar Novedad" que existió brevemente aquí se revirtió para mantener
+       esta tabla operativa despejada -- ver openNuevaSolicitudModal/#nsTipo). */
     primaryActions.push('<button data-act="notificar-llegada" data-id="' + route.id + '">Notificar Ya Llegó</button>');
-    primaryActions.push('<button data-act="reportar-novedad" data-id="' + route.id + '">Reportar Novedad</button>');
   }
   /* Ver requerimiento "Mejoras de UI, Auditoría de Trazabilidad y Control de Acceso...", punto 4: el "ojito"
      (Historial del Turno) queda reservado a roles internos operativos (Planner, Bodega, Auditor) -- ALIADO
@@ -13418,9 +13399,25 @@ function refreshNsFieldsForTipo() {
   var tipo = document.getElementById('nsTipo').value;
   var esReprog = tipo === 'reprogramacion', esEnroque = tipo === 'enroque';
   var esNuevoTurno = tipo === 'nuevo_turno';
+  var esCambioMensajero = tipo === 'cambio_mensajero';
   document.getElementById('nsHoraField').hidden = !esReprog;
   document.getElementById('nsNuevaHora').required = esReprog;
   document.getElementById('nsEnroqueField').hidden = !esEnroque;
+  /* 'cambio_mensajero' (ver comentario de #nsTipo en index.html): pide los datos del mensajero propuesto en
+     vez del motivo libre -- el motivo que ve Planner se autogenera (ver #formNuevaSolicitud), igual que ya
+     ocurría cuando este flujo vivía en el modal unificado "Novedad de Transporte". Oculta + desmarca
+     "required" en #nsMotivo para ese caso (mismo patrón que #nsNtHora, ver nota más abajo sobre el bug de
+     validación nativa con display:none). */
+  document.getElementById('nsCambioMensajeroFields').hidden = !esCambioMensajero;
+  document.getElementById('nsMotivoField').hidden = esCambioMensajero;
+  document.getElementById('nsMotivo').required = !esCambioMensajero;
+  if (esCambioMensajero) {
+    var routeCmNs = state.turnos.find(function (r) { return r.id === document.getElementById('nsRuta').value; });
+    var countryCmNs = routeCmNs ? countryForSede(routeCmNs.sede) : countryForAliado(state.user.aliado);
+    var vehSelCmNs = document.getElementById('nsCmVehiculo');
+    vehSelCmNs.innerHTML = vehiculosForCountry(countryCmNs).map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('');
+    if (routeCmNs) vehSelCmNs.value = routeCmNs.vehiculo;
+  }
   /* Nuevo Turno/Cupo Adicional no referencian un turno existente -- oculta Bodega/Mensajero-Turno (esos 2
      campos son para los otros 4 tipos) y muestra sus propios campos (Bodega/Vehículo/Hora deseada). */
   document.getElementById('nsBodegaField').hidden = esNuevoTurno;
@@ -13472,11 +13469,13 @@ function openNuevaSolicitudModal(presetRouteId, presetTipo) {
   var sel = document.getElementById('nsRuta');
   var esReprog = false;
   if (presetRoute) { sel.value = presetRoute.id; esReprog = true; }
-  /* Ver plan "Estandarización de Solicitudes del Aliado", Fase 3: 'cancelacion' ya no es una opción de este
-     selector (se movió al modal "Novedad de Transporte") -- el default genérico (sin preset de ruta) pasa a
-     ser 'reprogramacion', la única opción que no depende de un turno específico ya elegido. */
   document.getElementById('nsTipo').value = esNuevoTurnoPreset ? presetTipo : 'reprogramacion';
   document.getElementById('nsNuevaHora').value = '';
+  document.getElementById('nsCmNombre').value = '';
+  document.getElementById('nsCmTelefono').value = '';
+  document.getElementById('nsCmCedula').value = '';
+  document.getElementById('nsCmPlaca').value = '';
+  document.getElementById('nsCmCorreo').value = '';
   /* Mismo catálogo que openTurnoModal (turnoSede/turnoVehiculo): sedes activas y vehículos del país del
      Aliado -- siempre se repuebla (no "si está vacío") por si cambió de sesión/país entre aperturas. */
   var myCountryNt = countryForAliado(state.user.aliado);
@@ -20683,9 +20682,28 @@ document.addEventListener('DOMContentLoaded', function () {
        Solicitud nueva que entre a la bandeja del Planner, ni siquiera si el <select> llegó a tener ese valor
        preseleccionado. */
     var codeNs = computeEstado(route).code;
-    if (codeNs === 'afectacion_confirmada' || codeNs === 'sin_reemplazo') { toast('warn', 'Turno cerrado', route.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite Reprogramar ni Intercambio de Turno.'); closeModal(); return; }
-    var motivo = document.getElementById('nsMotivo').value.trim();
-    if (!motivo) return;
+    if (codeNs === 'afectacion_confirmada' || codeNs === 'sin_reemplazo') { toast('warn', 'Turno cerrado', route.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite gestión de novedades.'); closeModal(); return; }
+    var esCambioMensajeroNs = tipo === 'cambio_mensajero';
+    var mensajeroPropuesto = null;
+    var motivo;
+    /* 'cambio_mensajero' (ver comentario de #nsTipo en index.html): el motivo que ve Planner se autogenera --
+       lo relevante para la aprobación son los datos del mensajero propuesto, no un texto libre del Aliado
+       (mismo criterio que ya aplicaba cuando este flujo vivía en el modal unificado "Novedad de Transporte"). */
+    if (esCambioMensajeroNs) {
+      mensajeroPropuesto = {
+        nombre: document.getElementById('nsCmNombre').value.trim(), telefono: document.getElementById('nsCmTelefono').value.trim(),
+        cedula: document.getElementById('nsCmCedula').value.trim(), placa: document.getElementById('nsCmPlaca').value.trim(),
+        vehiculo: document.getElementById('nsCmVehiculo').value, correo: document.getElementById('nsCmCorreo').value.trim(),
+        sede: route.sede
+      };
+      if (!mensajeroPropuesto.nombre || !mensajeroPropuesto.telefono || !mensajeroPropuesto.cedula || !mensajeroPropuesto.placa) {
+        toast('warn', 'Completa los datos del mensajero propuesto', 'Nombre, teléfono, cédula y placa son obligatorios.'); return;
+      }
+      motivo = 'Cambio de mensajero solicitado por el Aliado — ' + route.id + '.';
+    } else {
+      motivo = document.getElementById('nsMotivo').value.trim();
+      if (!motivo) return;
+    }
     var nuevaHora = tipo === 'reprogramacion' ? document.getElementById('nsNuevaHora').value : null;
     if (tipo === 'reprogramacion' && !nuevaHora) return;
     var enroqueConRouteId = null;
@@ -20695,7 +20713,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     var solicitud = {
       tipo: tipo, estado: 'pendiente', motivo: motivo, horaAnterior: route.hora, nuevaHora: nuevaHora,
-      mensajeroPropuesto: null, enroqueConRouteId: enroqueConRouteId,
+      mensajeroPropuesto: mensajeroPropuesto, enroqueConRouteId: enroqueConRouteId,
       solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), solicitadaDesdeHM: fmtTimeHM(state.now), fecha: TODAY_STR, origen: 'aliado'
     };
     /* Clasificación de antelación (ver reprogramacionClasificacion): se calcula ANTES de asignar route.solicitud,
@@ -20706,7 +20724,10 @@ document.addEventListener('DOMContentLoaded', function () {
     route.solicitud = solicitud;
     registrarHistorialCambio(route, { tipo: tipo, accion: 'solicitada', motivo: motivo, horaAnterior: route.hora, horaPropuesta: nuevaHora, por: state.user.nombre });
     var toastMsgReprog = solicitud.evaluacionAntelacion ? (' (' + solicitud.evaluacionAntelacion.label + ')') : '';
-    var tipoToastLabel = { reprogramacion: 'Solicitud de reprogramación enviada', enroque: 'Solicitud de intercambio de turno enviada' }[tipo];
+    var tipoToastLabel = {
+      reprogramacion: 'Solicitud de reprogramación enviada', enroque: 'Solicitud de intercambio de turno enviada',
+      cambio_mensajero: 'Solicitud de cambio de mensajero enviada', cancelacion: 'Solicitud de cancelación enviada'
+    }[tipo];
     toast('warn', tipoToastLabel, route.id + toastMsgReprog + ' — a la espera de respuesta del equipo Melonn.');
     closeModal();
     syncAndRender(true);
@@ -21317,21 +21338,15 @@ document.addEventListener('DOMContentLoaded', function () {
     closeModal();
   });
 
-  /* Ver plan "Estandarización de Solicitudes del Aliado", Fase 3: wiring único del modal "Novedad de
-     Transporte" -- reemplaza el wiring de #cancelarModoSegment/#formCancelarReemplazo/#formAlertaReemplazo/
-     #formNoUbica. Los 2 segmentos (ntReemplazoModoSegment para reemplazo_cancelacion, ntOpcionSanaSegment
-     para novedad_sana) solo re-muestran/ocultan campos vía refreshNovedadTransporteCampos() -- el modo
-     (ntModo, fijado al abrir, nunca editable aquí) sigue siendo lo único que decide el destino real. */
+  /* Ver plan "Estandarización de Solicitudes del Aliado", Fase 3, y el ajuste de arquitectura posterior:
+     wiring del modal "Novedad de Transporte" -- reemplaza el wiring de #cancelarModoSegment/
+     #formCancelarReemplazo/#formAlertaReemplazo/#formNoUbica. El único segmento que queda
+     (ntReemplazoModoSegment, para reemplazo_cancelacion) solo re-muestra/oculta campos vía
+     refreshNovedadTransporteCampos() -- el modo (ntModo, fijado al abrir, nunca editable aquí) sigue siendo
+     lo único que decide el destino real. */
   document.querySelectorAll('#ntReemplazoModoSegment button').forEach(function (b) {
     b.addEventListener('click', function () {
       document.querySelectorAll('#ntReemplazoModoSegment button').forEach(function (x) { x.classList.remove('active'); });
-      b.classList.add('active');
-      refreshNovedadTransporteCampos();
-    });
-  });
-  document.querySelectorAll('#ntOpcionSanaSegment button').forEach(function (b) {
-    b.addEventListener('click', function () {
-      document.querySelectorAll('#ntOpcionSanaSegment button').forEach(function (x) { x.classList.remove('active'); });
       b.classList.add('active');
       refreshNovedadTransporteCampos();
     });
@@ -21365,50 +21380,6 @@ document.addEventListener('DOMContentLoaded', function () {
         solicitarCancelacionReemplazo(routeId, { nombre: nombreRc, telefono: telefonoRc, cedula: cedulaRc, placa: placaRc, vehiculo: vehiculoRc, correo: correoRc });
       }
       closeModal();
-    } else if (modo === 'novedad_sana') {
-      var routeNs = state.turnos.find(function (r) { return r.id === routeId; });
-      if (!routeNs) { closeModal(); return; }
-      /* Mismas 2 barreras que ya tenía formNuevaSolicitud para estos 2 tipos -- revalidadas aquí por si el
-         estado cambió entre abrir el modal y enviar. */
-      if (routeNs.solicitud && routeNs.solicitud.estado === 'pendiente') { toast('warn', 'Solicitud ya enviada', routeNs.id + ' ya tiene una solicitud pendiente de respuesta.'); closeModal(); return; }
-      var codeNs = computeEstado(routeNs).code;
-      if (codeNs === 'afectacion_confirmada' || codeNs === 'sin_reemplazo') { toast('warn', 'Turno cerrado', routeNs.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite gestión de novedades.'); closeModal(); return; }
-      var opcionSana = document.querySelector('#ntOpcionSanaSegment .active').dataset.opcion;
-      if (opcionSana === 'cambio_mensajero') {
-        var mensajeroPropuestoNs = {
-          nombre: document.getElementById('ntNombre').value.trim(), telefono: document.getElementById('ntTelefono').value.trim(),
-          cedula: document.getElementById('ntCedula').value.trim(), placa: document.getElementById('ntPlaca').value.trim(),
-          vehiculo: document.getElementById('ntVehiculo').value, correo: document.getElementById('ntCorreo').value.trim(),
-          sede: routeNs.sede
-        };
-        if (!mensajeroPropuestoNs.nombre || !mensajeroPropuestoNs.telefono || !mensajeroPropuestoNs.cedula || !mensajeroPropuestoNs.placa) {
-          toast('warn', 'Completa los datos del mensajero propuesto', 'Nombre, teléfono, cédula y placa son obligatorios.'); return;
-        }
-        var motivoCm = 'Cambio de mensajero solicitado por el Aliado desde Seguimiento — ' + routeNs.id + '.';
-        routeNs.solicitud = {
-          tipo: 'cambio_mensajero', estado: 'pendiente', motivo: motivoCm, horaAnterior: routeNs.hora, nuevaHora: null,
-          mensajeroPropuesto: mensajeroPropuestoNs, enroqueConRouteId: null,
-          solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), solicitadaDesdeHM: fmtTimeHM(state.now), fecha: TODAY_STR, origen: 'aliado'
-        };
-        registrarHistorialCambio(routeNs, { tipo: 'cambio_mensajero', accion: 'solicitada', motivo: motivoCm, horaAnterior: routeNs.hora, horaPropuesta: null, por: state.user.nombre });
-        toast('warn', 'Solicitud de cambio de mensajero enviada', routeNs.id + ' — a la espera de respuesta del equipo Melonn.');
-        closeModal();
-        syncAndRender(true);
-        pushRouteConAviso(routeNs, 'Solicitud no confirmada en la nube');
-      } else {
-        var motivoCancel = document.getElementById('ntMotivo').value.trim();
-        if (!motivoCancel) { toast('warn', 'Motivo requerido', 'Indica el motivo de la cancelación.'); return; }
-        routeNs.solicitud = {
-          tipo: 'cancelacion', estado: 'pendiente', motivo: motivoCancel, horaAnterior: routeNs.hora, nuevaHora: null,
-          mensajeroPropuesto: null, enroqueConRouteId: null,
-          solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), solicitadaDesdeHM: fmtTimeHM(state.now), fecha: TODAY_STR, origen: 'aliado'
-        };
-        registrarHistorialCambio(routeNs, { tipo: 'cancelacion', accion: 'solicitada', motivo: motivoCancel, horaAnterior: routeNs.hora, horaPropuesta: null, por: state.user.nombre });
-        toast('warn', 'Solicitud de cancelación enviada', routeNs.id + ' — a la espera de respuesta del equipo Melonn.');
-        closeModal();
-        syncAndRender(true);
-        pushRouteConAviso(routeNs, 'Solicitud no confirmada en la nube');
-      }
     }
   });
 
@@ -21752,7 +21723,6 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'seg-reprogramar') openReprogramarSeguimientoModal(id);
     else if (act === 'cancelar-solicitud-propia') openCancelarSolicitudPropiaModal(id, btn.dataset.esRuta === '1');
     else if (act === 'confirmar-reemplazo') openModalNovedadTransporte(id, 'reemplazo_cancelacion');
-    else if (act === 'reportar-novedad') openModalNovedadTransporte(id, 'novedad_sana');
     else if (act === 'cancelar') {
       if (canDo('schedule.cancel')) {
         openConfirmModal({
