@@ -792,11 +792,7 @@ function scPushCuotasConfig() {
     matrizProxima: state.cuotasMatrizProxima,
     fechaProxima: state.cuotasFechaProxima,
     bannerCO: state.cuotasBannerCO,
-    observaciones: state.cuotasObservaciones,
-    /* Ver requerimiento "Garantía Real de Cuota Pendiente...": compartido entre TODAS las sesiones/
-       dispositivos (nunca solo localStorage) -- es la única forma de que cierreCuotasNocturnoCatchUp() sepa,
-       desde cualquier navegador, si el déficit de HOY ya fue cubierto por otra sesión antes que esta. */
-    cierreCuotasNocturnoHechaFecha: state.cierreCuotasNocturnoHechaFecha
+    observaciones: state.cuotasObservaciones
   }]);
 }
 /* FIX "Guardar/Cargar Flota Habitual solo vivía en localStorage" (mismo hueco arquitectónico que Cuotas, ver
@@ -980,12 +976,6 @@ function scPullAll() {
       if (cfg.fechaProxima !== undefined) state.cuotasFechaProxima = cfg.fechaProxima;
       if (cfg.bannerCO !== undefined) state.cuotasBannerCO = cfg.bannerCO;
       if (cfg.observaciones) state.cuotasObservaciones = cfg.observaciones;
-      /* Solo adopta un valor MÁS AVANZADO que el local -- un pull con datos viejos (carrera con un push en
-         vuelo de esta misma pestaña) nunca debe retroceder la marca y hacer que el déficit de hoy se vuelva a
-         evaluar/duplicar innecesariamente. */
-      if (cfg.cierreCuotasNocturnoHechaFecha && cfg.cierreCuotasNocturnoHechaFecha > (state.cierreCuotasNocturnoHechaFecha || '')) {
-        state.cierreCuotasNocturnoHechaFecha = cfg.cierreCuotasNocturnoHechaFecha;
-      }
       try {
         localStorage.setItem(CUOTAS_STORAGE_KEY, JSON.stringify(state.cuotasMatriz));
         localStorage.setItem(CUOTAS_FRANJAS_STORAGE_KEY, JSON.stringify(state.cuotasFranjas));
@@ -3908,31 +3898,30 @@ function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
       pendientesCreados.push(nuevoTurnoSistema);
     }
   });
-  /* FIX "Marca de 'ya procesado' se guardaba sin confirmar que el turno realmente se persistió" (detectado en
-     verificación en vivo): devolver una Promise que solo resuelve DESPUÉS de que scPushRows confirme el
-     guardado real -- los llamadores (cierreCuotasNocturnoSweep/CatchUp) solo deben marcar
-     cierreCuotasNocturnoHechaFecha (y empujarla a Supabase) una vez que esto resuelva con éxito. Si el push
-     falla (red caída, timeout, RLS -- ver comentario de mensajerosCreados), NUNCA se marca como hecho -- el
-     próximo login/tick lo reintenta desde cero, recalculando el déficit real (idempotente: si algunos turnos
-     sí llegaron a guardarse, el recálculo nunca los duplica, solo crea el faltante genuino).
-     Mensajeros SIEMPRE antes que turnos (nunca en paralelo, ver riesgo documentado en la migración de RLS de
+  /* Mensajeros SIEMPRE antes que turnos, nunca en paralelo (ver riesgo documentado en la migración de RLS de
      app_turnos: un turno cuyo mensajero referenciado todavía no comprometió su propio INSERT quedaría
      "huérfano" para cualquier sesión que lo lea antes de que el mensajero también haya llegado) -- si el push
-     de mensajeros falla, ni siquiera se intenta el de turnos. */
-  var pushPromise = (mensajerosCreados.length ? scPushRows('app_mensajeros', mensajerosCreados) : Promise.resolve({ ok: true }))
-    .then(function (resMensajeros) {
-      if (!resMensajeros || !resMensajeros.ok) return resMensajeros;
-      return pendientesCreados.length ? scPushRows('app_turnos', pendientesCreados) : Promise.resolve({ ok: true });
+     de mensajeros falla (p. ej. RLS -- solo BODEGA/ALIADO/PLANNER pueden insertar en app_mensajeros/app_turnos,
+     ver esas migraciones), ni siquiera se intenta el de turnos. state.cierreCuotasNocturnoHechaFecha (ver
+     llamadores) es puramente LOCAL a esta sesión -- no hay ninguna tabla en la que TODOS los roles que
+     necesitan disparar este chequeo (cualquiera que inicie sesión) tengan a la vez permiso de escritura, así
+     que no intenta sincronizarse entre sesiones/dispositivos: cada sesión simplemente vuelve a evaluar el
+     déficit real desde cero (barato, solo lectura de lo ya sincronizado) y el cálculo mismo es idempotente --
+     si el déficit real ya es 0 (otra sesión lo cubrió), esta función no crea nada ni hace ningún llamado de
+     red. */
+  if (mensajerosCreados.length) {
+    scPushRows('app_mensajeros', mensajerosCreados).then(function (resMensajeros) {
+      if (resMensajeros && resMensajeros.ok && pendientesCreados.length) scPushRows('app_turnos', pendientesCreados);
     });
-  return { pendientesCreados: pendientesCreados, mensajerosCreados: mensajerosCreados, pushPromise: pushPromise };
+  } else if (pendientesCreados.length) {
+    scPushRows('app_turnos', pendientesCreados);
+  }
+  return pendientesCreados;
 }
 function cierreCuotasNocturnoSweep() {
   if (state.cierreCuotasNocturnoHechaFecha === TOMORROW_STR || state.now < progMidnightDT()) return;
-  cierreCuotasCompletarDeficit(TOMORROW_STR, 'Cierre Automático Nocturno (00:00)').pushPromise.then(function (res) {
-    if (!res || !res.ok) return; // push falló -- no se marca, el próximo tick/login lo reintenta
-    state.cierreCuotasNocturnoHechaFecha = TOMORROW_STR;
-    scPushCuotasConfig();
-  });
+  state.cierreCuotasNocturnoHechaFecha = TOMORROW_STR;
+  cierreCuotasCompletarDeficit(TOMORROW_STR, 'Cierre Automático Nocturno (00:00)');
 }
 /* Ver requerimiento "Garantía Real de Cuota Pendiente sin Depender de Medianoche Exacta" (reporte urgente:
    cierreCuotasNocturnoSweep SOLO corre dentro de una pestaña abierta y logueada justo en el instante del
@@ -3940,17 +3929,16 @@ function cierreCuotasNocturnoSweep() {
    plataforma abierta a esa hora, el déficit de cuota del día simplemente nunca se completaba). Respaldo de
    alcance: se dispara una vez por sesión, justo después de que completarInicioSesion() reciba el pull fresco
    de Supabase (nunca antes -- evaluar contra datos viejos podría crear un pendiente duplicado si otra sesión
-   ya lo había cubierto) -- si state.cierreCuotasNocturnoHechaFecha (compartido vía app_cuotas_config, ver
-   scPushCuotasConfig) todavía no llegó a TODAY_STR, completa el déficit de HOY en ese mismo instante, sin
-   importar la hora del día. Reutiliza cierreCuotasCompletarDeficit -- nunca marca incumplimientos ni penaliza
-   nada, solo siembra la plaza "Pendiente / Por Confirmar" que el Aliado puede confirmar después. */
+   ya lo había cubierto). Completa el déficit de HOY en ese mismo instante, sin importar la hora del día ni el
+   rol de quien inició sesión -- si ese rol no tiene permiso de escritura real sobre app_turnos/app_mensajeros
+   (ver RLS: solo BODEGA/ALIADO/PLANNER), el intento de guardado simplemente no persiste nada esa vez (sin
+   error visible ni bloqueo), y la PRÓXIMA sesión (de cualquier rol con permiso) lo vuelve a evaluar desde
+   cero -- nunca queda marcado como "hecho" de forma falsa. Reutiliza cierreCuotasCompletarDeficit -- nunca
+   marca incumplimientos ni penaliza nada, solo siembra la plaza "Pendiente / Por Confirmar" que el Aliado
+   puede confirmar después. */
 function cierreCuotasNocturnoCatchUp() {
-  if (!state.user || state.cierreCuotasNocturnoHechaFecha === TODAY_STR) return;
-  cierreCuotasCompletarDeficit(TODAY_STR, 'Chequeo de Alcance al Iniciar Sesión').pushPromise.then(function (res) {
-    if (!res || !res.ok) return; // push falló -- no se marca, el próximo login lo reintenta desde cero
-    state.cierreCuotasNocturnoHechaFecha = TODAY_STR;
-    scPushCuotasConfig();
-  });
+  if (!state.user) return;
+  cierreCuotasCompletarDeficit(TODAY_STR, 'Chequeo de Alcance al Iniciar Sesión');
 }
 /* ---------------- Regularización Obligatoria de Demora en Despacho (Jornada Anterior) ----------------
    Ver requerimiento "Auditoría Integral de Alertas, Cierre Nocturno y Regularización Obligatoria de Demora en
