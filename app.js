@@ -3724,12 +3724,18 @@ function progMidnightDT() { return parseDT(TOMORROW_STR, '00:00'); }
        Check-In físico en bodega, así que NO se cierra como "No Gestionada"/"Incumplimiento" solo por el paso de
        la medianoche. Se preserva (computeEstado ya lo hace solo, sin cierre automático por tiempo) y se marca
        con route.pendienteRegularizacion para el modal obligatorio de inicio de jornada de Bodega.
-   Idempotencia: state.jornadaCerrada evita que este barrido se repita en cada gravityTick una vez ejecutado
-   (TODAY_STR/TOMORROW_STR son constantes fijas en esta app de demostración -- ver comentario de
-   calculadorPurgeAdvanceNoche -- así que solo existe UN cruce de medianoche posible en toda la simulación). */
+   Idempotencia: state.jornadaCerradaFecha guarda el TODAY_STR ya cerrado -- evita que este barrido se repita
+   en cada gravityTick del MISMO día, pero sigue disparándose de nuevo cada vez que TODAY_STR avanza a un día
+   nuevo (ver FIX "Barridos de Medianoche Permanentemente Deshabilitados" en gravityTick: con un boolean simple
+   en vez de esto, el barrido solo corría UNA vez en la vida entera de la sesión -- TODAY_STR/TOMORROW_STR dejaron
+   de ser "constantes fijas" el día que se agregó el auto-avance de día real en gravityTick, pero este barrido
+   se quedó con la idempotencia pensada para esa suposición vieja). El llamado real que importa vive en
+   gravityTick, ANTES de avanzar TODAY_STR/TOMORROW_STR (ver ese comentario) -- el de más abajo en scanRoutes
+   queda como respaldo defensivo, inofensivo en el flujo normal (progMidnightDT() ya apunta a un medianoche
+   futuro para cuando scanRoutes llega a correr, así que su propio guard lo vuelve no-op). */
 function cierreJornadaSweep() {
-  if (state.jornadaCerrada || state.now < progMidnightDT()) return;
-  state.jornadaCerrada = true;
+  if (state.jornadaCerradaFecha === TODAY_STR || state.now < progMidnightDT()) return;
+  state.jornadaCerradaFecha = TODAY_STR;
   var motivoBase = 'Cierre de Jornada (00:00) — sin gestión manual antes de la medianoche.';
   state.turnos.forEach(function (route) {
     if (route.fecha !== TODAY_STR) return;
@@ -3826,11 +3832,13 @@ function cierreJornadaSweep() {
    turnosProgramadosGlobalCount (mismo total CONTRATADO que ya gobierna checkCuotaGlobalExceso/
    evaluarAprobacionCuota) para no duplicar ningún criterio de cuota -- por construcción, nunca genera más
    plazas que el déficit exacto, así que estos pendientes nunca califican como "Adicional" (ver
-   esTurnoAdicional). Idempotencia: state.cierreCuotasNocturnoHecho, mismo patrón que
-   state.jornadaCerrada -- corre una sola vez por cruce de medianoche real. */
+   esTurnoAdicional). Idempotencia: state.cierreCuotasNocturnoHechaFecha, mismo patrón que
+   state.jornadaCerradaFecha (ver su comentario, mismo FIX) -- guarda el TOMORROW_STR ya procesado en vez de
+   un boolean simple, así que vuelve a dispararse cada vez que TOMORROW_STR avanza a un día nuevo, en vez de
+   una sola vez en toda la vida de la sesión. */
 function cierreCuotasNocturnoSweep() {
-  if (state.cierreCuotasNocturnoHecho || state.now < progMidnightDT()) return;
-  state.cierreCuotasNocturnoHecho = true;
+  if (state.cierreCuotasNocturnoHechaFecha === TOMORROW_STR || state.now < progMidnightDT()) return;
+  state.cierreCuotasNocturnoHechaFecha = TOMORROW_STR;
   var dia = diaSemanaKey(TOMORROW_STR);
   if (!dia) return;
   var pendientesCreados = [];
@@ -5207,14 +5215,14 @@ function scanRoutes(silent) {
      recibe estos toasts — quedan restringidos a los 3 roles operativos activos: Bodega, Aliado y Planner. El
      statusCache se sigue actualizando siempre para ADMIN y AUDITOR también, para no perder la detección de
      cambios si luego opera otro rol. */
-  /* Ver requerimiento "Auditoría y Lógica de Cierre de Jornada...": el barrido de medianoche corre UNA sola
-     vez (ver state.jornadaCerrada dentro de cierreJornadaSweep) en cuanto state.now cruza progMidnightDT(),
-     antes de recalcular el resto del ciclo -- así ningún rol ve, ni por un instante, una alerta/solicitud de
-     "ayer" todavía activa tras la medianoche. */
+  /* FIX "Barridos de Medianoche Permanentemente Deshabilitados" (reporte Cabify/todos los aliados — ningún
+     turno "Pendiente / Por Confirmar" se generaba para cubrir el déficit de cuota del día nuevo): estas 2
+     llamadas YA NO disparan nada real aquí -- gravityTick (ver más abajo en este archivo) ya las ejecuta ANTES
+     de avanzar TODAY_STR/TOMORROW_STR al día real nuevo, que es el único momento en que progMidnightDT()
+     (calculado sobre TOMORROW_STR) todavía apunta al medianoche que ACABA de pasar en vez de a uno futuro.
+     Quedan aquí solo como respaldo defensivo (inofensivo: para cuando scanRoutes llega a correr, TODAY_STR/
+     TOMORROW_STR ya avanzaron, así que su propio guard las vuelve no-op en el flujo normal). */
   cierreJornadaSweep();
-  /* Ver requerimiento "Lógica Condicional de 'Pendientes' según Estado de Cuotas": mismo cruce de medianoche
-     real que cierreJornadaSweep, pero sobre TOMORROW_STR (el día que empieza) en vez de TODAY_STR (el que
-     cierra) -- ver cierreCuotasNocturnoSweep. */
   cierreCuotasNocturnoSweep();
   /* Ver requerimiento "Ajuste Matriz de SLA y Ciclos de Vida Diferenciados...": a diferencia de
      cierreJornadaSweep (respaldo final de medianoche, una sola vez), este chequeo corre en CADA tick -- las
@@ -5449,9 +5457,25 @@ function gravityTick() {
   /* Ver requerimiento "Riesgo de Zona Horaria en TODAY_STR/TOMORROW_STR": re-deriva el día calendario real
      de Bogotá en cada tick (1/seg) -- si una pestaña queda abierta cruzando la medianoche real, TODAY_STR/
      TOMORROW_STR avanzan solas, sin esperar a un refresh manual, y syncAndRender(false) de abajo ya
-     repinta todo lo que filtra por ellas con el día correcto. */
+     repinta todo lo que filtra por ellas con el día correcto.
+     FIX "Barridos de Medianoche Permanentemente Deshabilitados" (reporte urgente: ningún aliado -- Cabify
+     incluido -- recibía turnos "Pendiente / Por Confirmar" automáticos al no completar su cuota, ni se cerraba
+     la jornada anterior): cierreJornadaSweep()/cierreCuotasNocturnoSweep() (llamadas desde scanRoutes, más
+     abajo en este archivo) dependen de progMidnightDT() = medianoche de TOMORROW_STR para detectar "ya pasó la
+     medianoche, toca correr" (state.now >= progMidnightDT()). Si TODAY_STR/TOMORROW_STR se avanzan PRIMERO
+     (como hacía este bloque), para cuando esas funciones corren TOMORROW_STR ya es el día SIGUIENTE al que
+     acaba de empezar, así que progMidnightDT() queda apuntando a un medianoche todavía FUTURO -- la condición
+     nunca se cumple y ambos barridos quedan inertes para siempre, en todas las sesiones, desde que este
+     auto-avance de día real se agregó (antes, con TODAY_STR/TOMORROW_STR fijos durante toda la sesión, sí
+     alcanzaban a disparar una vez). Se corrige llamándolas AQUÍ, con los valores VIEJOS de TODAY_STR/
+     TOMORROW_STR todavía vigentes (el día que de verdad está cerrando / el día que de verdad está por
+     comenzar) -- el único instante en que progMidnightDT() coincide con el medianoche que ACABA de pasar. */
   var hoyBogota = bogotaTodayStr();
-  if (hoyBogota !== TODAY_STR) { TODAY_STR = hoyBogota; TOMORROW_STR = addDaysYMD(TODAY_STR, 1); }
+  if (hoyBogota !== TODAY_STR) {
+    cierreJornadaSweep();
+    cierreCuotasNocturnoSweep();
+    TODAY_STR = hoyBogota; TOMORROW_STR = addDaysYMD(TODAY_STR, 1);
+  }
   syncAndRender(false);
   scAutosaveTickCount++;
   if (scAutosaveTickCount >= 30) { scAutosaveTickCount = 0; scPushAll(); }
