@@ -2960,6 +2960,18 @@ function dockOverduePagoTagHtml(route, est) {
   }
   return ' <span class="badge badge-critical" data-tag="afectacion-sla-bodega" data-tip="Afectación en Mediciones de Bodega/SLA para Melonn. No aplica Tiempo de Espera Pago (México).">' + ICONS.clock + 'Afectación SLA/Bodega · ' + formatDuracionMinutos(info.minutosEspera) + '</span>';
 }
+/* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'", convivencia con Demora en Despacho:
+   dock_overdue SIEMPRE gana sobre con_ruta_asignada en computeEstado (el reloj de SLA de Bodega no se
+   detiene por asignar la ruta) -- así que una ruta demorada que YA tiene ruta asignada pierde esa
+   información visual por completo (queda indistinguible de una demorada sin gestionar). Este tag "HERMANO"
+   del badge (mismo patrón que dockOverduePagoTagHtml, justo arriba) recupera esa visibilidad SIN crear un
+   tercer código ni tocar el conteo de las tarjetas KPI (la ruta sigue contando en "Demorados en Despacho",
+   nunca en "En Despacho", mientras dure la demora). A diferencia de los tags monetarios de arriba, es
+   visible para los 3 roles (Bodega/Planner/Aliado) -- es información operativa, no financiera. */
+function rutaAsignadaTagHtml(route, est) {
+  if (!route.rutaAsignada || est.code !== 'dock_overdue') return '';
+  return ' <span class="badge badge-justified" data-tag="ruta-asignada-en-demora" data-tip="Bodega ya confirmó la asignación de ruta para este mensajero — se está despachando, aunque superó el tiempo de SLA de Bodega.">Ruta Asignada</span>';
+}
 /* ---------------- Cierre automático del ciclo por incumplimiento (T0 + 120 min) — regionalización CO/MX ----------------
    Cubre los 2 caminos que la FSM cierra sola al vencer los 120 min sin resolución (ver computeEstado): (1)
    'sin_reemplazo' — cancelación del Aliado sin reemplazo confirmado (route.reemplazoPendiente), y (2)
@@ -7970,7 +7982,7 @@ function rowHtmlConsolidado(route) {
       '</div></td>' +
     '<td>' + route.vehiculo + '</td>' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td><div class="row-actions">' + actions + '</div></td>' +
     '</tr>';
 }
@@ -8545,7 +8557,7 @@ function rowHtmlDespacho(route) {
     '<td>' + fmtTime12(route.salida) + '</td>' +
     '<td>' + maletaCell + '</td>' +
     '<td>' + celularCell + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + demoraPreviaTagHtml + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + demoraPreviaTagHtml + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td class="courier-sub">' + observacionesDespachoCellHtml(route, puedeGestionar && !route.salida) + '</td>' +
     '<td><div class="row-actions">' + actions + '</div></td>' +
     '</tr>';
@@ -9380,7 +9392,7 @@ function rowHtmlSeguimiento(route) {
     '<td>' + m.nombre + '</td>' +
     '<td>' + route.vehiculo + ' · ' + m.placa + '</td>' +
     '<td>' + route.sede + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td><div class="row-actions">' + accion + '</div></td>' +
     '</tr>';
 }
