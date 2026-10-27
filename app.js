@@ -15551,9 +15551,18 @@ function procesarArchivoCargaMasiva(file) {
     errorEl.hidden = false;
     errorEl.textContent = 'No se pudo leer el archivo. Verifica que no esté dañado e inténtalo de nuevo.';
   };
+  var esCsv = /\.csv$/i.test(file.name);
   reader.onload = function (e) {
     try {
-      var workbook = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      /* FIX "Encabezados con tilde corrompidos en CSV" (hallado en verificación con Playwright): SheetJS
+         decodifica un CSV leído como ArrayBuffer/binario asumiendo Latin1, nunca UTF-8 -- "Cédula" llegaba
+         como "CÃ©dula" (mojibake clásico de UTF-8 mal interpretado), rompiendo TODAS las columnas con tilde
+         de la plantilla real. Un .xlsx nunca tiene este problema (el texto va en XML con su encoding
+         declarado), así que solo el CSV necesita decodificarse explícitamente como UTF-8 (TextDecoder) ANTES
+         de pasarlo a XLSX.read, como type:'string' en vez de 'array'. */
+      var workbook = esCsv
+        ? XLSX.read(new TextDecoder('utf-8').decode(e.target.result), { type: 'string' })
+        : XLSX.read(e.target.result, { type: 'array', cellDates: true });
       var primeraHoja = workbook.Sheets[workbook.SheetNames[0]];
       var filasCrudas = XLSX.utils.sheet_to_json(primeraHoja, { defval: '' });
       var formaResult = parsearFilasCargaMasiva(filasCrudas);
