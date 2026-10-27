@@ -107,6 +107,10 @@ a{color:inherit;}
   box-shadow:0 2px 10px rgba(0,0,0,.18);
 }
 .login-top-banner svg{flex-shrink:0;}
+/* [hidden] por sí solo no basta -- misma especificidad que .login-top-banner{display:flex} de arriba, y por
+   orden de cascada (ambas reglas de autor, la de abajo en la hoja de estilos de la UA pierde) display:flex
+   seguiría ganando sin este override explícito. Mismo patrón ya usado en .cutoff-banner[hidden]. */
+.login-top-banner[hidden]{display:none;}
 .login-fleet-art{
   position:absolute;right:0;bottom:70px;z-index:0;max-width:min(560px,46vw);max-height:340px;
   pointer-events:none;

@@ -18,10 +18,12 @@
        cinta negra inferior, que debe quedarse al fondo tal cual está) y ponerlo como franja fija arriba de
        TODA la pantalla -- ya no reutiliza .cutoff-banner (pensado para vivir inline dentro de una tarjeta/
        panel, con su propio min-height/margin) sino una clase propia de franja de ancho completo, mismo
-       criterio que .login-footer-ribbon (fixed, fuera del grid, no afecta el layout de columnas). Quitar
-       este bloque manualmente una vez pase la ventana (martes 27 de octubre, 9:00 a.m.) -- no se oculta solo
-       por fecha. -->
-  <div class="login-top-banner" id="loginVentanaActualizacionBanner">
+       criterio que .login-footer-ribbon (fixed, fuera del grid, no afecta el layout de columnas). Ver
+       requerimiento "Ocultar Banner de Ventana de Actualizaciones": pasada la ventana (martes 27 de octubre,
+       9:00 a.m.), el bloque se OCULTA con `hidden` en vez de borrarse -- se conserva tal cual (texto/estilo
+       listos) para la próxima ventana de mantenimiento, solo hace falta quitar `hidden` y actualizar la
+       fecha/hora del texto. -->
+  <div class="login-top-banner" id="loginVentanaActualizacionBanner" hidden>
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
     <span><strong>Ventana de actualizaciones.</strong> La plataforma permanecerá en mantenimiento programado hasta el martes 27 de octubre, 9:00 a.m.</span>
   </div>
