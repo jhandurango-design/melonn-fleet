@@ -2680,13 +2680,21 @@ function nextMensajeroId() {
    contador obsoleto ya corregido para nextTurnoId/nextUserId -- ahora que state.solicitudesGenerales SÍ se
    trae de Supabase (scPullAll), derivar el siguiente id del propio contador en memoria (que arranca en 0 en
    cada carga) volvería a generar SOL-001 encima de una solicitud SOL-007 ya real traída del pull. Se deriva
-   del máximo id YA presente en el array, igual que las otras 2 colecciones. */
+   del máximo id YA presente en el array, igual que las otras 2 colecciones.
+   FIX "Colisión de IDs entre 2 Pestañas/Sesiones" (plan "Estandarización de Solicitudes del Aliado", Fase 1):
+   mismo bug ya corregido antes para nextMensajeroId()/nextTurnoId() -- 2 pestañas calculando "el siguiente
+   número" casi al mismo tiempo, cada una con su propia copia local todavía sin la del otro, podían derivar el
+   mismo maxNum+1; el upsert por id de Supabase fusionaba/sobrescribía silenciosamente una solicitud sobre la
+   otra. Mismo fix: sufijo corto único por instante+pestaña (timestamp en base36 + aleatorio) -- el número
+   secuencial se conserva como prefijo legible, la unicidad real ya no depende de que ninguna pestaña vea
+   primero el alta de la otra. slice(4, 7) (antes slice(4)) acota la extracción del número a las 3 posiciones
+   de SOL-NNN, sin intentar parsear el sufijo nuevo como si fuera el número. */
 function nextSolicitudGeneralId() {
   var maxNum = state.solicitudesGenerales.reduce(function (max, s) {
-    var n = parseInt(String(s.id).slice(4), 10);
+    var n = parseInt(String(s.id).slice(4, 7), 10);
     return isNaN(n) ? max : Math.max(max, n);
   }, 0);
-  return 'SOL-' + String(maxNum + 1).padStart(3, '0');
+  return 'SOL-' + String(maxNum + 1).padStart(3, '0') + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 }
 
 /* ---------------- Permisos ----------------
