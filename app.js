@@ -3898,14 +3898,23 @@ function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
       pendientesCreados.push(nuevoTurnoSistema);
     }
   });
-  if (pendientesCreados.length) scPushRows('app_turnos', pendientesCreados);
-  return pendientesCreados;
+  /* FIX "Marca de 'ya procesado' se guardaba sin confirmar que el turno realmente se persistió" (detectado en
+     verificación en vivo): devolver una Promise que solo resuelve DESPUÉS de que scPushRows confirme el
+     guardado real -- los llamadores (cierreCuotasNocturnoSweep/CatchUp) solo deben marcar
+     cierreCuotasNocturnoHechaFecha (y empujarla a Supabase) una vez que esto resuelva con éxito. Si el push
+     falla (red caída, timeout), NUNCA se marca como hecho -- el próximo login/tick lo reintenta desde cero,
+     recalculando el déficit real (idempotente: si algunos turnos sí llegaron a guardarse, el recálculo nunca
+     los duplica, solo crea el faltante genuino). */
+  var pushPromise = pendientesCreados.length ? scPushRows('app_turnos', pendientesCreados) : Promise.resolve({ ok: true });
+  return { pendientesCreados: pendientesCreados, pushPromise: pushPromise };
 }
 function cierreCuotasNocturnoSweep() {
   if (state.cierreCuotasNocturnoHechaFecha === TOMORROW_STR || state.now < progMidnightDT()) return;
-  state.cierreCuotasNocturnoHechaFecha = TOMORROW_STR;
-  cierreCuotasCompletarDeficit(TOMORROW_STR, 'Cierre Automático Nocturno (00:00)');
-  scPushCuotasConfig();
+  cierreCuotasCompletarDeficit(TOMORROW_STR, 'Cierre Automático Nocturno (00:00)').pushPromise.then(function (res) {
+    if (!res || !res.ok) return; // push falló -- no se marca, el próximo tick/login lo reintenta
+    state.cierreCuotasNocturnoHechaFecha = TOMORROW_STR;
+    scPushCuotasConfig();
+  });
 }
 /* Ver requerimiento "Garantía Real de Cuota Pendiente sin Depender de Medianoche Exacta" (reporte urgente:
    cierreCuotasNocturnoSweep SOLO corre dentro de una pestaña abierta y logueada justo en el instante del
@@ -3919,9 +3928,11 @@ function cierreCuotasNocturnoSweep() {
    nada, solo siembra la plaza "Pendiente / Por Confirmar" que el Aliado puede confirmar después. */
 function cierreCuotasNocturnoCatchUp() {
   if (!state.user || state.cierreCuotasNocturnoHechaFecha === TODAY_STR) return;
-  state.cierreCuotasNocturnoHechaFecha = TODAY_STR;
-  cierreCuotasCompletarDeficit(TODAY_STR, 'Chequeo de Alcance al Iniciar Sesión');
-  scPushCuotasConfig();
+  cierreCuotasCompletarDeficit(TODAY_STR, 'Chequeo de Alcance al Iniciar Sesión').pushPromise.then(function (res) {
+    if (!res || !res.ok) return; // push falló -- no se marca, el próximo login lo reintenta desde cero
+    state.cierreCuotasNocturnoHechaFecha = TODAY_STR;
+    scPushCuotasConfig();
+  });
 }
 /* ---------------- Regularización Obligatoria de Demora en Despacho (Jornada Anterior) ----------------
    Ver requerimiento "Auditoría Integral de Alertas, Cierre Nocturno y Regularización Obligatoria de Demora en
