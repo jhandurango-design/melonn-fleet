@@ -695,6 +695,16 @@
              vez, no solo el aliado en sesión). Cobertura total por defecto ("Todas las bodegas"/"Todos los
              aliados"), con los mismos selectores Bodega/Aliado ya usados en el resto de Consolidado. -->
         <div id="consolCuerpoManana" hidden>
+          <!-- Ver requerimiento "Mover el banner informativo de Avance y Carga T+1 justo debajo de los
+               filtros": reubicado del punto anterior (inmediatamente antes de la tabla de detalle) a aquí,
+               primer elemento del cuerpo de esta pestaña -- queda pegado justo debajo de la fila de filtros
+               (#consolFiltrosManana, que vive en .page-head-actions arriba), antes del panel de Avance de
+               Cuotas por Aliado. -->
+          <div class="cutoff-banner" id="consolManBanner">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>
+            <span id="consolManBannerTexto">Avance en vivo de la carga que los aliados están guardando para mañana — no afecta la operación de hoy.</span>
+          </div>
+
           <section class="panel">
             <p class="panel-title">Avance de Cuotas por Aliado — Mañana</p>
             <div class="cuotas-resumen-chips" id="consolManComplianceChips"></div>
@@ -703,13 +713,6 @@
               <div>Sin cuotas activas para mañana en el alcance seleccionado.</div>
             </div>
           </section>
-
-          <!-- Ver requerimiento "Ajustes finales de estructura... Avance y Carga T+1", punto 1: el banner
-               informativo va INMEDIATAMENTE antes de la tabla de detalle (ya no en la cabecera superior). -->
-          <div class="cutoff-banner" id="consolManBanner">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>
-            <span id="consolManBannerTexto">Avance en vivo de la carga que los aliados están guardando para mañana — no afecta la operación de hoy.</span>
-          </div>
 
           <!-- Ver requerimiento punto 3: reemplaza la Matriz de combinaciones sede/aliado/vehículo/franja por
                una tabla de REGISTROS reales (un turno = una fila), mismo criterio que la tabla de "Operación
