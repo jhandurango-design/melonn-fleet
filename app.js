@@ -7585,6 +7585,38 @@ function consolManDetalleRowHtml(route) {
     '<td>' + escapeHtml(route.sede) + '</td>' +
     '</tr>';
 }
+/* Ver requerimiento "Organizar 'Programación cargada — Mañana' como la tabla de 'Programación consolidada'
+   (Operación del Día)": mismo agrupamiento jerárquico Aliado -> Bodega que ya usa renderConsolTable
+   (rowHtmlConsolidado) -- antes esta tabla era una lista plana ordenada solo por sede+hora, sin encabezados
+   de grupo, mientras la de Operación del Día ya agrupaba por Aliado (con conteo) y, con "Todas las bodegas"
+   activo, por Bodega dentro de cada aliado (📍 + conteo). Mismas clases visuales (consol-group-row/
+   consol-subgroup-row/consol-group-count) para que ambas tablas luzcan y se naveguen igual. */
+function renderConsolManTable(routes) {
+  var multiBodega = !state.consolManFiltroBodega;
+  var byAliado = {};
+  routes.forEach(function (r) { var aliado = getMensajero(r.mensajeroId).aliado; (byAliado[aliado] = byAliado[aliado] || []).push(r); });
+  var aliados = Object.keys(byAliado).sort();
+  var html = '';
+  aliados.forEach(function (aliado) {
+    var aliadoRows = byAliado[aliado];
+    html += '<tr class="consol-group-row"><td colspan="6">' + aliadoLabelHtml(aliado) + ' <span class="consol-group-count">(' + aliadoRows.length + ' rutas)</span></td></tr>';
+    if (multiBodega) {
+      var bySede = {};
+      aliadoRows.forEach(function (r) { (bySede[r.sede] = bySede[r.sede] || []).push(r); });
+      Object.keys(bySede).sort().forEach(function (sede) {
+        var sedeRows = bySede[sede].slice().sort(function (a, b) { return a.hora.localeCompare(b.hora) || a.id.localeCompare(b.id); });
+        html += '<tr class="consol-subgroup-row"><td colspan="6">📍 ' + sede + ' <span class="consol-group-count">(' + sedeRows.length + ' rutas)</span></td></tr>';
+        html += sedeRows.map(consolManDetalleRowHtml).join('');
+      });
+    } else {
+      var rows = aliadoRows.slice().sort(function (a, b) { return a.hora.localeCompare(b.hora) || a.id.localeCompare(b.id); });
+      html += rows.map(consolManDetalleRowHtml).join('');
+    }
+  });
+  document.getElementById('consolManTbody').innerHTML = html;
+  document.getElementById('consolManCount').textContent = routes.length;
+  document.getElementById('consolManEmpty').classList.toggle('show', routes.length === 0);
+}
 function refreshConsolManAliadoOptions() {
   var sel = document.getElementById('consolManAliado');
   var current = sel.value;
@@ -7634,9 +7666,7 @@ function renderConsolidadoManana() {
   document.getElementById('consolManComplianceEmpty').classList.toggle('show', !huboResultados);
 
   var routes = routesForConsolidadoManana(state.consolManFiltroBodega, qAliado);
-  document.getElementById('consolManTbody').innerHTML = routes.map(consolManDetalleRowHtml).join('');
-  document.getElementById('consolManCount').textContent = routes.length;
-  document.getElementById('consolManEmpty').classList.toggle('show', routes.length === 0);
+  renderConsolManTable(routes);
 }
 function limpiarFiltroConsolMan() {
   state.consolManFiltroBodega = '';
