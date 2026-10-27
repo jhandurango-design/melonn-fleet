@@ -20270,13 +20270,13 @@ document.addEventListener('DOMContentLoaded', function () {
       banderaCoEl.style.animationDelay = (aliadosTexto.length * aliadosPasoLetra + 0.1).toFixed(3) + 's';
     }
   }
-  /* Ver requerimiento "Aviso de Plataforma Colapsable e Interactivo": nace colapsado (ver styles.css, sin
-     .is-open) -- clic en el botón/icono lo abre con una animación de alto automático; clic de nuevo, el
-     botón de cierre (✕) o Escape lo vuelven a colapsar. toggleLoginInfoBanner(forzar) centraliza las 3
-     entradas para que ninguna se desincronice de aria-expanded. */
+  /* Ver requerimiento "Aviso de Plataforma Colapsable e Interactivo" + "Ajustes Finos...": nace colapsado
+     (ver styles.css, sin .is-open) -- clic en el botón/icono (chevron incluido, mismo botón) lo abre con una
+     animación de alto automático; un segundo clic en ese MISMO botón, o Escape, lo vuelven a colapsar --
+     único control, sin un botón de cierre (✕) aparte que duplicara el mismo gesto. toggleLoginInfoBanner
+     (forzar) centraliza ambas entradas para que ninguna se desincronice de aria-expanded. */
   var loginInfoBannerEl = document.getElementById('loginInfoBanner');
   var loginInfoToggleBtn = document.getElementById('loginInfoToggle');
-  var loginInfoCloseBtn = document.getElementById('loginInfoClose');
   function toggleLoginInfoBanner(forzarAbierto) {
     if (!loginInfoBannerEl || !loginInfoToggleBtn) return;
     var abrir = typeof forzarAbierto === 'boolean' ? forzarAbierto : !loginInfoBannerEl.classList.contains('is-open');
@@ -20284,7 +20284,6 @@ document.addEventListener('DOMContentLoaded', function () {
     loginInfoToggleBtn.setAttribute('aria-expanded', abrir ? 'true' : 'false');
   }
   if (loginInfoToggleBtn) loginInfoToggleBtn.addEventListener('click', function () { toggleLoginInfoBanner(); });
-  if (loginInfoCloseBtn) loginInfoCloseBtn.addEventListener('click', function (e) { e.stopPropagation(); toggleLoginInfoBanner(false); });
   /* Escape cierra el aviso solo si está abierto -- nunca interfiere con otros usos de Escape en la pantalla
      de login (p. ej. cerrar algún modal propio), que siguen su propio manejador sin tocar este. */
   document.addEventListener('keydown', function (e) {
