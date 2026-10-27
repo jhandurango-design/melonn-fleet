@@ -15561,7 +15561,8 @@ function generarPlantillaCargaMasivaDemo() {
     ['Tipos de Vehículo válidos', vehiculosBaseForCountry(country).join(', ')],
     ['Hora de Citación', 'Formato HH:MM, en 24 horas (ej. 08:30, 14:00).'],
     ['Campos obligatorios', 'Cédula / INE, Nombre, Teléfono, Placa, Bodega, Tipo de Vehículo y Hora de Citación. Correo es opcional.'],
-    ['Cédulas duplicadas', 'No repitas la misma Cédula / INE dos veces en el archivo -- la 2ª aparición se rechaza.']
+    ['Cédulas duplicadas', 'No repitas la misma Cédula / INE dos veces en el archivo -- la 2ª aparición se rechaza.'],
+    ['¿Qué es un "Adicional"?', 'Una fila que excede tu cuota base contratada (por cupo ya completo, día festivo o domingo, o un Tipo de Vehículo no habilitado para ti en esa Bodega) no se rechaza: queda marcada como "Adicional" en el resumen de revisión antes de crear nada. Tú decides, fila por fila (o con "Incluir todos los Adicionales"), si se envía a aprobación de Planner o se omite de la carga.']
   ];
   var blob = buildXlsxBlob([
     { name: 'Plantilla', headers: headers, rows: filasEjemplo },
