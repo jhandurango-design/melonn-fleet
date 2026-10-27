@@ -2815,6 +2815,14 @@ const ESTADOS = {
   exonerado: { label: 'Exonerado / Justificado', badge: 'badge-justified', def: 'Planner marcó como resuelta una ruta en Incumplimiento Confirmado; se descuenta de los contadores y no genera afectación.' },
   sin_elementos: { label: 'Llegó a Bodega con Novedad', badge: 'badge-warn', def: 'El mensajero llegó pero reportó una novedad (ej. sin elementos de cargue) que impide despachar de inmediato.' },
   in_dock: { label: 'A Tiempo', badge: 'badge-dock', def: 'El mensajero llegó a la hora pactada o antes, y está en bodega, dentro del tiempo de despacho.' },
+  /* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'": milestone intermedio entre "Llegó a
+     Bodega" y "Despachado" (ver computeEstado/rowHtmlDespacho/asignarRuta) -- Bodega confirma con un solo
+     clic que el mensajero ya tiene la ruta asignada, antes del despacho final. Badge lila/"transición" (mismo
+     tono que 'reprogramado') para distinguirlo visualmente de los códigos cian de "en cola" (in_dock/
+     tolerance_arrival) y del verde de 'dispatched'. 'dock_overdue' sigue teniendo prioridad sobre este código
+     si se supera el SLA de 60 min sin despacho (el reloj de Demora en Despacho es independiente de este
+     milestone, ver computeEstado) -- no afecta ninguna alerta/KPI de demora ya existente. */
+  con_ruta_asignada: { label: 'Con Ruta Asignada', badge: 'badge-justified', def: 'El mensajero ya está en bodega y Bodega confirmó que tiene la ruta asignada, lista para el despacho final.' },
   tolerance_arrival: { label: 'Llegó en Tolerancia', badge: 'badge-warn', def: 'Llegó después de la hora pactada pero dentro de la gabela de 60 min; cuenta como tiempo válido, no como incumplimiento.' },
   late_arrival: { label: 'Llegada Tarde', badge: 'badge-warn', def: 'El mensajero sí se presentó, pero registró ingreso después de vencida la gabela de 60 min.' },
   dock_overdue: { label: 'Demora en despacho', badge: 'badge-critical', def: 'Más de 60 min en bodega sin ser despachado.' },
@@ -3179,6 +3187,12 @@ function computeEstado(route) {
     if (llegadaDT > horaBaseDockOverdue) horaBaseDockOverdue = llegadaDT;
     var elapsedDesdeBaseDockOverdue = minutesDiff(state.now, horaBaseDockOverdue);
     if (elapsedDesdeBaseDockOverdue > 60) return { code: 'dock_overdue', label: estadoLabel('dock_overdue'), elapsed: elapsedDesdeBaseDockOverdue };
+    /* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'": milestone de un solo clic (ver
+       asignarRuta) entre "Llegó a Bodega" y "Despachado" -- se evalúa DESPUÉS de dock_overdue a propósito
+       (el SLA de Demora en Despacho sigue corriendo igual, con o sin ruta asignada) y ANTES de la
+       clasificación por puntualidad de llegada (late_arrival/tolerance_arrival/in_dock), que deja de verse
+       una vez Bodega confirma la asignación. */
+    if (route.rutaAsignada) return { code: 'con_ruta_asignada', label: estadoLabel('con_ruta_asignada'), elapsed: elapsed };
     if (isLlegadaTarde(route)) return { code: 'late_arrival', label: estadoLabel('late_arrival'), elapsed: elapsed };
     if (minutesDiff(llegadaDT, parseDT(route.fecha, route.hora)) > 0) return { code: 'tolerance_arrival', label: estadoLabel('tolerance_arrival'), elapsed: elapsed };
     return { code: 'in_dock', label: estadoLabel('in_dock'), elapsed: elapsed };
@@ -3511,6 +3525,8 @@ var EVENTO_CODES = {
   'enroque:solicitada': 'SOLICITUD_ENROQUE', 'enroque:aprobada': 'APROBACION_ENROQUE', 'enroque:rechazada': 'RECHAZO_ENROQUE',
   'arribo_aliado:aprobada': 'CHECK_IN_BODEGA', 'arribo_aliado:hora_corregida': 'CHECK_IN_BODEGA_CORREGIDO', 'arribo_aliado:sin_llegar': 'ARRIBO_NO_CONFIRMADO',
   'llegada:registrada': 'CHECK_IN_BODEGA', 'salida:despachado': 'DESPACHO_FINAL', 'retiro:retirado': 'RETIRO_SIN_CARGUE',
+  /* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'". */
+  'ruta_asignada:asignada': 'RUTA_ASIGNADA',
   'justificacion:justificado': 'JUSTIFICACION_RETRASO', 'reversion:revertido': 'REVERSION_ESTADO',
   'novedad_elementos:reportada': 'NOVEDAD_ELEMENTOS_REPORTADA', 'novedad_elementos:resuelta_reemplazo': 'RESOLUCION_NOVEDAD_ELEMENTOS', 'novedad_elementos:resuelta_excepcion': 'RESOLUCION_NOVEDAD_ELEMENTOS',
   'resolucion_alerta:falla_tecnica': 'EXONERACION_ALERTA', 'resolucion_alerta:reemplazo_extemporaneo': 'EXONERACION_ALERTA',
@@ -4474,7 +4490,7 @@ function aplicarSolicitudGeneral(sol) {
        eso también debe limpiarse aquí (si no, el reemplazo heredaba la hora de llegada del mensajero
        bloqueado, saltándose su propia ventana de tolerancia). Si venía de ausencia pura (sin retirado ni
        noAutorizaDespacho), route.llegada ya era null. */
-    if (routeRe.retirado || routeRe.noAutorizaDespacho) { routeRe.retirado = false; routeRe.llegada = null; routeRe.salida = null; routeRe.retiroTramo = null; routeRe.retiroAlertaDesde = null; desvincularEventoGuionado(routeRe); }
+    if (routeRe.retirado || routeRe.noAutorizaDespacho) { routeRe.retirado = false; routeRe.llegada = null; routeRe.salida = null; routeRe.rutaAsignada = false; routeRe.rutaAsignadaEn = null; routeRe.retiroTramo = null; routeRe.retiroAlertaDesde = null; desvincularEventoGuionado(routeRe); }
     routeRe.noAutorizaDespacho = false; routeRe.motivoNoAutoriza = null; routeRe.noAutorizaDesde = null;
     routeRe.reemplazoPendienteTrasRetiro = false;
     /* Ver requerimiento "Complemento Regla de Negocio: Atribución de Responsabilidades...": si el reemplazo
@@ -4514,7 +4530,7 @@ function aplicarSolicitudGeneral(sol) {
       correo: sol.detalle.correo, sede: routeCr.sede, vehiculo: sol.detalle.vehiculo || routeCr.vehiculo
     }, { registrarAusentismo: true });
     var mensajeroSalienteReemplazoCr = resultadoReemplazoCr.mensajeroSaliente;
-    if (routeCr.retirado) { routeCr.retirado = false; routeCr.llegada = null; routeCr.salida = null; routeCr.retiroTramo = null; desvincularEventoGuionado(routeCr); }
+    if (routeCr.retirado) { routeCr.retirado = false; routeCr.llegada = null; routeCr.salida = null; routeCr.rutaAsignada = false; routeCr.rutaAsignadaEn = null; routeCr.retiroTramo = null; desvincularEventoGuionado(routeCr); }
     routeCr.noAutorizaDespacho = false; routeCr.motivoNoAutoriza = null;
     routeCr.reemplazoPendienteTrasRetiro = false;
     /* FIX "Inmutabilidad de Hora en Reemplazos" (mismo criterio que 'reemplazo_alerta', ver ese comentario):
@@ -5421,6 +5437,31 @@ function justificarRetraso(route, motivo) {
   state.statusCache[route.id] = 'justified';
   registrarHistorialCambio(route, { tipo: 'justificacion', accion: 'justificado', motivo: motivo, horaAnterior: null, horaPropuesta: null, por: state.user.nombre });
   pushRouteConAviso(route, 'Justificación no confirmada en la nube');
+}
+/* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'": transición de un solo clic, SIN modal ni
+   campos adicionales -- Bodega confirma que el mensajero ya tiene la ruta asignada, entre "Llegó a Bodega" y
+   el despacho final (ver rowHtmlDespacho/computeEstado). Mismo patrón de guardas/historial/push que
+   registrarSalida, justo abajo. */
+function asignarRuta(routeId) {
+  if (!canDo('despacho.manage')) return;
+  var route = state.turnos.find(function (r) { return r.id === routeId; });
+  if (!route) return;
+  if (!route.llegada || route.salida || route.retirado || route.rutaAsignada) return;
+  var estAsig = computeEstado(route);
+  if (estAsig.code === 'afectacion_confirmada' || estAsig.code === 'cancelled') {
+    toast('warn', 'Turno ya cerrado', route.id + ' ya no admite asignar ruta — su ciclo está terminado (' + estAsig.label + ').');
+    return;
+  }
+  route.rutaAsignada = true;
+  route.rutaAsignadaEn = fmtTimeHM(state.now);
+  registrarHistorialCambio(route, { tipo: 'ruta_asignada', accion: 'asignada', motivo: 'Ruta asignada al mensajero en bodega — ' + fmtTime12(route.rutaAsignadaEn) + '.', horaAnterior: null, horaPropuesta: null, por: state.user.nombre });
+  toast('ok', 'Ruta asignada', route.id + ' quedó con ruta asignada — listo para despachar.');
+  syncAndRender(true);
+  scPushRows('app_turnos', [route]).then(function (res) {
+    if (res && res.ok === false) {
+      toast('warn', 'Asignación no confirmada en la nube', route.id + ' se guardó localmente pero no se pudo sincronizar con Supabase — revisa tu conexión.');
+    }
+  });
 }
 function registrarSalida(routeId) {
   if (!canDo('departure.register')) return;
@@ -8374,7 +8415,17 @@ function rowHtmlDespacho(route) {
   } else if (puedeGestionar) {
     if (route.pendienteAprobacionPlanner) actions += '<span class="courier-sub">Pendiente de Aprobación por Planner</span>';
     if (!route.llegada && !bloqueado) primaryActions.push('<button data-act="despacho-llegada" data-id="' + route.id + '" data-tip="Llegó a Bodega">Llegó a Bodega</button>');
-    if (route.llegada && !route.salida && !bloqueado && !faltaElemento && !route.noAutorizaDespacho) primaryActions.push('<button data-act="salida" data-id="' + route.id + '" class="raised" data-tip="Marcar salida / despachado">Marcar Salida</button>');
+    /* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'": "Marcar Salida" se parte en 2 pasos de
+       un solo clic cada uno, sin modales ni campos adicionales -- "Asignar Ruta" (asignarRuta) confirma de
+       inmediato que el mensajero ya tiene la ruta asignada (route.rutaAsignada=true, ver computeEstado); una
+       vez asignada, el MISMO botón de despacho final reaparece como "Despachar" (misma acción 'salida' /
+       registrarSalida de siempre, solo cambia el texto/tooltip). Misma condición exacta que ya tenía "Marcar
+       Salida" para ambos pasos -- Maleta/Celular, Reportar Sin Elementos, No Se Autoriza Despacho y Se Retira
+       no dependen de rutaAsignada, así que siguen visibles/operativos sin cambios en los 2 pasos. */
+    if (route.llegada && !route.salida && !bloqueado && !faltaElemento && !route.noAutorizaDespacho) {
+      if (!route.rutaAsignada) primaryActions.push('<button data-act="asignar-ruta" data-id="' + route.id + '" class="raised" data-tip="Confirma que el mensajero ya tiene la ruta asignada, antes del despacho final">Asignar Ruta</button>');
+      else primaryActions.push('<button data-act="salida" data-id="' + route.id + '" class="raised" data-tip="Registrar despacho final hacia ruta">Despachar</button>');
+    }
     if (((!bloqueado && !faltaElemento) || novedadVencida) && !route.noAutorizaDespacho) primaryActions.push('<button data-act="despacho-retiro" data-id="' + route.id + '" class="danger" data-tip="Se retira sin cargue">Se Retira</button>');
     if (route.llegada && !route.salida && !bloqueado && faltaElemento) {
       if (route.novedadElementos) actions += '<span class="courier-sub">Novedad reportada — esperando Planner/Aliado</span>';
@@ -8503,6 +8554,11 @@ function registrarLlegadaBodega(routeId) {
     return;
   }
   route.llegada = fmtTimeHM(state.now);
+  /* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'": una llegada NUEVA siempre arranca sin
+     ruta asignada (defensivo -- por diseño nunca debería quedar true aquí, pero evita que un valor residual
+     de un ciclo previo salte directo a "Con Ruta Asignada" sin pasar por "Llegó a Bodega"). */
+  route.rutaAsignada = false;
+  route.rutaAsignadaEn = null;
   desvincularEventoGuionado(route);
   /* Ver requerimiento "Optimización: Trazabilidad en Historial...", punto 1b: el hito de Llegada a Bodega
      ahora lleva su propia puntualidad explícita en el evento (no solo la hora) -- misma regla de tolerancia
@@ -8623,7 +8679,7 @@ function confirmarCambioMensajeroSitio(routeId, datos) {
   route.mensajeroId = findOrCreateMensajeroParaAliado(aliadoNombre, { nombre: datos.nombre, telefono: datos.telefono, cedula: datos.cedula, placa: datos.placa, sede: route.sede, vehiculo: route.vehiculo });
   resolverNovedadElementos(route, motivo, state.user.nombre);
   registrarHistorialCambio(route, { tipo: 'novedad_elementos', accion: 'resuelta_reemplazo', motivo: motivo, horaAnterior: null, horaPropuesta: null, por: state.user.nombre });
-  toast('ok', 'Reemplazo confirmado', route.id + ' — Bodega recuperó Marcar Salida y Se Retira.');
+  toast('ok', 'Reemplazo confirmado', route.id + ' — Bodega recuperó Asignar Ruta/Despachar y Se Retira.');
   closeModal();
   syncAndRender(true);
   pushRouteConAviso(route, 'Reemplazo no confirmado en la nube');
@@ -8646,7 +8702,7 @@ function confirmarAutorizarExcepcion(routeId, observacion) {
   var motivo = 'Excepción de despacho autorizada por Planner — ' + observacion;
   resolverNovedadElementos(route, motivo, state.user.nombre);
   registrarHistorialCambio(route, { tipo: 'novedad_elementos', accion: 'resuelta_excepcion', motivo: motivo, horaAnterior: null, horaPropuesta: null, por: state.user.nombre });
-  toast('ok', 'Excepción autorizada', route.id + ' — Bodega recuperó Marcar Salida y Se Retira.');
+  toast('ok', 'Excepción autorizada', route.id + ' — Bodega recuperó Asignar Ruta/Despachar y Se Retira.');
   closeModal();
   syncAndRender(true);
   pushRouteConAviso(route, 'Excepción no confirmada en la nube');
@@ -10741,6 +10797,10 @@ function revertirEstado(routeId, motivo) {
   } else if (route.llegada) {
     route.llegada = null;
     route.notificacionValidada = null;
+    /* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'": revertir "Llegó a Bodega" vuelve el
+       turno a "Programado" -- no debe conservar una ruta asignada de un ciclo que ya no existe. */
+    route.rutaAsignada = false;
+    route.rutaAsignadaEn = null;
   } else {
     /* Sin llegada ni salida registradas: el Incumplimiento Confirmado surgió puramente por tiempo (no hay
        un paso físico previo que restaurar), así que no hay un "estado anterior" más específico que el
@@ -15780,6 +15840,8 @@ function historialItemHtml(h) {
     falla_tecnica: 'Resuelta — Falla Técnica / Bodega Offline', reemplazo_extemporaneo: 'Resuelta — Reemplazo Extemporáneo Aprobado',
     creado: 'Turno creado', registrada: 'Llegada registrada', despachado: 'Despacho final registrado',
     retirado: 'Mensajero se retiró sin cargue', justificado: 'Retraso justificado',
+    /* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'". */
+    asignada: 'Ruta asignada al mensajero',
     reportada: 'Reportada por Bodega', resuelta_reemplazo: 'Resuelta — Reemplazo en Sitio (Aliado)', resuelta_excepcion: 'Resuelta — Excepción Autorizada (Planner)',
     revertido: 'Estado revertido por el Planner', desasignado: 'Mensajero desasignado',
     hora_corregida: 'Hora Corregida' + (h.rol ? ' por ' + h.rol : ''), sin_llegar: 'Registrado Sin Llegar' + (h.rol ? ' por ' + h.rol : ''),
@@ -15817,6 +15879,8 @@ function historialItemHtml(h) {
     resolucion_alerta: Auth.getUserRole() === 'ALIADO' ? 'Resolución de Alerta (Justificado por Operación)' : 'Resolución de Alerta (Excepción — Exonerado)',
     creacion: 'Creación del turno', llegada: 'Llegada a bodega', salida: 'Despacho final', retiro: 'Retiro sin cargue',
     justificacion: 'Justificación de retraso', novedad_elementos: 'Novedad de Elementos (Maleta/Celular)',
+    /* Ver requerimiento "Nuevo Estado Operacional 'Con Ruta Asignada'". */
+    ruta_asignada: 'Ruta Asignada en Bodega',
     reversion: 'Revertir Estado (Planner)',
     /* Ver requerimiento "Mejoras de UI, Auditoría de Trazabilidad y Control de Acceso...", punto 3 --
        mismos 4 tipos que faltaban en accionLabel (ver comentario arriba), antes caían en el fallback
@@ -16879,7 +16943,7 @@ function matrizIncidentesPanelHtml(incluirExonerar) {
      Cuota/SLA, sin ningún detalle financiero. La distinción real CO/MX en los datos (sustitucionPenaltyInfo/
      dockOverduePagoInfo) no se toca -- solo el copy de esta tabla de referencia. */
   var rows = [
-    ['Demora en Despacho', 'Sistema automático', 'Bodega', 'Despachar al mensajero ("Marcar Salida") o registrar su retiro ("Se Retira") para cerrar el ciclo — el estado no se cierra solo por tiempo, permanece activo hasta esa acción.', 'SLA de Bodega afectado + se registra <strong>Tiempo de Espera</strong> desde el minuto 60 de espera.', 'Solo se marca la afectación de SLA de Bodega.'],
+    ['Demora en Despacho', 'Sistema automático', 'Bodega', 'Despachar al mensajero ("Asignar Ruta" y luego "Despachar") o registrar su retiro ("Se Retira") para cerrar el ciclo — el estado no se cierra solo por tiempo, permanece activo hasta esa acción.', 'SLA de Bodega afectado + se registra <strong>Tiempo de Espera</strong> desde el minuto 60 de espera.', 'Solo se marca la afectación de SLA de Bodega.'],
     ['Ausencia Definitiva / Incumplimiento Confirmado', 'Sistema automático', 'Aliado', ausenciaAccion, 'Se registra +1 incumplimiento en Cumplimiento y Calidad del Aliado y cae su Cobertura de Cuota, por ausencia sin gestión — responsabilidad del Aliado frente a Melonn.', 'Afecta métrica de Cobertura de Cuota y SLA de Bodega.'],
     ['Cancelación sin Reemplazo Confirmado', 'Sistema automático', 'Aliado', 'El Aliado canceló al mensajero asignado pero no llegó a confirmar un reemplazo válido con el botón <strong>Reasignar</strong>/<strong>Confirmar Reemplazo</strong> de Alertas Activas antes de que venciera la ventana de sustitución (T0 + 120 min) — el ciclo cierra solo.', 'Se registra +1 incumplimiento y cae la Cobertura de Cuota, por vencimiento de la ventana de sustitución tras la cancelación — responsabilidad del Aliado frente a Melonn.', 'Afecta métrica de Cobertura de Cuota y SLA de Bodega.'],
     ['Retiro en Bodega', 'Acción manual', 'Aliado (según tramo)', 'Bodega registra el retiro ("Se Retira") con el tiempo de espera en bodega desde la llegada. Tramo 1 (&lt; 1h, Gabela) y Tramo 2 (1-2h, Espera) requieren que el Aliado confirme un reemplazo desde Alertas Activas; Tramo 3 (&ge; 2h, Espera Prolongada) no pide reemplazo — el ciclo cierra sin más gestión.', 'Tramo 1: atribuible al Aliado. Tramos 2 y 3: responsabilidad de Melonn — el Tramo 3 además queda registrado como espera prolongada en bodega (la demora fue de bodega, no del mensajero).', 'Mismo criterio de tramos y responsabilidad — solo afectación de indicadores de servicio.'],
@@ -17213,7 +17277,8 @@ function ayudaContentByRole(role) {
         '<li>Las filas de conductores se ordenan dinámicamente por <strong>orden de llegada</strong> en cuanto registran su ingreso — la operación se gestiona en una única Bodega / Zona Común de Despacho.</li>' +
         '<li>Usa <strong>Llegó a Bodega</strong> para registrar la hora exacta de ingreso del conductor; el estado pasa automáticamente a "A Tiempo" si ingresó dentro de la hora pactada, o a "Llegada Tarde" si ingresó después.</li>' +
         '<li>El toggle <strong>Maleta</strong> (Sí/No) solo está disponible para vehículos tipo Moto.</li>' +
-        '<li>Usa <strong>Marcar Salida</strong> para registrar la hora exacta de despacho; el estado pasa a "Despachado" y la fila queda de solo lectura.</li>' +
+        '<li>Usa <strong>Asignar Ruta</strong> en cuanto confirmes la ruta del conductor (un solo clic, sin datos adicionales): el estado pasa a <strong>"Con Ruta Asignada"</strong>. Maleta/Celular y el resto de acciones (Reportar Sin Elementos, No Se Autoriza Despacho, Se Retira) siguen disponibles igual que antes de asignar la ruta.</li>' +
+        '<li>Usa <strong>Despachar</strong> (reemplaza al botón "Asignar Ruta" una vez usado) para registrar la hora exacta de despacho final; el estado pasa a "Despachado" y la fila queda de solo lectura.</li>' +
         '<li>Usa <strong>Se Retira</strong> cuando el conductor abandona la bodega sin completar el cargue: el motivo del retiro es obligatorio y queda guardado en Observaciones.</li>' +
         '<li>El botón <strong>📋</strong> junto a los datos del conductor copia al portapapeles su Nombre, CÉDULA / INE, Teléfono, Placa y Correo.</li>' +
         '<li>En "Operación del Día" ves el banner informativo <strong>"Cualquier modificación o cancelación de turnos en vivo aprobada para tu bodega la puedes consultar desde el módulo \'Solicitudes y Cambios\'."</strong>, justo debajo de los filtros y encima de las tarjetas KPI — nunca te invita a "enviar una solicitud", ya que tu bandeja ahí es de solo consulta.</li>' +
@@ -17355,7 +17420,7 @@ function ayudaContentByRole(role) {
     );
     panels.programacion.push(
       '<section class="panel"><p class="panel-title">Programación (Bodega / Zona Común de Despacho) — modo espejo</p><ol class="help-steps">' +
-        '<li>Ves exactamente la misma tabla que Planner y Bodega, en modo <strong>Historial del Mes</strong> permanente — "Operación del Día" no aplica a tu rol, así que no tienes el toggle Hoy/Mañana ni botones de acción de ningún tipo (ni "Llegó a Bodega", ni "Marcar Salida", ni "Se Retira").</li>' +
+        '<li>Ves exactamente la misma tabla que Planner y Bodega, en modo <strong>Historial del Mes</strong> permanente — "Operación del Día" no aplica a tu rol, así que no tienes el toggle Hoy/Mañana ni botones de acción de ningún tipo (ni "Llegó a Bodega", ni "Asignar Ruta", ni "Despachar", ni "Se Retira").</li>' +
         '<li>La columna <strong>Observaciones</strong> muestra, igual que a Planner y Bodega, la nota automática del sistema y cualquier <strong>nota manual</strong> que Bodega haya agregado (prefijo "Nota manual:") — para tu rol es siempre de solo lectura, sin ícono de edición.</li>' +
       '</ol></section>'
     );
@@ -21780,6 +21845,7 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'toggle-detalle-cumplimiento-mensajero') toggleCumplimientoAliadoFlatDetalle(id);
     else if (act === 'atiempo-microfiltro') setAtiempoMicroFiltro(id);
     else if (act === 'llegada') openLlegadaModal(id);
+    else if (act === 'asignar-ruta') asignarRuta(id);
     else if (act === 'salida') registrarSalida(id);
     else if (act === 'justificar') openJustificarModal(id);
     else if (act === 'editar') openRutaModal(id);
