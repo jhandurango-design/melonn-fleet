@@ -3276,6 +3276,16 @@ function turnosProgramadosCount(sede, aliado, fecha, franja, vehiculo) {
        (Planner/Admin), el cupo NO se libera: el Aliado ya cumplió, así que sigue contando como cubierto — sin
        tocar el resto del mecanismo de cuotas (matriz, evaluarAprobacionCuota, cuotasActivoPais). */
     if (r.solicitud && r.solicitud.tipo === 'cancelacion' && r.solicitud.estado === 'aceptada' && r.solicitud.origen === 'aliado') return false;
+    /* FIX "Adicional Fantasma tras Rechazo de Planner" (reporte Cabify/Rapiboy, Avance de Cuotas Mañana): un
+       turno RECHAZADO por Planner (rechazarCuotaPlanner) también queda con solicitud.tipo==='cancelacion' /
+       estado==='aceptada', pero con origen:'planner' -- la exclusión de arriba (Sección 3A) nunca lo
+       alcanzaba, así que seguía contando en "actuales" y en el badge "+N Adicionales" para siempre, aunque
+       Planner ya lo hubiera denegado explícitamente (nunca llegó a ocupar una plaza real: a diferencia de una
+       cancelación operativa de Melonn sobre un turno YA confirmado, este nunca estuvo confirmado -- estaba
+       pendiente de aprobación y Planner dijo que no). route.cuotaAprobacion.estado==='rechazada' es la marca
+       exclusiva que deja rechazarCuotaPlanner (nunca una cancelación operativa común), así que excluirlo aquí
+       no toca el comportamiento de la Sección 3A para ningún otro caso. */
+    if (r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada') return false;
     return true;
   }).length;
 }
@@ -3358,6 +3368,10 @@ function turnosProgramadosGlobalCount(sede, aliado, fecha) {
     if (r.sede !== sede || r.fecha !== fecha) return false;
     if (getMensajero(r.mensajeroId).aliado !== aliado) return false;
     if (r.solicitud && r.solicitud.tipo === 'cancelacion' && r.solicitud.estado === 'aceptada' && r.solicitud.origen === 'aliado') return false;
+    /* FIX "Adicional Fantasma tras Rechazo de Planner" -- ver mismo comentario en turnosProgramadosCount. El
+       total GLOBAL (base del badge agregado "+N Adicionales" y de checkCuotaGlobalExceso) tenía el mismo
+       hueco. */
+    if (r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada') return false;
     return true;
   }).length;
 }
@@ -17919,6 +17933,34 @@ function cancelarCuotaProxima() {
    (cuotasMatrizVigenteHoy), igual que el resto de la plataforma; cualquier otra fecha (Mañana) usa la matriz
    en vivo -- mismo criterio que evaluarAprobacionCuota/checkCuotaExceso. Bodegas sin Cuotas activas para su
    país quedan fuera por completo (ninguna de estas reglas aplica si el módulo está apagado). */
+/* Ver requerimiento "Explicar Adicionales sin Franja en el Desglose" (reporte Cabify/Medellín — "no entiendo
+   en que franja se están posicionando", la suma del desglose nunca cuadraba contra el total de arriba): un
+   turno real puede caer en una hora/vehículo SIN ninguna fila en la matriz de cuotas de ese día (franja no
+   configurada para ese aliado+sede+día) -- turnosProgramadosGlobalCount SÍ lo cuenta en el total agregado
+   (ver FIX "Desfase de conteo en Avance de Cuotas"), pero antes era completamente invisible en "Ver desglose
+   por franja" (que solo listaba las franjas con fila en la matriz), así que la suma de las franjas nunca
+   cuadraba contra el total mostrado arriba. Se agrega aquí una entrada sintética por cada franja+vehículo
+   real sin cuota configurada (cuota:0, fueraDeFranja:true -- ver cuotasDesgloseHtml), con el mismo criterio
+   de exclusión que turnosProgramadosGlobalCount (cancelación aceptada del propio Aliado, rechazo de Planner)
+   para no inflar el desglose con turnos que ya no cuentan. */
+function cuotasAgregarFranjasFueraDeMatriz(franjas, sede, aliado, fecha) {
+  var country = countryForSede(sede);
+  var yaListadas = {};
+  franjas.forEach(function (f) { yaListadas[f.franja + '|' + f.vehiculo] = true; });
+  var fueraDeMatriz = {};
+  state.turnos.forEach(function (r) {
+    if (r.sede !== sede || r.fecha !== fecha) return;
+    if (getMensajero(r.mensajeroId).aliado !== aliado) return;
+    if (r.solicitud && r.solicitud.tipo === 'cancelacion' && r.solicitud.estado === 'aceptada' && r.solicitud.origen === 'aliado') return;
+    if (r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada') return;
+    var franjaReal = franjaForHora(r.hora, country);
+    var key = franjaReal + '|' + r.vehiculo;
+    if (yaListadas[key]) return;
+    if (!fueraDeMatriz[key]) fueraDeMatriz[key] = { franja: franjaReal, vehiculo: r.vehiculo, cuota: 0, actuales: 0, fueraDeFranja: true };
+    fueraDeMatriz[key].actuales++;
+  });
+  Object.keys(fueraDeMatriz).forEach(function (k) { franjas.push(fueraDeMatriz[k]); });
+}
 function cuotasProgresoPorSede(aliado, fecha) {
   var dia = diaSemanaKey(fecha);
   if (!dia) return [];
@@ -17939,6 +17981,7 @@ function cuotasProgresoPorSede(aliado, fecha) {
      franja/tipología base (ver descalceFranjaAlerta en evaluarAprobacionCuota/submitTurno) -- aunque la cuota
      GLOBAL ya esté cubierta, el desglose por franja de abajo puede no coincidir con la matriz pactada. */
   Object.keys(porSede).forEach(function (s) {
+    cuotasAgregarFranjasFueraDeMatriz(porSede[s].franjas, s, aliado, fecha);
     porSede[s].franjas.sort(function (a, b) { return a.franja < b.franja ? -1 : 1; });
     /* FIX "Falso positivo en Descalce de Franja" (reporte Rapiboy/Bogotá, 2026-10-21): descalceFranjaAlerta
        se marca UNA VEZ al crear/editar un turno fuera de su franja base y nunca se limpiaba aunque el turno
@@ -17992,6 +18035,7 @@ function cuotasProgresoPorAliadoManana(sedeFiltro) {
      cuotasProgresoPorSede, agregado aquí por aliado a través de todas sus bodegas con cuota activa. */
   Object.keys(porAliado).forEach(function (a) {
     var sedesDeEsteAliado = Object.keys(sedesPorAliado[a]);
+    if (sedeFiltro) cuotasAgregarFranjasFueraDeMatriz(porAliado[a].franjas, sedeFiltro, a, TOMORROW_STR);
     porAliado[a].franjas.sort(function (x, y) { return x.franja < y.franja ? -1 : 1; });
     /* Mismo FIX "Falso positivo en Descalce de Franja" que cuotasProgresoPorSede (ver ese comentario). */
     porAliado[a].descalce = state.turnos.some(function (r) {
@@ -18028,6 +18072,7 @@ function cuotasProgresoPorBodegaYAliadoManana() {
   return Object.keys(porSede).sort().map(function (sede) {
     var aliados = Object.keys(porSede[sede]).sort().map(function (a) {
       var rec = porSede[sede][a];
+      cuotasAgregarFranjasFueraDeMatriz(rec.franjas, sede, a, TOMORROW_STR);
       rec.franjas.sort(function (x, y) { return x.franja < y.franja ? -1 : 1; });
       /* Mismo FIX "Falso positivo en Descalce de Franja" que cuotasProgresoPorSede (ver ese comentario). */
       rec.descalce = state.turnos.some(function (r) {
@@ -18065,6 +18110,7 @@ function cuotasProgresoPorAliadoHoy(sedeFiltro) {
   });
   Object.keys(porAliado).forEach(function (a) {
     var sedesDeEsteAliado = Object.keys(sedesPorAliado[a]);
+    if (sedeFiltro) cuotasAgregarFranjasFueraDeMatriz(porAliado[a].franjas, sedeFiltro, a, TODAY_STR);
     porAliado[a].franjas.sort(function (x, y) { return x.franja < y.franja ? -1 : 1; });
     porAliado[a].descalce = state.turnos.some(function (r) {
       return r.fecha === TODAY_STR && r.descalceFranjaAlerta && sedesDeEsteAliado.indexOf(r.sede) !== -1 && getMensajero(r.mensajeroId).aliado === a &&
@@ -18091,6 +18137,7 @@ function cuotasProgresoPorBodegaYAliadoHoy() {
   return Object.keys(porSede).sort().map(function (sede) {
     var aliados = Object.keys(porSede[sede]).sort().map(function (a) {
       var rec = porSede[sede][a];
+      cuotasAgregarFranjasFueraDeMatriz(rec.franjas, sede, a, TODAY_STR);
       rec.franjas.sort(function (x, y) { return x.franja < y.franja ? -1 : 1; });
       rec.descalce = state.turnos.some(function (r) {
         return r.sede === sede && r.fecha === TODAY_STR && r.descalceFranjaAlerta && getMensajero(r.mensajeroId).aliado === a &&
@@ -18133,6 +18180,15 @@ function cuotasDesgloseHtml(key, sede, franjas) {
   var panel = '<div class="cuotas-resumen-desglose">' +
     '<div class="cuotas-resumen-desglose-header"><button type="button" class="cuotas-desglose-cerrar" data-act="cerrar-cuotas-desglose" data-key="' + key + '" data-tip="Cerrar desglose">✕</button></div>' +
     '<ul>' + franjas.map(function (f) {
+      /* Franja real sin ninguna fila en la matriz de cuotas de ese día (ver cuotasAgregarFranjasFueraDeMatriz)
+         -- cuota:0 no es "sin iniciar" (rojo) ni "completo" (verde), es capacidad desplegada FUERA de lo
+         pactado; se marca en ámbar con su propia etiqueta y el badge de Adicionales directo sobre el total
+         real (no hay "cuota" contra la cual comparar). Esto es lo que antes faltaba en el desglose y hacía
+         que la suma nunca cuadrara contra el total agregado de arriba. */
+      if (f.fueraDeFranja) {
+        return '<li class="descalce-franja-item">' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(sede))) +
+          ' <em>(sin cupo contratado en esta franja)</em>: ' + f.actuales + cuotasSobrecupoBadgeHtml(f.actuales, 0) + '</li>';
+      }
       /* Ver requerimiento "Semaforización Visual por Estado": mismo criterio de 3 colores que el resto del
          widget (cuotasEstadoManana) -- Completo (verde, sin clase extra, color por defecto del <li>),
          Incompleto/A medias (ámbar, descalce-franja-item) o Sin iniciar/cero recursos (rojo, vacio-franja-item). */
