@@ -959,13 +959,25 @@ function scPullAll() {
          scDeleteRows() todavía sin confirmar resucita la fila que el usuario acaba de eliminar. */
       var turnosBorrandose = scTablasConBorradoEnVuelo['app_turnos'] || {};
       var turnosRemotos = deduplicarTurnosPorAsignacion(turnos).filter(function (t) { return !turnosBorrandose[t.id]; });
-      /* Ver scPushRows/scTablasConAltaEnVuelo (mismo FIX de Cabify): preserva cualquier turno creado/
-         editado EN ESTA pestaña cuyo scPushRows() todavía no se haya confirmado y que el pull remoto
-         todavía no traiga. */
+      /* FIX "Solicitud de Adicional reaparece tras Aprobar/Rechazar" (reporte Planner): el comentario de esta
+         protección siempre dijo "creado/editado", pero el código de abajo solo cubría el caso ALTA (un turno
+         NUEVO, ausente del pull remoto porque su INSERT todavía no comprometía) -- nunca el caso EDICIÓN de un
+         turno YA existente (ej. aprobarCuotaPlanner/rechazarCuotaPlanner mutando pendienteAprobacionPlanner):
+         ahí el id SÍ aparece en turnosRemotos (con el valor VIEJO, porque el UPDATE en vuelo todavía no
+         comprometía), así que el filtro "!idsTurnosRemotos[t.id]" nunca disparaba y el reemplazo en bloque de
+         abajo adoptaba la copia remota desactualizada -- la fila "resucitaba" en la Bandeja de Solicitudes
+         unos segundos después, obligando a un segundo clic. Ahora, para cualquier id con un push todavía en
+         vuelo, se usa la copia LOCAL (la más reciente -- es literalmente lo que se está subiendo) en lugar de
+         la que trajo este pull, sin importar si ese id ya existía remotamente o no. */
+      var turnosLocalesPorId = {};
+      state.turnos.forEach(function (t) { turnosLocalesPorId[t.id] = t; });
+      var turnosRemotosResueltos = turnosRemotos.map(function (t) {
+        return (altaTurnosEnVueloFoto[t.id] && turnosLocalesPorId[t.id]) ? turnosLocalesPorId[t.id] : t;
+      });
       var idsTurnosRemotos = {};
-      turnosRemotos.forEach(function (t) { idsTurnosRemotos[t.id] = true; });
+      turnosRemotosResueltos.forEach(function (t) { idsTurnosRemotos[t.id] = true; });
       var turnosLocalesEnVuelo = state.turnos.filter(function (t) { return altaTurnosEnVueloFoto[t.id] && !idsTurnosRemotos[t.id]; });
-      state.turnos = turnosRemotos.concat(turnosLocalesEnVuelo);
+      state.turnos = turnosRemotosResueltos.concat(turnosLocalesEnVuelo);
       changed = true;
     }
     if (solicitudesGenerales && solicitudesGenerales.length) {
@@ -2386,6 +2398,26 @@ var MESES_LARGO = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio
 function fmtDateLong(fechaStr) {
   var p = fechaStr.split('-'); var y = parseInt(p[0], 10), mo = parseInt(p[1], 10), d = parseInt(p[2], 10);
   return d + ' de ' + MESES_LARGO[mo - 1] + ' de ' + y;
+}
+/* Formato corto "DD Mon" (ej. "28 Oct") -- ver requerimiento "Claridad Visual en Fecha de la Solicitud (Hoy
+   vs. Mañana)": fmtDateLong ("28 de octubre de 2026") es demasiado largo para un badge compacto de fila. */
+function fmtDateCorta(fechaStr) {
+  var p = fechaStr.split('-'); var mo = parseInt(p[1], 10), d = parseInt(p[2], 10);
+  var abrev = MESES_LARGO[mo - 1].slice(0, 3);
+  return d + ' ' + abrev.charAt(0).toUpperCase() + abrev.slice(1);
+}
+/* Badge explícito con la fecha OPERATIVA de la solicitud (route.fecha/sol.fecha -- TODAY_STR o
+   TOMORROW_STR), distinto de "solicitadaTxt" (CUÁNDO se envió la solicitud, casi siempre HOY sin importar
+   para qué día aplica). Ver requerimiento "Claridad Visual en Fecha de la Solicitud (Hoy vs. Mañana)": un
+   Aliado puede pedir un Adicional a mediodía para la programación de MAÑANA -- sin este badge, el Planner no
+   distinguía de un vistazo si una fila de la Bandeja de Solicitudes aplicaba a la operación de hoy mismo o a
+   la de mañana. Reutilizado por las 3 fuentes de la Bandeja Unificada (unifiedFromRouteSolicitud/
+   unifiedFromGeneral/unifiedFromCuota) solo en sus filas PENDIENTES -- el historial ya muestra la fecha
+   resuelta por su cuenta y no necesita este distintivo. */
+function fechaOperacionBadgeHtml(fecha) {
+  if (fecha === TODAY_STR) return ' <span class="badge badge-warn" data-tip="Esta solicitud aplica a la operación de HOY.">Para Hoy (' + fmtDateCorta(fecha) + ')</span>';
+  if (fecha === TOMORROW_STR) return ' <span class="badge badge-justified" data-tip="Esta solicitud aplica a la operación de MAÑANA.">Para Mañana (' + fmtDateCorta(fecha) + ')</span>';
+  return '';
 }
 /* Formato largo para el Rango de Fechas de Historial (ver historialRangoPreset) — un solo día ("Ayer") se
    muestra igual que fmtDateLong; un rango real muestra ambos extremos unidos por un guion largo. */
@@ -10906,10 +10938,24 @@ function revertirEstado(routeId, motivo) {
    país. Aprobar simplemente "descongela" el turno: quita la bandera y computeEstado retoma el ciclo normal
    por tiempo/llegada, sin tocar ningún otro dato. Rechazar reutiliza el mismo mecanismo que ya usa Cancelar
    (route.solicitud aceptada/cancelacion) — la fila nunca se elimina, para conservar trazabilidad completa. */
+/* Ver requerimiento "Corrección del Bug de Reaparición al Aprobar (Race Condition)": botones hallados por
+   data-act+data-id (ver actionsHtml en unifiedFromCuota) -- se deshabilitan de inmediato, ANTES de tocar
+   state o disparar el push, mismo criterio ya establecido en submitTurno ("FIX Ajustes de UX para
+   RappiBoy": feedback instantáneo al primer clic, re-clic mientras sigue en vuelo se ignora directo). */
+function botonesCuotaAprobacion(routeId) {
+  return {
+    aprobar: document.querySelector('button[data-act="cuota-aprobacion-aprobar"][data-id="' + routeId + '"]'),
+    rechazar: document.querySelector('button[data-act="cuota-aprobacion-rechazar"][data-id="' + routeId + '"]')
+  };
+}
 function aprobarCuotaPlanner(routeId) {
   if (!canDo('solicitud.resolve.general')) return;
   var route = state.turnos.find(function (r) { return r.id === routeId; });
   if (!route || !route.pendienteAprobacionPlanner) return;
+  var btns = botonesCuotaAprobacion(routeId);
+  if (btns.aprobar && btns.aprobar.disabled) return;
+  if (btns.aprobar) { btns.aprobar.disabled = true; btns.aprobar.textContent = 'Aprobando…'; }
+  if (btns.rechazar) btns.rechazar.disabled = true;
   route.pendienteAprobacionPlanner = false;
   /* route.cuotaAprobacion: marca puramente aditiva de trazabilidad para la Bandeja Unificada de Solicitudes
      (ver unifiedFromCuota/renderSolicitudes) — nunca toca evaluarAprobacionCuota ni ningún otro cálculo del
@@ -10925,14 +10971,23 @@ function aprobarCuotaPlanner(routeId) {
     motivo: 'Planner aprobó la programación (' + cuotaCausalFrase(route.pendienteAprobacionMotivo) + '); el turno retoma el ciclo operativo normal.',
     horaAnterior: null, horaPropuesta: null, por: state.user.nombre
   });
-  toast('ok', 'Programación aprobada', route.id + ' retomó el ciclo operativo normal.');
-  scPushRows('app_turnos', [route]);
-  syncAndRender(true);
+  /* Ver FIX en scPullAll/altaTurnosEnVueloFoto (mismo requerimiento): ese es el cierre REAL de la carrera
+     contra un pull de foco/visibilitychange/autoguardado concurrente -- este await es una segunda capa,
+     puramente de UX (el toast/re-render de ESTA pestaña esperan la confirmación real en vez de asumirla),
+     nunca el único mecanismo de protección. */
+  scPushRows('app_turnos', [route]).then(function () {
+    toast('ok', 'Programación aprobada', route.id + ' retomó el ciclo operativo normal.');
+    syncAndRender(true);
+  });
 }
 function rechazarCuotaPlanner(routeId) {
   if (!canDo('solicitud.resolve.general')) return;
   var route = state.turnos.find(function (r) { return r.id === routeId; });
   if (!route || !route.pendienteAprobacionPlanner) return;
+  var btns = botonesCuotaAprobacion(routeId);
+  if (btns.rechazar && btns.rechazar.disabled) return;
+  if (btns.rechazar) { btns.rechazar.disabled = true; btns.rechazar.textContent = 'Rechazando…'; }
+  if (btns.aprobar) btns.aprobar.disabled = true;
   route.pendienteAprobacionPlanner = false;
   route.solicitud = { tipo: 'cancelacion', estado: 'aceptada', origen: 'planner', motivo: 'Rechazado por Planner (' + cuotaCausalFrase(route.pendienteAprobacionMotivo) + ').', resueltoEn: fmtClock(state.now), resueltoFecha: TODAY_STR };
   /* Mismo marcador aditivo que aprobarCuotaPlanner (ver comentario arriba) — aquí coexiste con route.solicitud
@@ -10949,9 +11004,10 @@ function rechazarCuotaPlanner(routeId) {
     motivo: 'Planner rechazó la programación (' + cuotaCausalFrase(route.pendienteAprobacionMotivo) + '); el turno quedó Cancelado.',
     horaAnterior: null, horaPropuesta: null, por: state.user.nombre
   });
-  toast('warn', 'Programación rechazada', route.id + ' quedó Cancelado.');
-  scPushRows('app_turnos', [route]);
-  syncAndRender(true);
+  scPushRows('app_turnos', [route]).then(function () {
+    toast('warn', 'Programación rechazada', route.id + ' quedó Cancelado.');
+    syncAndRender(true);
+  });
 }
 /* Uso exclusivo Planner, desde Programación (Bodega / Zona Común de Despacho). La cancelación de rutas se gestiona
    aparte, desde el botón de cancelación del Consolidado. */
@@ -13032,6 +13088,10 @@ function unifiedFromRouteSolicitud(route, pendiente) {
     rec.solicitadoPorHtml = escapeHtml(nombreConRol(s.solicitadoPor) || s.solicitadoPor || '—');
     rec.motivoHtml = escapeHtml(s.motivo);
     rec.solicitadaTxt = (s.fecha ? fmtDateLong(s.fecha) + ' · ' : '') + s.solicitadoEn;
+    /* Ver requerimiento "Claridad Visual en Fecha de la Solicitud (Hoy vs. Mañana)": route.fecha (fecha
+       OPERATIVA del turno) -- nunca s.fecha, que es simplemente cuándo se envió la solicitud (siempre HOY,
+       sin importar para qué día aplica el turno referenciado). */
+    rec.tipoHtml += fechaOperacionBadgeHtml(route.fecha);
     var puedeResolver = canDo('solicitud.resolve') && (
       (state.user.role === 'ALIADO' && s.origen !== 'aliado') ||
       ((state.user.role === 'ADMIN' || state.user.role === 'PLANNER') && s.origen === 'aliado')
@@ -13106,6 +13166,23 @@ function solicitudGeneralDetalleHtml(sol) {
   if (sol.tipo === 'edicion_turno') base = d.routeId + ' — ' + base;
   return escapeHtml(base);
 }
+/* Ver requerimiento "Claridad Visual en Fecha de la Solicitud (Hoy vs. Mañana)": a diferencia de
+   unifiedFromRouteSolicitud (siempre tiene route.fecha a mano), las solicitudesGenerales no comparten una
+   única forma -- sol.fecha es SIEMPRE cuándo se envió (TODAY_STR), nunca el día operativo real. La fecha
+   operativa real vive en sol.detalle.fecha para los tipos que la traen de un payload de turno (nuevo_turno/
+   cupo_adicional/edicion_turno al crearse, ver submitTurno/procesarCargaMasivaTurnos), o se resuelve
+   consultando la ruta ya existente que referencian (reemplazo_alerta/reemplazo_cancelacion/edicion_turno al
+   desasignar, vía detalle.routeId) cuando el payload no trae .fecha directo. prolongacion/
+   reprogramacion_masiva no tienen una fecha operativa puntual ambigua -- sin badge para esos 2 (devuelve
+   null, fechaOperacionBadgeHtml ya maneja ese caso sin romper nada). */
+function fechaOperativaDeGeneral(sol) {
+  if (sol.detalle && sol.detalle.fecha) return sol.detalle.fecha;
+  if (sol.detalle && sol.detalle.routeId) {
+    var routeRef = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
+    if (routeRef) return routeRef.fecha;
+  }
+  return null;
+}
 function unifiedFromGeneral(sol) {
   var pendiente = sol.estado === 'pendiente';
   var rec = {
@@ -13123,6 +13200,7 @@ function unifiedFromGeneral(sol) {
        reprogramacion_masiva (ver requerimiento "Prompt Consolidador Maestro...", Bloque 3) es la ÚNICA
        excepción -- origen:'planner', así que "Solicitado por" debe mostrar a quien la envió (Planner), no al
        Aliado destinatario (que ya se identifica en la columna Aliado). */
+    rec.tipoHtml += fechaOperacionBadgeHtml(fechaOperativaDeGeneral(sol));
     rec.solicitadoPorHtml = sol.origen === 'planner' ? escapeHtml(nombreConRol(sol.solicitadoPor) || sol.solicitadoPor) : rec.aliadoHtml;
     rec.motivoHtml = escapeHtml(sol.motivo);
     rec.solicitadaTxt = (sol.fecha ? fmtDateLong(sol.fecha) + ' · ' : '') + sol.solicitadoEn;
@@ -13179,7 +13257,7 @@ function unifiedFromCuota(route, pendiente) {
   };
   if (pendiente) {
     var causalLabel = cuotaCausalLabel(route.pendienteAprobacionMotivo);
-    rec.tipoHtml = solicitudTipoBadgeHtml('cuota_festivo') + ' <span class="courier-sub">' + causalLabel + '</span>';
+    rec.tipoHtml = solicitudTipoBadgeHtml('cuota_festivo') + ' <span class="courier-sub">' + causalLabel + '</span>' + fechaOperacionBadgeHtml(route.fecha);
     /* Mismo criterio que unifiedFromGeneral: el cupo/festivo nace del propio registro del Aliado al
        programar su flota, nunca de Planner -- reutiliza aliadoHtml. */
     rec.solicitadoPorHtml = rec.aliadoHtml;
