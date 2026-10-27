@@ -976,6 +976,13 @@
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
               Nuevo Turno
             </button>
+            <!-- Ver requerimiento "Carga Masiva de Programación vía Excel/CSV": visible solo en "Mañana"
+                 (mismo criterio que #btnProgAcciones/Cargar Flota Recurrente -- ver renderProgramacion), al
+                 lado de "+ Nuevo Turno". Abre #modalCargaMasiva (ver abrirModalCargaMasiva en app.js). -->
+            <button class="btn btn-ghost" id="btnCargaMasiva" hidden>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M21 21H3"/></svg>
+              Carga Masiva
+            </button>
           </div>
         </div>
 
@@ -2577,6 +2584,57 @@
     </form>
   </div>
 
+  <!-- Ver requerimiento "Carga Masiva de Programación vía Excel/CSV" (ver plan en
+       .claude/plans/rippling-imagining-dove.md): Modal 1 -- selección del archivo + descarga de la plantilla
+       demo. El parseo (SheetJS) y las 3 fases de validación corren en memoria al elegir el archivo
+       (abrirModalCargaMasiva/manejarArchivoCargaMasiva en app.js); "Continuar" solo se habilita si el archivo
+       parseó sin errores de forma (Fase 0) y pasa a #modalCargaMasivaPreview. -->
+  <div class="modal" id="modalCargaMasiva">
+    <div class="modal-head"><h3>Carga Masiva de Programación</h3><button class="modal-close" data-close>&times;</button></div>
+    <div class="modal-body">
+      <p class="modal-note">Sube un archivo Excel (.xlsx) o CSV con tu programación de <strong>mañana</strong>. Nada se guarda todavía — primero verás un resumen de qué se va a crear antes de confirmar.</p>
+      <button type="button" class="btn btn-ghost" id="btnDescargarPlantillaCargaMasiva" style="margin-bottom:16px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M21 21H3"/></svg>
+        Descargar Plantilla Demo
+      </button>
+      <div class="field">
+        <label for="cargaMasivaArchivo">Archivo (.xlsx o .csv)</label>
+        <input type="file" id="cargaMasivaArchivo" accept=".xlsx,.csv">
+      </div>
+      <p class="modal-note" id="cargaMasivaResumenRapido" hidden></p>
+      <p class="modal-note" id="cargaMasivaErrorArchivo" hidden style="background:var(--danger-soft);color:var(--danger);"></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btnCargaMasivaContinuar" disabled>Continuar</button>
+    </div>
+  </div>
+
+  <!-- Modal 2 -- preview clasificado (Base / Adicional / Error) antes de persistir nada. Las filas Adicional
+       llevan un checkbox propio (ver cargaMasivaPreviewRowHtml/toggleCargaMasivaAdicional en app.js);
+       "Incluir todos los Adicionales" es un atajo que marca/desmarca todos a la vez, nunca oculta el control
+       por fila. "Aplicar y Guardar Programación" llama a procesarCargaMasivaTurnos con las filas Base + las
+       Adicionales marcadas. -->
+  <div class="modal modal-wide" id="modalCargaMasivaPreview">
+    <div class="modal-head"><h3>Revisar antes de guardar</h3><button class="modal-close" data-close>&times;</button></div>
+    <div class="modal-body">
+      <section class="metrics" id="cargaMasivaResumenMetrics"></section>
+      <label class="maleta-toggle" id="cargaMasivaIncluirAdicionalesField" style="font-weight:700;border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:8px;display:block;" hidden>
+        <input type="checkbox" id="cargaMasivaIncluirTodosAdicionales"> Incluir todos los Adicionales detectados (se enviarán a aprobación de Planner)
+      </label>
+      <div class="table-scroll">
+        <table id="cargaMasivaPreviewTable">
+          <thead><tr><th>Fila</th><th>Cédula</th><th>Nombre</th><th>Bodega</th><th>Vehículo</th><th>Hora</th><th>Clasificación</th><th></th></tr></thead>
+          <tbody id="cargaMasivaPreviewTbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" id="btnCargaMasivaVolver">Volver</button>
+      <button type="button" class="btn btn-primary" id="btnCargaMasivaConfirmar">Aplicar y Guardar Programación</button>
+    </div>
+  </div>
+
   <div class="modal" id="modalFlotaPropiaEditar">
     <div class="modal-head"><h3>Editar mensajero</h3><button class="modal-close" data-close>&times;</button></div>
     <form id="formFlotaPropiaEditar" class="modal-body">
@@ -3565,6 +3623,13 @@
      grecaptcha.execute() sin esperar un segundo onload -- ver intentarCredenciales/ejecutarVerificacionRecaptcha
      en app.js, que capturan el token en el submit de "Iniciar sesión". -->
 <script src="https://www.google.com/recaptcha/api.js?render=6Lfc7fItAAAAAJsxtExBkbiYkdVNbJat5V3yJrQe"></script>
+<!-- Ver requerimiento "Carga Masiva de Programación vía Excel/CSV": única dependencia externa del proyecto
+     para LEER un archivo subido por el Aliado (.xlsx/.csv) -- la app ya tiene un generador de .xlsx propio
+     escrito a mano (buildXlsxBlob/xlsxSheetXml en app.js) para EXPORTAR, pero parsear un .xlsx arbitrario
+     (formato ZIP+XML) a mano es mucho más riesgoso que escribirlo, así que esa dirección sí usa SheetJS. Se
+     usa SOLO del lado de lectura (XLSX.read/sheet_to_json en app.js) -- la plantilla demo que se descarga
+     sigue generándose 100% con el generador propio, sin depender de esta librería. -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 </body>

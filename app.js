@@ -9280,6 +9280,10 @@ function renderProgramacion() {
   } else {
     btnProgAcciones.hidden = true;
   }
+  /* Ver requerimiento "Carga Masiva de Programación vía Excel/CSV": mismo criterio que btnProgAcciones --
+     oculto por completo en "Hoy" (la carga masiva, igual que "Cargar Flota Recurrente", solo aplica a
+     "Mañana"). */
+  document.getElementById('btnCargaMasiva').hidden = state.progDay !== 'tomorrow';
   renderProgBanner();
   renderProgCuotasResumen();
   refreshProgFiltroBodegaOptions();
@@ -15163,10 +15167,10 @@ function eliminarFlotaHabitual() {
    DESPUÉS de completar el push (y el rollback si Supabase falla) con {ok, creados, omitidosPorCupo,
    adicionalesCreados, solicitudes, turnosNuevos, mensajerosNuevos, solicitudesGeneralesNuevas} -- el llamador
    decide el texto del toast; syncAndRender(true) ya corre aquí dentro cuando hubo algo que empujar. */
-function procesarCargaMasivaTurnos(entries, opciones) {
-  opciones = opciones || {};
-  var modoAdicional = opciones.modoAdicional || 'omitir';
-  var motivoContexto = opciones.motivoContexto || 'carga masiva';
+/* Extraído de procesarCargaMasivaTurnos (ver esa función, justo abajo) para que la clasificación del preview
+   de la carga por archivo (ver clasificarFilasCargaMasiva) pueda usar EXACTAMENTE el mismo criterio de
+   "ya programado" que la propia carga aplicará al confirmar -- nunca 2 copias que puedan desalinearse. */
+function cedulasYaProgramadasParaManana() {
   var fecha = TOMORROW_STR;
   var yaProgramados = {};
   routesInScope('tomorrow').forEach(function (r) {
@@ -15174,18 +15178,26 @@ function procesarCargaMasivaTurnos(entries, opciones) {
     if (m && m.cedula) yaProgramados[m.cedula] = true;
   });
   /* Ver requerimiento "Idempotencia / Control de Duplicados en Solicitudes al Planner" (reporte de Easyway/
-     Cabify, acumulación masiva de solicitudes pendientes): la rama "fuera de ventana" de abajo (ver
-     solMasiva) NO crea ningún turno, solo una fila en state.solicitudesGenerales -- así que yaProgramados
-     (que solo mira turnos reales, arriba) nunca detectaba que esa cédula YA tenía una solicitud en curso, y
-     cada carga repetida generaba una solicitud duplicada más para el mismo mensajero/fecha, sin límite. Se
-     suman aquí también las cédulas con una Solicitud General propia todavía 'pendiente' (nuevo_turno/
-     cupo_adicional) para esta misma fecha. */
+     Cabify, acumulación masiva de solicitudes pendientes): la rama "fuera de ventana" de procesarCargaMasivaTurnos
+     (ver solMasiva ahí) NO crea ningún turno, solo una fila en state.solicitudesGenerales -- así que
+     yaProgramados (que solo mira turnos reales, arriba) nunca detectaba que esa cédula YA tenía una solicitud
+     en curso, y cada carga repetida generaba una solicitud duplicada más para el mismo mensajero/fecha, sin
+     límite. Se suman aquí también las cédulas con una Solicitud General propia todavía 'pendiente'
+     (nuevo_turno/cupo_adicional) para esta misma fecha. */
   state.solicitudesGenerales.forEach(function (s) {
     if (s.estado !== 'pendiente' || s.aliado !== state.user.aliado) return;
     if ((s.tipo === 'nuevo_turno' || s.tipo === 'cupo_adicional') && s.detalle && s.detalle.fecha === fecha && s.detalle.cedula) {
       yaProgramados[s.detalle.cedula] = true;
     }
   });
+  return yaProgramados;
+}
+function procesarCargaMasivaTurnos(entries, opciones) {
+  opciones = opciones || {};
+  var modoAdicional = opciones.modoAdicional || 'omitir';
+  var motivoContexto = opciones.motivoContexto || 'carga masiva';
+  var fecha = TOMORROW_STR;
+  var yaProgramados = cedulasYaProgramadasParaManana();
   var creados = 0, omitidosPorCupo = 0, adicionalesCreados = 0, solicitudes = 0;
   /* Ver nota "Supabase" junto a submitTurno(): esta carga masiva tampoco empujaba nunca a app_turnos --
      se acumulan aquí todos los turnos nuevos de esta pasada para empujarlos juntos en un solo scPushRows
@@ -15348,6 +15360,298 @@ function ejecutarCargaFlotaHabitual(plantilla) {
     toast('ok', 'Flota Recurrente cargada', msg);
   });
 }
+
+/* ---------------- Carga Masiva de Programación vía Excel/CSV (Aliado) ----------------
+   Ver plan "Carga Masiva de Programación vía Excel/CSV" (.claude/plans/rippling-imagining-dove.md). 100%
+   client-side: el archivo se parsea en memoria (SheetJS, única dependencia externa nueva del proyecto, ver
+   <script> en index.html) y se descarta -- nunca se sube a Supabase Storage ni se crea nada "borrador" en la
+   nube. La confirmación final reutiliza procesarCargaMasivaTurnos (ver arriba), el mismo núcleo que ya usa
+   "Cargar Flota Recurrente", con opciones.modoAdicional:'crear_pendiente' (el Aliado ya decidió en el
+   preview cuáles Adicionales incluir). cargaMasivaPreviewState vive FUERA de `state` a propósito -- es
+   trabajo transitorio de un solo modal, nunca se persiste ni se lee desde ningún otro módulo (mismo criterio
+   que lastMetricsHtml, ver esa variable). */
+var cargaMasivaPreviewState = null;
+var CARGA_MASIVA_LIMITE_FILAS = 500;
+/* Encabezados esperados -- tolerante a variantes sin tilde (una plantilla editada a mano por el Aliado
+   puede perder los acentos sin querer al guardar como CSV desde algunos editores). */
+var CARGA_MASIVA_COLUMNAS = {
+  cedula: ['Cédula / INE', 'Cedula / INE', 'Cédula', 'Cedula'],
+  nombre: ['Nombre'],
+  telefono: ['Teléfono', 'Telefono'],
+  placa: ['Placa'],
+  correo: ['Correo Electrónico', 'Correo Electronico', 'Correo'],
+  sede: ['Bodega'],
+  vehiculo: ['Tipo de Vehículo', 'Tipo de Vehiculo'],
+  hora: ['Hora de Citación', 'Hora de Citacion', 'Hora']
+};
+function leerColumnaCargaMasiva(filaObj, claves) {
+  for (var i = 0; i < claves.length; i++) {
+    if (filaObj[claves[i]] != null && filaObj[claves[i]] !== '') return filaObj[claves[i]];
+  }
+  return '';
+}
+/* SheetJS puede entregar una celda de hora como string ("8:30"/"08:30 a. m."), como Date (si detectó
+   formato de hora/fecha en el .xlsx) o como número decimal (fracción de día, si la celda es numérica sin
+   formato reconocido, p. ej. 0.354166... = 08:30) -- se tolera cualquiera de las 3 formas. */
+function normalizarHoraCargaMasiva(valor) {
+  if (valor == null || valor === '') return null;
+  if (valor instanceof Date) return ('0' + valor.getHours()).slice(-2) + ':' + ('0' + valor.getMinutes()).slice(-2);
+  if (typeof valor === 'number' && isFinite(valor)) {
+    var totalMin = Math.round(valor * 24 * 60);
+    var hh = Math.floor(totalMin / 60) % 24, mm = totalMin % 60;
+    return ('0' + hh).slice(-2) + ':' + ('0' + mm).slice(-2);
+  }
+  var m = String(valor).trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  var h = parseInt(m[1], 10), mi = parseInt(m[2], 10);
+  if (isNaN(h) || isNaN(mi) || h > 23 || mi > 59) return null;
+  return ('0' + h).slice(-2) + ':' + ('0' + mi).slice(-2);
+}
+/* Fase 0 (ver plan, sección 3): valida la FORMA del archivo ya parseado por SheetJS (array de objetos
+   {encabezado: valorCelda}) -- nunca toca Supabase ni state.turnos/mensajeros, solo normaliza y marca
+   errores de forma por fila. Cédulas duplicadas DENTRO del archivo (el Aliado se equivocó al llenarlo) se
+   marcan en la 2ª+ aparición -- la 1ª sigue su curso normal hacia la Fase 1/2. */
+function parsearFilasCargaMasiva(filasCrudas) {
+  if (!filasCrudas.length) return { ok: false, error: 'El archivo no tiene ninguna fila con datos.' };
+  if (filasCrudas.length > CARGA_MASIVA_LIMITE_FILAS) {
+    return { ok: false, error: 'El archivo tiene ' + filasCrudas.length + ' filas -- el máximo por carga es ' + CARGA_MASIVA_LIMITE_FILAS + '. Divídelo en varios archivos.' };
+  }
+  var vistosCedula = {};
+  var filas = filasCrudas.map(function (filaObj, idx) {
+    var f = {
+      numeroFila: idx + 2, // +2: la fila 1 del archivo es el encabezado
+      cedula: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.cedula)).trim(),
+      nombre: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.nombre)).trim(),
+      telefono: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.telefono)).trim(),
+      placa: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.placa)).trim(),
+      correo: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.correo)).trim(),
+      sede: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.sede)).trim(),
+      vehiculo: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.vehiculo)).trim(),
+      hora: normalizarHoraCargaMasiva(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.hora)),
+      incluirAdicional: false
+    };
+    var errores = [];
+    if (!f.cedula) errores.push('Cédula vacía');
+    if (!f.nombre) errores.push('Nombre vacío');
+    if (!f.telefono) errores.push('Teléfono vacío');
+    if (!f.placa) errores.push('Placa vacía');
+    if (!f.sede) errores.push('Bodega vacía');
+    if (!f.vehiculo) errores.push('Tipo de Vehículo vacío');
+    if (!f.hora) errores.push('Hora de Citación inválida (formato esperado HH:MM)');
+    if (f.cedula) {
+      if (vistosCedula[f.cedula]) errores.push('Cédula duplicada dentro del archivo (ya aparece en la fila ' + vistosCedula[f.cedula] + ')');
+      else vistosCedula[f.cedula] = f.numeroFila;
+    }
+    f.erroresForma = errores;
+    return f;
+  });
+  return { ok: true, filas: filas };
+}
+/* Fase 1 (integridad contra el estado real) + Fase 2 (cuota y clasificación) -- ver plan, sección 3. Cada
+   fila queda clasificada como 'base' (se crea directo), 'adicional' (excede cupo/festivo/domingo/tipología
+   -- el Aliado decide incluirla en el preview, ver sección 4) o 'error' (nunca se crea). Reutiliza 1:1 los
+   mismos checks de integridad/cuota que ya corren en submitTurno/procesarCargaMasivaTurnos -- nunca
+   re-derivados a mano, para no arriesgar que esta carga quede desalineada de las reglas reales. */
+function clasificarFilasCargaMasiva(filas) {
+  var country = countryForAliado(state.user.aliado);
+  var sedesValidas = activeWarehouseIds(country);
+  var vehiculosValidos = vehiculosBaseForCountry(country);
+  var yaProgramados = cedulasYaProgramadasParaManana();
+  filas.forEach(function (f) {
+    if (f.erroresForma.length) { f.clasificacion = 'error'; f.motivo = f.erroresForma.join('; '); return; }
+    if (sedesValidas.indexOf(f.sede) === -1) { f.clasificacion = 'error'; f.motivo = 'Bodega "' + f.sede + '" no es una sede activa.'; return; }
+    if (vehiculosValidos.indexOf(f.vehiculo) === -1) { f.clasificacion = 'error'; f.motivo = 'Tipo de Vehículo "' + f.vehiculo + '" no existe en el catálogo.'; return; }
+    if (yaProgramados[f.cedula]) { f.clasificacion = 'error'; f.motivo = 'Ya existe un turno o solicitud pendiente para esta cédula en la fecha de mañana.'; return; }
+    var conflictoOtroAliado = mensajeroProgramadoPorOtroAliado({ cedula: f.cedula, placa: f.placa, correo: f.correo, nombre: f.nombre }, TOMORROW_STR, state.user.aliado);
+    if (conflictoOtroAliado) { f.clasificacion = 'error'; f.motivo = mensajeDuplicidadAliado(conflictoOtroAliado); return; }
+    var mensajeroExistente = state.mensajeros.find(function (m) { return m.aliado === state.user.aliado && m.cedula === f.cedula && !m.superseded; });
+    if (mensajeroExistente) {
+      var conflictoRetorno = turnoEnVentanaRetorno(mensajeroExistente.id, TOMORROW_STR, f.hora, null);
+      if (conflictoRetorno) { f.clasificacion = 'error'; f.motivo = 'Ventana de retorno no cumplida: ya tiene un turno a las ' + fmtTime12(conflictoRetorno.hora) + ' ese mismo día.'; return; }
+    }
+    if (!horaPerteneceAFranjaContratada(f.sede, state.user.aliado, f.vehiculo, f.hora, TOMORROW_STR)) {
+      f.clasificacion = 'error';
+      f.motivo = 'La hora ' + fmtTime12(f.hora) + ' no corresponde a una franja contratada para ' + f.sede + ' / ' + cuotasVehiculoLabel(f.vehiculo, country) + '.';
+      return;
+    }
+    var tipologiaNoHabilitadaMasiva = cuotasActivoPais(country) && !esFlotaPropia(state.user.aliado) && !tipologiaHabilitada(f.sede, state.user.aliado, f.vehiculo);
+    var aprobacion = tipologiaNoHabilitadaMasiva
+      ? { requiere: true, motivo: 'tipologia', detalle: 'Excepción de Tipología: ' + state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(f.vehiculo, country) + ' en ' + f.sede + '.' }
+      : evaluarAprobacionCuota(f.sede, state.user.aliado, f.vehiculo, f.hora, TOMORROW_STR);
+    if (aprobacion.requiere) {
+      f.clasificacion = 'adicional';
+      f.motivo = cuotaCausalLabel(aprobacion.motivo) + ': ' + aprobacion.detalle;
+    } else {
+      f.clasificacion = 'base';
+      f.motivo = null;
+    }
+  });
+  return filas;
+}
+/* Plantilla demo descargable (ver plan, sección 2) -- reutiliza el generador propio de .xlsx ya existente
+   (buildXlsxBlob/xlsxSheetXml, ver "Generador de .xlsx sin dependencias externas" más abajo en este archivo)
+   en vez de SheetJS: la ESCRITURA de un archivo fijo y simple no necesita la librería externa que sí hace
+   falta para LEER un archivo arbitrario subido por el usuario. */
+function generarPlantillaCargaMasivaDemo() {
+  if (!canDo('schedule.aliado.manage')) return;
+  var country = countryForAliado(state.user.aliado);
+  var headers = ['Cédula / INE', 'Nombre', 'Teléfono', 'Placa', 'Correo Electrónico', 'Bodega', 'Tipo de Vehículo', 'Hora de Citación'];
+  var filasEjemplo = [
+    ['900000001', 'Juan Pérez (ejemplo)', '3000000001', 'ABC001', 'juan.perez@ejemplo.com', activeWarehouseIds(country)[0] || '', vehiculosBaseForCountry(country)[0] || '', '08:00'],
+    ['900000002', 'María Gómez (ejemplo)', '3000000002', 'ABC002', 'maria.gomez@ejemplo.com', activeWarehouseIds(country)[0] || '', vehiculosBaseForCountry(country)[0] || '', '08:30']
+  ];
+  var instrucciones = [
+    ['Regla', 'Detalle'],
+    ['Solo para "Mañana"', 'Esta plantilla programa exclusivamente la Programación de Flota del día de mañana. No incluye columna de Fecha.'],
+    ['Bodegas válidas', activeWarehouseIds(country).join(', ')],
+    ['Tipos de Vehículo válidos', vehiculosBaseForCountry(country).join(', ')],
+    ['Hora de Citación', 'Formato HH:MM, en 24 horas (ej. 08:30, 14:00).'],
+    ['Campos obligatorios', 'Cédula / INE, Nombre, Teléfono, Placa, Bodega, Tipo de Vehículo y Hora de Citación. Correo es opcional.'],
+    ['Cédulas duplicadas', 'No repitas la misma Cédula / INE dos veces en el archivo -- la 2ª aparición se rechaza.']
+  ];
+  var blob = buildXlsxBlob([
+    { name: 'Plantilla', headers: headers, rows: filasEjemplo },
+    { name: 'Instrucciones', headers: instrucciones[0], rows: instrucciones.slice(1) }
+  ]);
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'melonn-fleet-plantilla-carga-masiva-' + state.user.aliado.replace(/[^a-z0-9]+/gi, '-').toLowerCase() + '.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+/* Modal 1 (ver plan, sección 4): abre el selector de archivo -- gate idéntico al de "Cargar Flota
+   Recurrente" (solo "Mañana"). */
+function abrirModalCargaMasiva() {
+  if (!canDo('schedule.aliado.manage')) return;
+  if (state.progDay !== 'tomorrow') return;
+  cargaMasivaPreviewState = null;
+  document.getElementById('cargaMasivaArchivo').value = '';
+  document.getElementById('cargaMasivaResumenRapido').hidden = true;
+  document.getElementById('cargaMasivaErrorArchivo').hidden = true;
+  document.getElementById('btnCargaMasivaContinuar').disabled = true;
+  openModal('modalCargaMasiva');
+}
+/* Parseo + clasificación (Fases 0/1/2), disparado por el 'change' de #cargaMasivaArchivo (ver wiring en
+   DOMContentLoaded). try/catch explícito: un archivo corrupto o con un formato que SheetJS no reconoce
+   nunca debe tirar una excepción no controlada ni dejar el modal en un estado roto. */
+function procesarArchivoCargaMasiva(file) {
+  var errorEl = document.getElementById('cargaMasivaErrorArchivo');
+  var resumenEl = document.getElementById('cargaMasivaResumenRapido');
+  var continuarBtn = document.getElementById('btnCargaMasivaContinuar');
+  errorEl.hidden = true;
+  resumenEl.hidden = true;
+  continuarBtn.disabled = true;
+  cargaMasivaPreviewState = null;
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onerror = function () {
+    errorEl.hidden = false;
+    errorEl.textContent = 'No se pudo leer el archivo. Verifica que no esté dañado e inténtalo de nuevo.';
+  };
+  reader.onload = function (e) {
+    try {
+      var workbook = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      var primeraHoja = workbook.Sheets[workbook.SheetNames[0]];
+      var filasCrudas = XLSX.utils.sheet_to_json(primeraHoja, { defval: '' });
+      var formaResult = parsearFilasCargaMasiva(filasCrudas);
+      if (!formaResult.ok) {
+        errorEl.hidden = false;
+        errorEl.textContent = formaResult.error;
+        return;
+      }
+      var filas = clasificarFilasCargaMasiva(formaResult.filas);
+      cargaMasivaPreviewState = { filas: filas, nombreArchivo: file.name };
+      var totalBase = filas.filter(function (f) { return f.clasificacion === 'base'; }).length;
+      var totalAdicional = filas.filter(function (f) { return f.clasificacion === 'adicional'; }).length;
+      var totalError = filas.filter(function (f) { return f.clasificacion === 'error'; }).length;
+      resumenEl.hidden = false;
+      resumenEl.textContent = filas.length + ' fila' + (filas.length === 1 ? '' : 's') + ' leída' + (filas.length === 1 ? '' : 's') + ': ' + totalBase + ' dentro de cuota, ' + totalAdicional + ' Adicional(es), ' + totalError + ' con error. Haz clic en "Continuar" para revisar el detalle.';
+      continuarBtn.disabled = filas.length === totalError;
+    } catch (err) {
+      errorEl.hidden = false;
+      errorEl.textContent = 'No se pudo leer el archivo -- verifica que sea un .xlsx o .csv válido, exportado desde Excel/Google Sheets.';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+/* Modal 2 (ver plan, sección 4): tarjetas resumen + tabla clasificada. Se reconstruye por completo cada vez
+   que cambia algún checkbox (volumen esperado: unas pocas decenas de filas por carga, nunca miles -- ver
+   CARGA_MASIVA_LIMITE_FILAS) en vez de parchear nodos individuales, por simplicidad. */
+function renderCargaMasivaPreview() {
+  if (!cargaMasivaPreviewState) return;
+  var filas = cargaMasivaPreviewState.filas;
+  var totalBase = filas.filter(function (f) { return f.clasificacion === 'base'; }).length;
+  var adicionales = filas.filter(function (f) { return f.clasificacion === 'adicional'; });
+  var totalError = filas.filter(function (f) { return f.clasificacion === 'error'; }).length;
+  var totalIncluidos = totalBase + adicionales.filter(function (f) { return f.incluirAdicional; }).length;
+  document.getElementById('cargaMasivaResumenMetrics').innerHTML =
+    '<div class="metric-card"><div class="metric-top"><span class="metric-label">Dentro de cuota</span></div><div class="metric-value">' + totalBase + '</div><div class="metric-foot">Se crean directo</div></div>' +
+    '<div class="metric-card"><div class="metric-top"><span class="metric-label">Adicionales detectados</span></div><div class="metric-value">' + adicionales.length + '</div><div class="metric-foot">Tú decides cuáles incluir</div></div>' +
+    '<div class="metric-card"><div class="metric-top"><span class="metric-label">Con error</span></div><div class="metric-value">' + totalError + '</div><div class="metric-foot ' + (totalError > 0 ? 'warn' : 'ok') + '">Nunca se crean</div></div>' +
+    '<div class="metric-card"><div class="metric-top"><span class="metric-label">Total a crear</span></div><div class="metric-value">' + totalIncluidos + '</div><div class="metric-foot">Con la selección actual</div></div>';
+  var incluirField = document.getElementById('cargaMasivaIncluirAdicionalesField');
+  incluirField.hidden = !adicionales.length;
+  var incluirTodos = document.getElementById('cargaMasivaIncluirTodosAdicionales');
+  incluirTodos.checked = adicionales.length > 0 && adicionales.every(function (f) { return f.incluirAdicional; });
+  document.getElementById('cargaMasivaPreviewTbody').innerHTML = filas.map(function (f, idx) { return cargaMasivaPreviewRowHtml(f, idx); }).join('');
+  var confirmarBtn = document.getElementById('btnCargaMasivaConfirmar');
+  confirmarBtn.disabled = totalIncluidos === 0;
+}
+function cargaMasivaClasificacionBadgeHtml(f) {
+  if (f.clasificacion === 'base') return '<span class="badge badge-dispatched"><i></i>Dentro de cuota</span>';
+  if (f.clasificacion === 'adicional') return '<span class="badge-sobrecupo" data-tip="' + escapeHtml(f.motivo) + '">Adicional</span>';
+  return '<span class="badge badge-critical" data-tip="' + escapeHtml(f.motivo) + '"><i></i>Error</span>';
+}
+function cargaMasivaPreviewRowHtml(f, idx) {
+  var checkboxHtml = f.clasificacion === 'adicional'
+    ? '<input type="checkbox" data-act="carga-masiva-toggle-adicional" data-idx="' + idx + '"' + (f.incluirAdicional ? ' checked' : '') + '>'
+    : (f.clasificacion === 'base' ? '<span class="courier-sub">Se incluye</span>' : '<span class="courier-sub">—</span>');
+  return '<tr>' +
+    '<td>' + f.numeroFila + '</td>' +
+    '<td>' + escapeHtml(f.cedula) + '</td>' +
+    '<td>' + escapeHtml(f.nombre) + '</td>' +
+    '<td>' + escapeHtml(f.sede) + '</td>' +
+    '<td>' + escapeHtml(f.vehiculo) + '</td>' +
+    '<td>' + (f.hora ? fmtTime12(f.hora) : '—') + '</td>' +
+    '<td>' + cargaMasivaClasificacionBadgeHtml(f) + '</td>' +
+    '<td>' + checkboxHtml + '</td>' +
+    '</tr>';
+}
+/* Confirmación final (ver plan, sección 4): solo las filas 'base' + las 'adicional' que el Aliado marcó
+   llegan a procesarCargaMasivaTurnos -- las 'error' nunca se incluyen (ni siquiera se vuelven a evaluar).
+   modoAdicional:'crear_pendiente' porque, a diferencia de "Cargar Flota Recurrente", aquí el Aliado YA vio
+   y aprobó explícitamente cada Adicional en el preview. */
+function confirmarCargaMasiva() {
+  if (!canDo('schedule.aliado.manage')) return;
+  if (!cargaMasivaPreviewState) return;
+  var entries = cargaMasivaPreviewState.filas.filter(function (f) {
+    return f.clasificacion === 'base' || (f.clasificacion === 'adicional' && f.incluirAdicional);
+  });
+  if (!entries.length) return;
+  var confirmarBtn = document.getElementById('btnCargaMasivaConfirmar');
+  confirmarBtn.disabled = true;
+  confirmarBtn.textContent = 'Guardando…';
+  procesarCargaMasivaTurnos(entries, { modoAdicional: 'crear_pendiente', motivoContexto: 'carga masiva vía archivo Excel/CSV' }).then(function (resultado) {
+    confirmarBtn.disabled = false;
+    confirmarBtn.textContent = 'Aplicar y Guardar Programación';
+    if (!resultado.ok) {
+      toast('warn', 'No se pudo confirmar en la nube', 'La carga masiva no se guardó — revisa tu conexión e inténtalo de nuevo.');
+      return;
+    }
+    var msg = 'Se cargaron ' + resultado.creados + ' turno' + (resultado.creados === 1 ? '' : 's') + '.';
+    var extra = [];
+    if (resultado.adicionalesCreados) extra.push(resultado.adicionalesCreados + ' quedaron "Pendiente de Aprobación por Planner" (Adicionales que incluiste).');
+    if (resultado.solicitudes) extra.push(resultado.solicitudes + ' se enviaron como Solicitud de Cambio, fuera del horario de programación.');
+    if (extra.length) msg += ' ' + extra.join(' ');
+    toast('ok', 'Carga Masiva aplicada', msg);
+    cargaMasivaPreviewState = null;
+    closeModal();
+  });
+}
+
 /* CONMUTACIÓN ESTRICTA: libre desasignación pre-cutoff vs. Solicitud de Cambio post-cutoff — mismo criterio
    de ventana que Editar (progWindowState, ver submitTurno), aplicado a una acción más quirúrgica: solo quita
    el mensajero asignado, sin tocar hora/vehículo/sede. Dentro de la ventana (o su ampliación activa), la
@@ -21512,6 +21816,33 @@ document.addEventListener('DOMContentLoaded', function () {
   });
 
   document.getElementById('btnNuevoTurno').addEventListener('click', function () { openTurnoModal('create', null); });
+  /* Ver requerimiento "Carga Masiva de Programación vía Excel/CSV". */
+  document.getElementById('btnCargaMasiva').addEventListener('click', abrirModalCargaMasiva);
+  document.getElementById('btnDescargarPlantillaCargaMasiva').addEventListener('click', generarPlantillaCargaMasivaDemo);
+  document.getElementById('cargaMasivaArchivo').addEventListener('change', function (e) { procesarArchivoCargaMasiva(e.target.files[0]); });
+  document.getElementById('btnCargaMasivaContinuar').addEventListener('click', function () {
+    if (!cargaMasivaPreviewState) return;
+    /* openModal ya oculta cualquier otro .modal abierto (ver ese comentario) -- no hace falta closeModal()
+       de por medio para pasar del Modal 1 al Modal 2. */
+    renderCargaMasivaPreview();
+    openModal('modalCargaMasivaPreview');
+  });
+  document.getElementById('btnCargaMasivaVolver').addEventListener('click', function () { openModal('modalCargaMasiva'); });
+  document.getElementById('btnCargaMasivaConfirmar').addEventListener('click', confirmarCargaMasiva);
+  document.getElementById('cargaMasivaIncluirTodosAdicionales').addEventListener('change', function (e) {
+    if (!cargaMasivaPreviewState) return;
+    var marcar = e.target.checked;
+    cargaMasivaPreviewState.filas.forEach(function (f) { if (f.clasificacion === 'adicional') f.incluirAdicional = marcar; });
+    renderCargaMasivaPreview();
+  });
+  document.getElementById('cargaMasivaPreviewTbody').addEventListener('change', function (e) {
+    if (!cargaMasivaPreviewState) return;
+    var checkbox = e.target.closest('[data-act="carga-masiva-toggle-adicional"]');
+    if (!checkbox) return;
+    var fila = cargaMasivaPreviewState.filas[parseInt(checkbox.dataset.idx, 10)];
+    if (fila) fila.incluirAdicional = checkbox.checked;
+    renderCargaMasivaPreview();
+  });
   /* Ver requerimiento "Menú Desplegable de Acciones para Flota Recurrente": Cargar/Guardar/Eliminar ya no son
      botones estáticos con su propio addEventListener -- viven como ítems del menú flotante de #btnProgAcciones
      (data-menu-html armado en cada render de renderProgramacion(), ver ese comentario), disparados por el
