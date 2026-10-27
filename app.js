@@ -3855,6 +3855,7 @@ function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
   var dia = diaSemanaKey(fechaObjetivo);
   if (!dia) return [];
   var pendientesCreados = [];
+  var mensajerosCreados = [];
   var vistos = {};
   state.cuotasMatriz.forEach(function (c) {
     if (c.dia !== dia || c.cantidad <= 0) return;
@@ -3884,6 +3885,15 @@ function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
     if (!primeraFranja) return;
     for (var i = 0; i < faltan; i++) {
       var mensajeroPendienteId = crearMensajeroPendiente({ sede: c.sede, vehiculo: primeraFranja.vehiculo }, c.aliado);
+      /* FIX "Mensajero Placeholder Fantasma" (detectado en verificación en vivo): crearMensajeroPendiente solo
+         mutaba state.mensajeros EN MEMORIA -- nunca se empujaba a Supabase. El turno sí se guardaba (referencia
+         a este mensajeroId), pero en cualquier OTRA sesión/dispositivo (o la misma, tras recargar), getMensajero
+         no lo encontraba y caía a su fallback {aliado:null, nombre:'—', ...} -- el turno aparecía "roto": sin
+         aliado real, invisible en cualquier filtro por aliado (incluida la propia verificación de déficit, que
+         volvía a contarlo como faltante en vez de ya cubierto). Se captura aquí para empujarlo junto con los
+         turnos (ver pushPromise más abajo, mensajeros ANTES que turnos). */
+      var mensajeroPendienteObj = state.mensajeros[state.mensajeros.length - 1];
+      mensajerosCreados.push(mensajeroPendienteObj);
       var nuevoTurnoSistema = {
         id: nextTurnoId(), sede: c.sede, fecha: fechaObjetivo, mensajeroId: mensajeroPendienteId, vehiculo: primeraFranja.vehiculo,
         hora: primeraFranja.franja, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: true
@@ -3902,11 +3912,19 @@ function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
      verificación en vivo): devolver una Promise que solo resuelve DESPUÉS de que scPushRows confirme el
      guardado real -- los llamadores (cierreCuotasNocturnoSweep/CatchUp) solo deben marcar
      cierreCuotasNocturnoHechaFecha (y empujarla a Supabase) una vez que esto resuelva con éxito. Si el push
-     falla (red caída, timeout), NUNCA se marca como hecho -- el próximo login/tick lo reintenta desde cero,
-     recalculando el déficit real (idempotente: si algunos turnos sí llegaron a guardarse, el recálculo nunca
-     los duplica, solo crea el faltante genuino). */
-  var pushPromise = pendientesCreados.length ? scPushRows('app_turnos', pendientesCreados) : Promise.resolve({ ok: true });
-  return { pendientesCreados: pendientesCreados, pushPromise: pushPromise };
+     falla (red caída, timeout, RLS -- ver comentario de mensajerosCreados), NUNCA se marca como hecho -- el
+     próximo login/tick lo reintenta desde cero, recalculando el déficit real (idempotente: si algunos turnos
+     sí llegaron a guardarse, el recálculo nunca los duplica, solo crea el faltante genuino).
+     Mensajeros SIEMPRE antes que turnos (nunca en paralelo, ver riesgo documentado en la migración de RLS de
+     app_turnos: un turno cuyo mensajero referenciado todavía no comprometió su propio INSERT quedaría
+     "huérfano" para cualquier sesión que lo lea antes de que el mensajero también haya llegado) -- si el push
+     de mensajeros falla, ni siquiera se intenta el de turnos. */
+  var pushPromise = (mensajerosCreados.length ? scPushRows('app_mensajeros', mensajerosCreados) : Promise.resolve({ ok: true }))
+    .then(function (resMensajeros) {
+      if (!resMensajeros || !resMensajeros.ok) return resMensajeros;
+      return pendientesCreados.length ? scPushRows('app_turnos', pendientesCreados) : Promise.resolve({ ok: true });
+    });
+  return { pendientesCreados: pendientesCreados, mensajerosCreados: mensajerosCreados, pushPromise: pushPromise };
 }
 function cierreCuotasNocturnoSweep() {
   if (state.cierreCuotasNocturnoHechaFecha === TOMORROW_STR || state.now < progMidnightDT()) return;
