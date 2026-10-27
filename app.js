@@ -15224,7 +15224,7 @@ function procesarCargaMasivaTurnos(entries, opciones) {
        directamente como Excepción de Tipología pendiente de aprobación. */
     var tipologiaNoHabilitadaMasiva = cuotasActivoPais(countryForSede(entry.sede)) && !esFlotaPropia(state.user.aliado) && !tipologiaHabilitada(entry.sede, state.user.aliado, entry.vehiculo);
     var aprobacion = tipologiaNoHabilitadaMasiva
-      ? { requiere: true, motivo: 'tipologia', detalle: 'Solicitud de Excepción de Tipología: ' + state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(entry.vehiculo, countryForSede(entry.sede)) + ' en ' + entry.sede + '.' }
+      ? { requiere: true, motivo: 'tipologia', detalle: state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(entry.vehiculo, countryForSede(entry.sede)) + ' en ' + entry.sede + '.' }
       : evaluarAprobacionCuota(entry.sede, state.user.aliado, entry.vehiculo, entry.hora, fecha);
     /* FIX "Plantilla de Flota Recurrente satura Solicitudes y Cambios con Pendientes de Aprobación" (reporte
        Cordiandina, aplica a cualquier Aliado): por defecto (modoAdicional 'omitir'), un entry que excede
@@ -15476,7 +15476,7 @@ function clasificarFilasCargaMasiva(filas) {
     }
     var tipologiaNoHabilitadaMasiva = cuotasActivoPais(country) && !esFlotaPropia(state.user.aliado) && !tipologiaHabilitada(f.sede, state.user.aliado, f.vehiculo);
     var aprobacion = tipologiaNoHabilitadaMasiva
-      ? { requiere: true, motivo: 'tipologia', detalle: 'Excepción de Tipología: ' + state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(f.vehiculo, country) + ' en ' + f.sede + '.' }
+      ? { requiere: true, motivo: 'tipologia', detalle: state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(f.vehiculo, country) + ' en ' + f.sede + '.' }
       : evaluarAprobacionCuota(f.sede, state.user.aliado, f.vehiculo, f.hora, TOMORROW_STR);
     if (aprobacion.requiere) {
       f.clasificacion = 'adicional';
