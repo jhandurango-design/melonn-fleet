@@ -792,7 +792,11 @@ function scPushCuotasConfig() {
     matrizProxima: state.cuotasMatrizProxima,
     fechaProxima: state.cuotasFechaProxima,
     bannerCO: state.cuotasBannerCO,
-    observaciones: state.cuotasObservaciones
+    observaciones: state.cuotasObservaciones,
+    /* Ver requerimiento "Garantía Real de Cuota Pendiente...": compartido entre TODAS las sesiones/
+       dispositivos (nunca solo localStorage) -- es la única forma de que cierreCuotasNocturnoCatchUp() sepa,
+       desde cualquier navegador, si el déficit de HOY ya fue cubierto por otra sesión antes que esta. */
+    cierreCuotasNocturnoHechaFecha: state.cierreCuotasNocturnoHechaFecha
   }]);
 }
 /* FIX "Guardar/Cargar Flota Habitual solo vivía en localStorage" (mismo hueco arquitectónico que Cuotas, ver
@@ -976,6 +980,12 @@ function scPullAll() {
       if (cfg.fechaProxima !== undefined) state.cuotasFechaProxima = cfg.fechaProxima;
       if (cfg.bannerCO !== undefined) state.cuotasBannerCO = cfg.bannerCO;
       if (cfg.observaciones) state.cuotasObservaciones = cfg.observaciones;
+      /* Solo adopta un valor MÁS AVANZADO que el local -- un pull con datos viejos (carrera con un push en
+         vuelo de esta misma pestaña) nunca debe retroceder la marca y hacer que el déficit de hoy se vuelva a
+         evaluar/duplicar innecesariamente. */
+      if (cfg.cierreCuotasNocturnoHechaFecha && cfg.cierreCuotasNocturnoHechaFecha > (state.cierreCuotasNocturnoHechaFecha || '')) {
+        state.cierreCuotasNocturnoHechaFecha = cfg.cierreCuotasNocturnoHechaFecha;
+      }
       try {
         localStorage.setItem(CUOTAS_STORAGE_KEY, JSON.stringify(state.cuotasMatriz));
         localStorage.setItem(CUOTAS_FRANJAS_STORAGE_KEY, JSON.stringify(state.cuotasFranjas));
@@ -3836,31 +3846,34 @@ function cierreJornadaSweep() {
    state.jornadaCerradaFecha (ver su comentario, mismo FIX) -- guarda el TOMORROW_STR ya procesado en vez de
    un boolean simple, así que vuelve a dispararse cada vez que TOMORROW_STR avanza a un día nuevo, en vez de
    una sola vez en toda la vida de la sesión. */
-function cierreCuotasNocturnoSweep() {
-  if (state.cierreCuotasNocturnoHechaFecha === TOMORROW_STR || state.now < progMidnightDT()) return;
-  state.cierreCuotasNocturnoHechaFecha = TOMORROW_STR;
-  var dia = diaSemanaKey(TOMORROW_STR);
-  if (!dia) return;
+/* Núcleo reutilizable de cierreCuotasNocturnoSweep (ver su comentario) — extraído para poder reutilizarlo
+   también desde cierreCuotasNocturnoCatchUp() (ver más abajo), que cubre el déficit de HOY apenas alguien
+   inicia sesión, sin depender de que una pestaña estuviera abierta justo a medianoche. fechaObjetivo es el
+   día a completar (TOMORROW_STR en el barrido en vivo, TODAY_STR en el chequeo de alcance); motivoEtiqueta
+   distingue el origen en el Historial de Cambios de cada turno generado. */
+function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
+  var dia = diaSemanaKey(fechaObjetivo);
+  if (!dia) return [];
   var pendientesCreados = [];
   var vistos = {};
   state.cuotasMatriz.forEach(function (c) {
     if (c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (esFlotaPropia(c.aliado)) return;
-    /* Ver requerimiento "Ajuste y Validación Integral de Días Festivos", Corrección Crítica: TOMORROW_STR
+    /* Ver requerimiento "Ajuste y Validación Integral de Días Festivos", Corrección Crítica: fechaObjetivo
        festivo (por país de la sede, nunca un único país global -- una misma noche puede ser festivo en
        Colombia y no en México) no debe generar turnos "Pendiente/Por Confirmar" fantasma -- el Aliado no
        incumple nada por no operar un festivo (ver evaluarAprobacionCuota, que ya trata festivo como su propia
        causal, nunca como "cupo excedido"). Sin este chequeo, estos turnos sintéticos escalaban solos (FSM de
        pendienteAsignacion) hasta Incumplimiento Confirmado, contaminando incumplimientosConfirmados/
        posicionamientoPct en aliadoMetricas() por un día que nunca debió exigir cuota. */
-    if (esFestivo(TOMORROW_STR, countryForSede(c.sede))) return;
+    if (esFestivo(fechaObjetivo, countryForSede(c.sede))) return;
     var key = c.sede + '|' + c.aliado;
     if (vistos[key]) return;
     vistos[key] = true;
-    var cuotaTotal = cuotaGlobalAsignada(c.sede, c.aliado, TOMORROW_STR);
+    var cuotaTotal = cuotaGlobalAsignada(c.sede, c.aliado, fechaObjetivo);
     if (cuotaTotal <= 0) return;
-    var actuales = turnosProgramadosGlobalCount(c.sede, c.aliado, TOMORROW_STR);
+    var actuales = turnosProgramadosGlobalCount(c.sede, c.aliado, fechaObjetivo);
     var faltan = cuotaTotal - actuales;
     if (faltan <= 0) return;
     /* Hora/vehículo de los pendientes generados por el Sistema: se reutiliza la primera franja/tipología
@@ -3872,20 +3885,43 @@ function cierreCuotasNocturnoSweep() {
     for (var i = 0; i < faltan; i++) {
       var mensajeroPendienteId = crearMensajeroPendiente({ sede: c.sede, vehiculo: primeraFranja.vehiculo }, c.aliado);
       var nuevoTurnoSistema = {
-        id: nextTurnoId(), sede: c.sede, fecha: TOMORROW_STR, mensajeroId: mensajeroPendienteId, vehiculo: primeraFranja.vehiculo,
+        id: nextTurnoId(), sede: c.sede, fecha: fechaObjetivo, mensajeroId: mensajeroPendienteId, vehiculo: primeraFranja.vehiculo,
         hora: primeraFranja.franja, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: true
       };
       state.turnos.push(nuevoTurnoSistema);
       registrarCreacionTurno(nuevoTurnoSistema, 'Sistema Gravity');
       registrarHistorialCambio(nuevoTurnoSistema, {
         tipo: 'cierre_cuotas_nocturno', accion: 'generado_automaticamente',
-        motivo: 'Cierre Automático Nocturno (00:00) — el Aliado no completó la cuota base contratada de ' + c.sede + '; el Sistema generó esta plaza "Pendiente / Por Confirmar" para no dejarla descubierta.',
+        motivo: motivoEtiqueta + ' — el Aliado no completó la cuota base contratada de ' + c.sede + '; el Sistema generó esta plaza "Pendiente / Por Confirmar" para no dejarla descubierta.',
         horaAnterior: null, horaPropuesta: null, por: 'Sistema Gravity', rol: 'SYSTEM'
       });
       pendientesCreados.push(nuevoTurnoSistema);
     }
   });
   if (pendientesCreados.length) scPushRows('app_turnos', pendientesCreados);
+  return pendientesCreados;
+}
+function cierreCuotasNocturnoSweep() {
+  if (state.cierreCuotasNocturnoHechaFecha === TOMORROW_STR || state.now < progMidnightDT()) return;
+  state.cierreCuotasNocturnoHechaFecha = TOMORROW_STR;
+  cierreCuotasCompletarDeficit(TOMORROW_STR, 'Cierre Automático Nocturno (00:00)');
+  scPushCuotasConfig();
+}
+/* Ver requerimiento "Garantía Real de Cuota Pendiente sin Depender de Medianoche Exacta" (reporte urgente:
+   cierreCuotasNocturnoSweep SOLO corre dentro de una pestaña abierta y logueada justo en el instante del
+   cruce real de medianoche -- esta app no tiene ningún proceso de servidor propio, así que si nadie tenía la
+   plataforma abierta a esa hora, el déficit de cuota del día simplemente nunca se completaba). Respaldo de
+   alcance: se dispara una vez por sesión, justo después de que completarInicioSesion() reciba el pull fresco
+   de Supabase (nunca antes -- evaluar contra datos viejos podría crear un pendiente duplicado si otra sesión
+   ya lo había cubierto) -- si state.cierreCuotasNocturnoHechaFecha (compartido vía app_cuotas_config, ver
+   scPushCuotasConfig) todavía no llegó a TODAY_STR, completa el déficit de HOY en ese mismo instante, sin
+   importar la hora del día. Reutiliza cierreCuotasCompletarDeficit -- nunca marca incumplimientos ni penaliza
+   nada, solo siembra la plaza "Pendiente / Por Confirmar" que el Aliado puede confirmar después. */
+function cierreCuotasNocturnoCatchUp() {
+  if (!state.user || state.cierreCuotasNocturnoHechaFecha === TODAY_STR) return;
+  state.cierreCuotasNocturnoHechaFecha = TODAY_STR;
+  cierreCuotasCompletarDeficit(TODAY_STR, 'Chequeo de Alcance al Iniciar Sesión');
+  scPushCuotasConfig();
 }
 /* ---------------- Regularización Obligatoria de Demora en Despacho (Jornada Anterior) ----------------
    Ver requerimiento "Auditoría Integral de Alertas, Cierre Nocturno y Regularización Obligatoria de Demora en
@@ -19130,8 +19166,12 @@ function completarInicioSesion(user) {
   /* Ver nota "Supabase" junto a scPullAll: refresca usuarios/mensajeros/turnos desde la nube justo al
      iniciar sesión -- si Supabase tiene datos más frescos que lo que esta pestaña tenía en memoria
      (p. ej. otro usuario creó un turno desde otro navegador), el re-render que dispara scPullAll los
-     refleja apenas lleguen, sin bloquear el login mientras tanto. */
-  scPullAll();
+     refleja apenas lleguen, sin bloquear el login mientras tanto.
+     Ver requerimiento "Garantía Real de Cuota Pendiente...": cierreCuotasNocturnoCatchUp() se encadena
+     DESPUÉS de que este pull resuelva (nunca antes) -- necesita cuotasMatriz/turnos/
+     cierreCuotasNocturnoHechaFecha ya frescos de Supabase para no evaluar un déficit con datos viejos y
+     terminar creando un pendiente duplicado que otra sesión ya había cubierto. */
+  scPullAll().then(function () { cierreCuotasNocturnoCatchUp(); });
   showLoadingOverlay();
   resetViewState(); /* ver RESET_VIEW_STATE -- red de seguridad adicional a la de logout() para la restauración
      de sesión al recargar la página (savedId en melonn_session), que llega aquí sin pasar por logout(). */
