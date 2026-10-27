@@ -580,6 +580,15 @@ function verificarSessionToken(token) {
    elige con un booleano por llamador -- clienteParaTabla(table) decide solo, por nombre de tabla (ver esa
    función, cerca de supabaseClient/supabaseAuthClient). Si no hay token/sesión todavía (supabaseAuthClient
    en null), cae de vuelta al cliente anon -- nunca bloquea la operación por falta de sesión. */
+/* Ver requerimiento "Auditoría de Desconexiones Intermitentes con Supabase": scPullTable nunca reintentaba --
+   un solo timeout/hipo de red en CUALQUIERA de las 8 tablas de scPullAll resolvía null de inmediato y esa
+   tabla simplemente no se actualizaba en este ciclo (el próximo pull la trae), pero en una racha de
+   micro-cortes seguidos (mismo patrón ya corregido para escritura, ver SC_PUSH_RETRY_DELAYS_MS) la lectura
+   se quedaba sistemáticamente atrás sin ningún reintento. Mismo backoff progresivo que scPushRows (1s, 3s,
+   5s -- 4 intentos en total), independiente por tabla (las 8 siguen en paralelo vía Promise.all en
+   scPullAll, así que una tabla reintentando no bloquea a las demás, solo alarga lo que scPullAll espera en
+   conjunto si esa tabla puntual tuvo que reintentar). */
+var SC_PULL_RETRY_DELAYS_MS = [1000, 3000, 5000];
 function scPullTable(table) {
   var client = clienteParaTabla(table);
   if (!client) return Promise.resolve(null);
@@ -589,10 +598,24 @@ function scPullTable(table) {
      INSERT manual contra la tabla desde el SQL Editor, cada uno con su propio id), cuál de las 2 es la más
      reciente y debe prevalecer. Se devuelve como { value, updatedAt } en vez de la fila "data" pelada -- scPullTable
      es de uso interno exclusivo de scPullAll, así que este cambio de forma no afecta a nadie más. */
-  return client.from(table).select('data, updated_at').then(function (res) {
-    if (res.error || !res.data) return null;
-    return res.data.map(function (row) { return { value: row.data, updatedAt: row.updated_at }; });
-  }, function () { return null; });
+  function intentoUnico() {
+    try {
+      return client.from(table).select('data, updated_at').then(function (res) {
+        if (res.error || !res.data) return null;
+        return res.data.map(function (row) { return { value: row.data, updatedAt: row.updated_at }; });
+      }, function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+  /* null distingue un fallo real (reintentable) de una tabla genuinamente vacía (res.data === [], .map ya
+     devuelve [] -- nunca null) -- solo se reintenta el primer caso. */
+  function conReintentos(numeroIntento) {
+    return intentoUnico().then(function (res) {
+      if (res !== null || numeroIntento > SC_PULL_RETRY_DELAYS_MS.length) return res;
+      return new Promise(function (resolve) { setTimeout(resolve, SC_PULL_RETRY_DELAYS_MS[numeroIntento - 1]); })
+        .then(function () { return conReintentos(numeroIntento + 1); });
+    });
+  }
+  return conReintentos(1);
 }
 /* Consolida filas de app_users por correo (minúsculas) cuando Supabase trae más de una para la misma
    persona bajo ids distintos -- se queda con la de updated_at más reciente. Una fila sin correo reconocible
@@ -679,10 +702,11 @@ var scTablasConAltaEnVuelo = {};
    diagnóstico descartó RLS/datos como causa, dejando un corte de red transitorio en esa conexión como la
    explicación más probable): antes, un solo timeout/error de red (SC_PUSH_TIMEOUT_MS, 10s) bastaba para
    reportar el guardado como fallido, sin ningún reintento -- un hipo de 1-2s en una conexión inestable
-   bloqueaba al usuario por completo, obligándolo a reintentar manualmente. Ahora reintenta hasta 2 veces más
-   (3 intentos en total) con una breve espera entre cada uno antes de rendirse -- beneficia a CUALQUIER
-   llamador de scPushRows (50+ puntos en el archivo), no solo al guardado de contraseña. */
-var SC_PUSH_RETRY_DELAYS_MS = [1000, 2000];
+   bloqueaba al usuario por completo, obligándolo a reintentar manualmente. Ahora reintenta hasta 3 veces más
+   (4 intentos en total) con backoff progresivo (1s, 3s, 5s -- ver requerimiento "Auditoría de Desconexiones
+   Intermitentes con Supabase") entre cada uno antes de rendirse -- beneficia a CUALQUIER llamador de
+   scPushRows (50+ puntos en el archivo), no solo al guardado de contraseña. */
+var SC_PUSH_RETRY_DELAYS_MS = [1000, 3000, 5000];
 function scPushRows(table, rows, clienteAuthOverride, silencioso) {
   var client = clienteParaTabla(table, clienteAuthOverride);
   if (!client || !rows || !rows.length) return Promise.resolve({ ok: true });
@@ -889,7 +913,23 @@ var scPullEnVuelo = null;
    sobre HOY) -- aquí no es una edición de Admin, es simplemente la app enterándose por primera vez del dato
    real que ya existía. */
 var cuotasVigenteHoySincronizadaReal = false;
+/* Ver requerimiento "Auditoría de Desconexiones Intermitentes con Supabase" (reporte: errores de red
+   intermitentes que "vacían" tablas a 0 filas / congelan la interfaz, atribuidos a cambiar de bodega activa):
+   scPullAll() nunca comprobaba si YA había un pull en curso antes de lanzar uno nuevo -- cada vez que la
+   pestaña recupera foco/visibilidad (ver wiring de 'focus'/'visibilitychange' más abajo) dispara sus propias
+   8 consultas en paralelo a Supabase, SIN DEDUPLICAR contra un pull anterior todavía sin resolver. En la
+   práctica, 'focus' y 'visibilitychange' casi siempre disparan juntos al volver a esta pestaña (mismo evento
+   de usuario, ambos listeners activos) -- eso por sí solo ya duplicaba el tráfico (16 consultas simultáneas
+   en vez de 8) en el caso más común, sin que el usuario hiciera nada fuera de lo normal (cambiar de
+   aplicación, revisar otra pestaña y volver). Sumado a que gravityTick dispara su propio scPushAll()->
+   scPullAll() cada 30s de forma independiente, y a que CUALQUIER acción directa (crear/editar un turno,
+   resolver una solicitud, etc.) puede disparar scPullAll() propio, una sesión con varias pestañas o un
+   usuario alternando de aplicación con frecuencia podía acumular ráfagas de consultas superpuestas --
+   exactamente el patrón que agota el pool de conexiones/límite de PostgREST de un proyecto Supabase real,
+   descrito como "colapso" en el reporte. Ahora, si ya hay un pull en vuelo, scPullAll() REUTILIZA esa misma
+   promesa en vez de lanzar un segundo lote de consultas -- dedup real, no solo una bandera decorativa. */
 function scPullAll() {
+  if (scPullEnVuelo) return scPullEnVuelo;
   /* Ver scTablasConAltaEnVuelo/scPushRows (FIX "Ruta desaparece y reaparece sola", reporte Cabify): se
      captura una FOTO de qué ids están en vuelo justo AHORA, antes de siquiera disparar las 8 consultas --
      no se puede leer scTablasConAltaEnVuelo recién dentro del .then() de abajo, porque el push que de verdad
@@ -1042,6 +1082,18 @@ function scPullAll() {
     }
     if (changed && state.user) syncAndRender(true);
     return changed;
+  }).catch(function (e) {
+    /* Blindaje: si CUALQUIER paso del merge de arriba lanza una excepción inesperada (fila malformada, etc.),
+       esto era antes un unhandled promise rejection que abortaba el resto del .then() en silencio -- ninguna
+       tabla posterior a la que falló llegaba a mezclarse, y syncAndRender(true) nunca se disparaba, dejando
+       la interfaz a medio actualizar. Nunca debe tumbar la sesión ni dejar de liberar el guard de abajo. */
+    console.warn('scPullAll: fallo inesperado durante el merge, se descarta este ciclo sin tocar state', e);
+    return false;
+  }).then(function (resultado) {
+    /* Libera el guard SOLO al terminar (éxito, fallo controlado o excepción) -- la próxima llamada a
+       scPullAll() (otro focus, otro autoguardado) vuelve a disparar sus propias consultas con normalidad. */
+    scPullEnVuelo = null;
+    return resultado;
   });
   return scPullEnVuelo;
 }
@@ -20075,7 +20127,14 @@ function cambiarBodegaActivaUsuario(sedeId) {
     aliadoId: null,
   });
   persistUsers();
-  scPushRows('app_users', [state.user]);
+  /* Ver requerimiento "Auditoría de Desconexiones Intermitentes con Supabase": guardar en cuál bodega quedó
+     esta cuenta es puramente una conveniencia de la PRÓXIMA sesión (ver completarInicioSesion, que lee
+     user.sede) -- un fallo de red aquí no debe generar el aviso intrusivo "Sin conexión con Supabase" (que sí
+     tiene sentido para un guardado que el usuario espera ver confirmado, como crear un turno) ni, mucho
+     menos, bloquear o retrasar el cambio de bodega en curso, que ya aplicó 100% en memoria/localStorage un
+     momento antes. silencioso=true + try/catch defensivo (aunque scPushRows ya nunca rechaza su promesa, ver
+     su propio contrato) para blindar explícitamente este flujo contra cualquier fallo inesperado. */
+  try { scPushRows('app_users', [state.user], undefined, true); } catch (e) {}
   renderContextPill();
   toast('ok', 'Bodega activa cambiada', 'Ahora estás operando en ' + sedeId + '.');
   syncAndRender(true);
@@ -22735,7 +22794,23 @@ document.addEventListener('DOMContentLoaded', function () {
      + guardar en puntos clave" -- el equivalente barato es re-sincronizar cada vez que esta pestaña vuelve a
      tener foco o redescubre visibilidad (volver de otra pestaña/app, despertar el equipo, etc.), que es
      justo cuando un cambio hecho en otro lado (otro navegador, o directo en Supabase) es más probable que ya
-     exista y nadie lo haya visto todavía. scPullAll() ya es un no-op seguro sin sesión activa/sin red. */
-  window.addEventListener('focus', function () { if (state.user) scPullAll(); });
-  document.addEventListener('visibilitychange', function () { if (!document.hidden && state.user) scPullAll(); });
+     exista y nadie lo haya visto todavía. scPullAll() ya es un no-op seguro sin sesión activa/sin red.
+     Ver requerimiento "Auditoría de Desconexiones Intermitentes con Supabase": 'focus' y 'visibilitychange'
+     casi siempre disparan juntos al volver a esta pestaña -- sin amortiguar, cada regreso duplicaba el
+     tráfico (2 lotes de 8 consultas en vez de 1). scPullAll() ya deduplica un pull genuinamente en vuelo,
+     pero esto es una segunda capa, más barata: ignora un segundo disparo de recuperar foco/visibilidad
+     dentro de la misma ventana de 4s (alternar de aplicación/pestaña repetidamente no debe seguir generando
+     una consulta nueva cada vez), sin afectar NINGÚN otro llamador de scPullAll (login, autoguardado,
+     acciones directas del usuario) -- esos siguen disparando siempre, sin este throttle. */
+  var SC_PULL_VISIBILIDAD_MIN_INTERVAL_MS = 4000;
+  var scUltimoPullPorVisibilidadEn = 0;
+  function scPullPorRecuperarVisibilidad() {
+    if (!state.user) return;
+    var ahora = Date.now();
+    if (ahora - scUltimoPullPorVisibilidadEn < SC_PULL_VISIBILIDAD_MIN_INTERVAL_MS) return;
+    scUltimoPullPorVisibilidadEn = ahora;
+    scPullAll();
+  }
+  window.addEventListener('focus', scPullPorRecuperarVisibilidad);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) scPullPorRecuperarVisibilidad(); });
 });
