@@ -3462,7 +3462,17 @@
         </div>
         <p class="login-error" id="usuarioRolesError" hidden>Selecciona al menos un rol.</p>
       </div>
-      <div class="field" id="usuarioSedeField"><label for="usuarioSede">Bodega asignada</label><select id="usuarioSede"></select></div>
+      <!-- Ver requerimiento "Asignación de Múltiples Bodegas a un Usuario Bodega/Coordinador": antes un único
+           <select> (1 bodega por usuario) -- ahora casillas de selección múltiple, mismo patrón que
+           Rol(es)/Perfil(es) arriba (usuario-sede-check en vez de usuario-rol-check). u.sedes guarda el
+           array completo; u.sede sigue existiendo como la bodega ACTIVA de la sesión en este momento (ver
+           cambiarBodegaActivaUsuario) -- scopeSedes/routesInScope/mensajerosInScope siguen leyendo esa misma
+           propiedad singular sin cambios, así que un usuario con 1 sola bodega asignada se comporta
+           exactamente igual que antes. -->
+      <div class="field" id="usuarioSedeField"><label>Bodega(s) asignada(s)</label>
+        <div class="checkbox-group" id="usuarioSedesField"></div>
+        <p class="login-error" id="usuarioSedesError" hidden>Selecciona al menos una bodega.</p>
+      </div>
       <div class="field" id="usuarioAliadoField"><label for="usuarioAliado">Aliado de flota asignado</label><select id="usuarioAliado"></select></div>
       <p class="modal-note" id="usuarioAlcanceGlobalNote" hidden>Alcance: <strong>Global</strong> — este perfil no se asigna a una bodega o aliado fijo.</p>
       <!-- Ver requerimiento "Eliminación del Sistema de Activación por Enlace/Token -- Creación Directa con

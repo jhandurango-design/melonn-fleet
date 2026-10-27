@@ -266,6 +266,15 @@ function warehouseOptionsByCountryHtml() {
    la vez (ver Cumplimiento y Calidad, requerimiento "Corrección de Scope de Filtros..."): agrupa por país con
    la misma bandera SVG en el <optgroup> para que un select con ALIADOS_ALL se lea igual de claro que uno de
    bodega. */
+/* Equivalente de warehouseOptionsByCountryHtml() en casillas en vez de <option> (ver requerimiento
+   "Asignación de Múltiples Bodegas a un Usuario Bodega/Coordinador") -- usado solo por el modal de Usuarios
+   para permitir marcar 1 o varias bodegas a la vez, mismo patrón visual que las casillas de Rol(es). */
+function usuarioSedesCheckboxesHtml() {
+  return COUNTRIES.map(function (c) {
+    return WAREHOUSES.filter(function (w) { return w.active && w.country === c.code; })
+      .map(function (w) { return '<label class="maleta-toggle"><input type="checkbox" class="usuario-sede-check" value="' + w.id + '"> ' + c.flag + ' ' + w.id + '</label>'; }).join('');
+  }).join('');
+}
 function aliadoOptionsByCountryHtml() {
   return COUNTRIES.map(function (c) {
     var lista = c.code === 'MX' ? ALIADOS_MX : ALIADOS;
@@ -6234,7 +6243,16 @@ function renderContextPill() {
   pill.hidden = false;
   if (role === 'PLANNER') { labelEl.textContent = t('context.bodegaActual'); valueEl.textContent = state.activeSede; pill.classList.remove('static'); chevron.style.display = ''; }
   else if (role === 'AUDITOR') { labelEl.textContent = t('context.alcanceAuditoria'); valueEl.textContent = state.activeSede || t('context.todasLasSedes'); pill.classList.remove('static'); chevron.style.display = ''; }
-  else if (role === 'BODEGA') { labelEl.textContent = t('context.bodegaAsignada'); valueEl.textContent = state.user.sede || t('context.todasLasSedes'); pill.classList.add('static'); chevron.style.display = 'none'; }
+  else if (role === 'BODEGA') {
+    labelEl.textContent = t('context.bodegaAsignada'); valueEl.textContent = state.user.sede || t('context.todasLasSedes');
+    /* Ver requerimiento "Asignación de Múltiples Bodegas a un Usuario Bodega/Coordinador": el pill solo se
+       vuelve interactivo (chevron visible, ver toggleSedeDropdown) cuando el usuario tiene MÁS de una
+       bodega autorizada -- con 1 sola (la inmensa mayoría de cuentas Bodega) se comporta EXACTAMENTE igual
+       que antes (estático, sin selector), cero cambio de comportamiento para ese caso. */
+    var bodegaConMultiplesSedes = Array.isArray(state.user.sedes) && state.user.sedes.length > 1;
+    pill.classList.toggle('static', !bodegaConMultiplesSedes);
+    chevron.style.display = bodegaConMultiplesSedes ? '' : 'none';
+  }
   /* Ver requerimiento "Auditoría y Refactorización Estructural...": fallback defensivo -- un ALIADO sin
      .aliado asignado (dato incompleto en app_users, nunca debería ocurrir pero no debe mostrar el string
      literal "undefined" en el Header) cae a un guión en vez de romper la pantalla. */
@@ -6248,12 +6266,39 @@ function toggleSedeDropdown() {
   var existing = document.getElementById('sedeDropdownMenu');
   if (existing) { closeSedeMenu(); return; }
   var role = state.user.role;
-  if (role !== 'AUDITOR' && role !== 'PLANNER' && role !== 'ADMIN') return;
+  var bodegaConMultiplesSedes = role === 'BODEGA' && Array.isArray(state.user.sedes) && state.user.sedes.length > 1;
+  if (role !== 'AUDITOR' && role !== 'PLANNER' && role !== 'ADMIN' && !bodegaConMultiplesSedes) return;
   document.getElementById('userDropdown').classList.remove('open');
   var menu = document.createElement('div');
   menu.id = 'sedeDropdownMenu'; menu.className = 'sede-dropdown-menu';
   var rect = document.getElementById('contextPill').getBoundingClientRect();
   menu.style.top = (rect.bottom + 6) + 'px'; menu.style.right = (window.innerWidth - rect.right) + 'px';
+
+  /* BODEGA con varias bodegas autorizadas: rama propia y totalmente aislada del resto de esta función --
+     a diferencia de Planner/Auditor/Admin, BODEGA nunca usa state.activeSede (ver userEffectiveScope/
+     scopeSedes, que leen Auth.getUserScopes().bodegaId == state.user.sede) ni ninguno de los
+     re-sincronizados de filtros locales de más abajo (Alertas/Consolidado/Despacho/Solicitudes/Cumplimiento/
+     Cuotas -- ninguno de esos módulos muestra un selector de Bodega para este rol, ver comentario en
+     updateAlertsBadge). Elegir una opción aquí solo cambia CUÁL de sus bodegas autorizadas está activa en
+     este momento (cambiarBodegaActivaUsuario), restringido a state.user.sedes -- nunca la lista completa de
+     WAREHOUSES que sí ve Admin/Planner/Auditor más abajo. */
+  if (bodegaConMultiplesSedes) {
+    state.user.sedes.forEach(function (sedeId) {
+      var b = document.createElement('button');
+      var selected = state.user.sede === sedeId;
+      if (selected) b.className = 'selected';
+      b.innerHTML = '<span>' + sedeId + '</span>' + (selected ? '<span class="check">✓</span>' : '');
+      b.addEventListener('click', function () {
+        menu.remove();
+        document.removeEventListener('click', closeSedeDropdownOnce);
+        cambiarBodegaActivaUsuario(sedeId);
+      });
+      menu.appendChild(b);
+    });
+    document.body.appendChild(menu);
+    setTimeout(function () { document.addEventListener('click', closeSedeDropdownOnce); }, 0);
+    return;
+  }
 
   function addSedeOption(label, value) {
     var b = document.createElement('button');
@@ -13807,7 +13852,9 @@ function usuarioRowHtml(u) {
      undefined. Se normaliza aquí, igual que el resto de accesores defensivos del archivo, para que una sola
      fila corrupta nunca vuelva a tumbar la vista completa. */
   var roles = Array.isArray(u.roles) ? u.roles : [];
-  var asign = u.sede || u.aliado || '—';
+  /* u.sedes (array, ver requerimiento "Asignación de Múltiples Bodegas...") es la fuente completa cuando
+     existe -- un usuario BODEGA con varias bodegas las muestra todas aquí, separadas por coma. */
+  var asign = (Array.isArray(u.sedes) && u.sedes.length ? u.sedes.join(', ') : u.sede) || u.aliado || '—';
   /* Ver requerimiento "Eliminación del Sistema de Activación por Enlace/Token": ya no existe el estado
      PENDING_ACTIVATION -- todo usuario nuevo nace ACTIVO de inmediato (ver creación en #formUsuario), así
      que el badge vuelve a ser solo Activo/Inactivo según u.activo. */
@@ -15970,12 +16017,15 @@ function copiarInfoMensajero(routeId) {
    Solo aliados ACTIVOS se ofrecen aquí — es una asignación NUEVA, a diferencia de un usuario ya existente
    cuyo state.user.aliado se conserva aunque ese aliado se desactive después. */
 function refreshUsuarioModalCatalogos() {
-  document.getElementById('usuarioSede').innerHTML = warehouseOptionsByCountryHtml();
+  document.getElementById('usuarioSedesField').innerHTML = usuarioSedesCheckboxesHtml();
   var aliadosActivos = aliadosActivosForCountry('CO').concat(aliadosActivosForCountry('MX'));
   document.getElementById('usuarioAliado').innerHTML = aliadosActivos.map(function (a) { return '<option value="' + a + '">' + a + '</option>'; }).join('');
 }
 function usuarioRolesSeleccionados() {
   return Array.from(document.querySelectorAll('.usuario-rol-check:checked')).map(function (c) { return c.value; });
+}
+function usuarioSedesSeleccionadas() {
+  return Array.from(document.querySelectorAll('.usuario-sede-check:checked')).map(function (c) { return c.value; });
 }
 /* Ver requerimiento "Infraestructura Multirrol...": ahora lee TODAS las casillas marcadas en vez de un único
    <select> -- Sede se exige si BODEGA está entre los roles elegidos, Aliado si ALIADO lo está (un usuario
@@ -16000,6 +16050,7 @@ function openUsuarioModal() {
   document.getElementById('usuarioSubmitBtn').textContent = 'Invitar Usuario';
   document.getElementById('usuarioInviteNote').hidden = false;
   document.getElementById('usuarioRolesError').hidden = true;
+  document.getElementById('usuarioSedesError').hidden = true;
   document.querySelectorAll('.usuario-rol-check').forEach(function (c) { c.checked = false; });
   refreshUsuarioModalCatalogos();
   refreshUsuarioAsignacion();
@@ -16020,11 +16071,16 @@ function openUsuarioEditModal(userId) {
   document.getElementById('usuarioSubmitBtn').textContent = 'Guardar cambios';
   document.getElementById('usuarioInviteNote').hidden = true;
   document.getElementById('usuarioRolesError').hidden = true;
+  document.getElementById('usuarioSedesError').hidden = true;
   document.getElementById('usuarioNombre').value = u.nombre;
   document.getElementById('usuarioEmail').value = u.email;
   refreshUsuarioModalCatalogos();
   document.querySelectorAll('.usuario-rol-check').forEach(function (c) { c.checked = u.roles.indexOf(c.value) !== -1; });
-  if (u.sede) document.getElementById('usuarioSede').value = u.sede;
+  /* u.sedes (array) es la fuente completa de bodegas autorizadas -- un usuario persistido ANTES de este
+     requerimiento solo trae u.sede (singular), que se trata aquí como su única bodega autorizada hasta que
+     Admin la expanda. */
+  var sedesUsuarioEdit = Array.isArray(u.sedes) && u.sedes.length ? u.sedes : (u.sede ? [u.sede] : []);
+  document.querySelectorAll('.usuario-sede-check').forEach(function (c) { c.checked = sedesUsuarioEdit.indexOf(c.value) !== -1; });
   if (u.aliado) document.getElementById('usuarioAliado').value = u.aliado;
   refreshUsuarioAsignacion();
   openModal('modalUsuario');
@@ -16387,9 +16443,10 @@ function migrarAsignacionesRolesGlobales(users) {
        entrada de datos persistidos de usuarios (ver loadPersistedUsers), así que basta normalizar aquí. */
     if (!u.roles) u = Object.assign({}, u, { roles: [u.role] });
     if (!u.roles.every(function (r) { return ROLES_ALCANCE_GLOBAL.indexOf(r) !== -1; })) return u;
-    if (u.sede === undefined && u.aliado === undefined) return u;
+    if (u.sede === undefined && u.aliado === undefined && u.sedes === undefined) return u;
     var limpio = Object.assign({}, u);
     delete limpio.sede;
+    delete limpio.sedes;
     delete limpio.aliado;
     return limpio;
   });
@@ -16993,7 +17050,8 @@ function abrirModalEstablecerPasswordBodega(userId) {
   if (!u || !Array.isArray(u.roles) || u.roles.indexOf('BODEGA') === -1) return;
   document.getElementById('formEstablecerPasswordBodega').reset();
   document.getElementById('establecerPasswordUserId').value = userId;
-  document.getElementById('establecerPasswordNote').textContent = 'Cuenta operativa de Bodega: ' + u.nombre + ' (' + u.sede + ') — ' + u.email + '.';
+  var sedesTextoPassword = (Array.isArray(u.sedes) && u.sedes.length ? u.sedes.join(', ') : u.sede) || '—';
+  document.getElementById('establecerPasswordNote').textContent = 'Cuenta operativa de Bodega: ' + u.nombre + ' (' + sedesTextoPassword + ') — ' + u.email + '.';
   openModal('modalEstablecerPasswordBodega');
 }
 function establecerPasswordBodegaDirecta(userId, nuevaPassword) {
@@ -19893,6 +19951,29 @@ function aplicarRolActivo() {
   navigate(DEFAULT_VIEW[state.user.role]);
   syncAndRender(true);
 }
+/* Ver requerimiento "Asignación de Múltiples Bodegas a un Usuario Bodega/Coordinador": alterna la bodega
+   ACTIVA de un usuario BODEGA con más de una bodega autorizada (ver toggleSedeDropdown) -- state.user.sede
+   sigue siendo la propiedad singular que de verdad consumen userEffectiveScope/scopeSedes vía
+   Auth.getUserScopes().bodegaId, así que basta reasignarla y re-emitir el claim para que TODOS los módulos
+   de Bodega (Despacho, Mi Flota, Alertas, Solicitudes y Cambios...) recalculen su alcance con el próximo
+   render -- ninguno de ellos necesita saber que este usuario tiene más de una bodega. Se persiste de
+   inmediato (localStorage + Supabase) para que la próxima vez que inicie sesión recuerde en cuál se quedó. */
+function cambiarBodegaActivaUsuario(sedeId) {
+  if (!state.user || state.user.role !== 'BODEGA' || state.user.sede === sedeId) return;
+  if (!Array.isArray(state.user.sedes) || state.user.sedes.indexOf(sedeId) === -1) return;
+  state.user.sede = sedeId;
+  Auth.setCurrentUser({
+    username: state.user.email.split('@')[0],
+    role: state.user.role,
+    bodegaId: sedeId,
+    aliadoId: null,
+  });
+  persistUsers();
+  scPushRows('app_users', [state.user]);
+  renderContextPill();
+  toast('ok', 'Bodega activa cambiada', 'Ahora estás operando en ' + sedeId + '.');
+  syncAndRender(true);
+}
 function logout() {
   /* Ver nota "Supabase" junto a scPushAll: empuja el snapshot final de la sesión antes de cerrarla. */
   scPushAll();
@@ -21426,6 +21507,9 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('btnNuevoUsuario').addEventListener('click', openUsuarioModal);
   refreshUsuarioModalCatalogos();
   document.querySelectorAll('.usuario-rol-check').forEach(function (c) { c.addEventListener('change', refreshUsuarioAsignacion); });
+  document.getElementById('usuarioSedesField').addEventListener('change', function (e) {
+    if (e.target.classList.contains('usuario-sede-check') && usuarioSedesSeleccionadas().length) document.getElementById('usuarioSedesError').hidden = true;
+  });
   document.getElementById('formUsuario').addEventListener('submit', function (e) {
     e.preventDefault();
     if (!canDo('users.manage')) return;
@@ -21440,17 +21524,28 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!nombre || !email) return;
     if (!roles.length) { document.getElementById('usuarioRolesError').hidden = false; return; }
     document.getElementById('usuarioRolesError').hidden = true;
+    /* Ver requerimiento "Asignación de Múltiples Bodegas a un Usuario Bodega/Coordinador": 1 o varias
+       casillas en vez de un único <select> -- igual que Rol(es), se exige al menos 1 marcada si BODEGA está
+       entre los roles elegidos. */
+    var sedesElegidas = roles.indexOf('BODEGA') !== -1 ? usuarioSedesSeleccionadas() : [];
+    if (roles.indexOf('BODEGA') !== -1 && !sedesElegidas.length) { document.getElementById('usuarioSedesError').hidden = false; return; }
+    document.getElementById('usuarioSedesError').hidden = true;
     if (state.users.some(function (u) { return u.email.toLowerCase() === email.toLowerCase() && u.id !== editId; })) {
       toast('warn', 'Correo ya registrado', 'Ya existe un usuario con este correo corporativo.');
       return;
     }
-    var sede = roles.indexOf('BODEGA') !== -1 ? document.getElementById('usuarioSede').value : undefined;
     var aliado = roles.indexOf('ALIADO') !== -1 ? document.getElementById('usuarioAliado').value : undefined;
     if (editId) {
       var existente = state.users.find(function (u) { return u.id === editId; });
       if (!existente) return;
       existente.nombre = nombre; existente.email = email; existente.roles = roles; existente.avatarInitials = initialsOf(nombre);
-      if (sede !== undefined) existente.sede = sede; else delete existente.sede;
+      if (sedesElegidas.length) {
+        existente.sedes = sedesElegidas;
+        /* Conserva la bodega ACTIVA actual si sigue autorizada (no descoloca a un Bodega ya operando en esa
+           sede solo porque Admin le amplió/editó la lista) -- si ya no lo está (Admin le quitó justo esa),
+           cae a la primera autorizada de la nueva lista. */
+        existente.sede = (existente.sede && sedesElegidas.indexOf(existente.sede) !== -1) ? existente.sede : sedesElegidas[0];
+      } else { delete existente.sedes; delete existente.sede; }
       if (aliado !== undefined) existente.aliado = aliado; else delete existente.aliado;
       persistUsers();
       /* Ver nota "Supabase": a diferencia de otros pushes "fire and forget" de este archivo, AQUÍ sí importa
@@ -21480,7 +21575,7 @@ document.addEventListener('DOMContentLoaded', function () {
         activo: true, modulosDeshabilitados: [], modulosAdicionales: [],
         status: 'ACTIVE', password: null, mustChangePassword: true, isTemporaryPassword: true
       };
-      if (sede !== undefined) nuevo.sede = sede;
+      if (sedesElegidas.length) { nuevo.sedes = sedesElegidas; nuevo.sede = sedesElegidas[0]; }
       if (aliado !== undefined) nuevo.aliado = aliado;
       /* Ver requerimiento "Hashing de Contraseñas": CLAVE_TEMPORAL_USUARIO_NUEVO sigue siendo la MISMA clave
          fija comunicada al Admin/al correo de invitación (ver comentario junto a su declaración) -- solo lo
