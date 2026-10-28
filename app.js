@@ -4050,12 +4050,21 @@ function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
      déficit real desde cero (barato, solo lectura de lo ya sincronizado) y el cálculo mismo es idempotente --
      si el déficit real ya es 0 (otra sesión lo cubrió), esta función no crea nada ni hace ningún llamado de
      red. */
+  /* Ver requerimiento "Auditoría de Desconexiones Intermitentes con Supabase" (reporte: toast "Sin conexión
+     con Supabase (tabla app_mensajeros)" apareciendo solo al entrar a Programar Flota -- sin que el Aliado
+     hubiera hecho guardado alguno): este sweep es 100% automático -- corre solo, para TODOS los aliados/
+     sedes con déficit, apenas cualquier sesión inicia o cruza la medianoche (ver cierreCuotasNocturnoCatchUp/
+     cierreCuotasNocturnoSweep, ningún llamador es una acción directa del usuario). Mismo criterio que el
+     resto de empujes puramente de fondo de la app (ver scPushAll, silencioso=true): un fallo puntual de red
+     aquí no debe alarmar con el aviso intrusivo -- el usuario no tiene nada que "reintentar" (no es su
+     propio guardado), y la próxima sesión/sweep ya vuelve a evaluar el déficit real desde cero sin perder
+     nada (comentario de arriba: "si el déficit real ya es 0... esta función no crea nada"). */
   if (mensajerosCreados.length) {
-    scPushRows('app_mensajeros', mensajerosCreados).then(function (resMensajeros) {
-      if (resMensajeros && resMensajeros.ok && pendientesCreados.length) scPushRows('app_turnos', pendientesCreados);
+    scPushRows('app_mensajeros', mensajerosCreados, undefined, true).then(function (resMensajeros) {
+      if (resMensajeros && resMensajeros.ok && pendientesCreados.length) scPushRows('app_turnos', pendientesCreados, undefined, true);
     });
   } else if (pendientesCreados.length) {
-    scPushRows('app_turnos', pendientesCreados);
+    scPushRows('app_turnos', pendientesCreados, undefined, true);
   }
   return pendientesCreados;
 }
