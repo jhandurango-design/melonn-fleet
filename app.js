@@ -15886,11 +15886,64 @@ var CARGA_MASIVA_COLUMNAS = {
   vehiculo: ['Tipo de Vehículo', 'Tipo de Vehiculo'],
   hora: ['Hora de Citación', 'Hora de Citacion', 'Hora']
 };
-function leerColumnaCargaMasiva(filaObj, claves) {
-  for (var i = 0; i < claves.length; i++) {
-    if (filaObj[claves[i]] != null && filaObj[claves[i]] !== '') return filaObj[claves[i]];
+var CARGA_MASIVA_CAMPOS_OBLIGATORIOS = ['cedula', 'nombre', 'telefono', 'placa', 'sede', 'vehiculo', 'hora'];
+var CARGA_MASIVA_CAMPO_LABEL = {
+  cedula: 'Cédula / INE', nombre: 'Nombre', telefono: 'Teléfono', placa: 'Placa', correo: 'Correo Electrónico',
+  sede: 'Bodega', vehiculo: 'Tipo de Vehículo', hora: 'Hora de Citación'
+};
+/* FIX "Carga Masiva rechaza el 100% de las filas sin motivo claro" (reporte real: Rapiboy, y el mismo patrón
+   un día antes con Easyway) -- confirmado contra el archivo real que subieron: su herramienta de generación
+   automática (no Excel a mano) escribe los encabezados Y los valores de texto SIN NINGÚN ESPACIO
+   ("Cédula/INE", "TipodeVehículo", "Bogotá#2-Montevideo", "JosimarSierraCastro"...), mientras que la hoja
+   "Instrucciones" del MISMO archivo sí conserva los espacios con normalidad -- prueba de que partieron de la
+   plantilla real, pero algo en su proceso de llenado automático los elimina al reescribir la hoja
+   "Plantilla". El emparejamiento de columnas (leerColumnaCargaMasiva) y de catálogo (Bodega/Tipo de
+   Vehículo) antes exigían coincidencia EXACTA -- un solo espacio de diferencia (de más, de menos, o
+   ausente) o una tilde/mayúscula distinta bastaba para que la columna completa se leyera vacía en las 15
+   filas por igual. Ahora ambos se comparan normalizados (sin espacios, sin tildes, en minúsculas) -- nunca
+   se guarda el valor normalizado tal cual, siempre se resuelve al valor CANÓNICO real del catálogo (ver
+   resolverValorCatalogoCargaMasiva), para que el resto del flujo (cuotas, franjas, etc.) trabaje con el
+   mismo string exacto que usa toda la plataforma. */
+function normalizarTextoComparacionCargaMasiva(valor) {
+  return String(valor == null ? '' : valor)
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+/* Resuelve, UNA sola vez por archivo (no por fila), qué clave real de filaMuestra corresponde a cada campo
+   esperado -- comparando cada candidato de CARGA_MASIVA_COLUMNAS contra los encabezados reales ya
+   normalizados. Devuelve { campo: claveReal | null }. */
+function resolverEncabezadosCargaMasiva(filaMuestra) {
+  var clavesReales = Object.keys(filaMuestra || {});
+  var normalizadas = {};
+  clavesReales.forEach(function (k) { normalizadas[normalizarTextoComparacionCargaMasiva(k)] = k; });
+  var resuelto = {};
+  Object.keys(CARGA_MASIVA_COLUMNAS).forEach(function (campo) {
+    var candidatos = CARGA_MASIVA_COLUMNAS[campo], encontrada = null;
+    for (var i = 0; i < candidatos.length; i++) {
+      var real = normalizadas[normalizarTextoComparacionCargaMasiva(candidatos[i])];
+      if (real) { encontrada = real; break; }
+    }
+    resuelto[campo] = encontrada;
+  });
+  return resuelto;
+}
+function leerColumnaCargaMasiva(filaObj, claveReal) {
+  if (!claveReal) return '';
+  var v = filaObj[claveReal];
+  return v == null ? '' : v;
+}
+/* Mismo criterio de comparación normalizada, aplicado a Bodega/Tipo de Vehículo contra el catálogo real --
+   "medellin" (sin tilde, en minúsculas) o "Bogotá#2-Montevideo" (sin espacios) ahora SÍ encuentran su
+   entrada real; se devuelve siempre el valor CANÓNICO del catálogo (nunca lo que escribió el Aliado), para
+   que turnoEnVentanaRetorno/evaluarAprobacionCuota/horaPerteneceAFranjaContratada (todas comparan por
+   igualdad exacta de string contra WAREHOUSES/VEHICULOS) sigan funcionando sin ningún otro cambio. */
+function resolverValorCatalogoCargaMasiva(valor, catalogo) {
+  var norm = normalizarTextoComparacionCargaMasiva(valor);
+  for (var i = 0; i < catalogo.length; i++) {
+    if (normalizarTextoComparacionCargaMasiva(catalogo[i]) === norm) return catalogo[i];
   }
-  return '';
+  return null;
 }
 /* SheetJS puede entregar una celda de hora como string ("8:30"/"08:30 a. m."), como Date (si detectó
    formato de hora/fecha en el .xlsx) o como número decimal (fracción de día, si la celda es numérica sin
@@ -15921,18 +15974,34 @@ function parsearFilasCargaMasiva(filasCrudas) {
   if (filasCrudas.length > CARGA_MASIVA_LIMITE_FILAS) {
     return { ok: false, error: 'El archivo tiene ' + filasCrudas.length + ' filas -- el máximo por carga es ' + CARGA_MASIVA_LIMITE_FILAS + '. Divídelo en varios archivos.' };
   }
+  /* Se resuelve UNA sola vez contra la 1ª fila -- todas comparten los mismos encabezados reales (vienen de
+     la misma hoja). Si falta una columna obligatoria POR COMPLETO (ningún encabezado del archivo coincide,
+     ni siquiera de forma tolerante), se corta aquí con un error claro a nivel de archivo -- la alternativa
+     (cada fila marcada "Cédula vacía"/"Tipo de Vehículo vacío" una por una, sin explicar POR QUÉ) es
+     justo lo que generó la confusión real reportada (Rapiboy/Easyway): 15 filas "con error" sin ninguna
+     pista de que la causa real era una sola columna no reconocida. */
+  var encabezados = resolverEncabezadosCargaMasiva(filasCrudas[0]);
+  var faltantes = CARGA_MASIVA_CAMPOS_OBLIGATORIOS.filter(function (campo) { return !encabezados[campo]; });
+  if (faltantes.length) {
+    return {
+      ok: false,
+      error: 'No se reconoce' + (faltantes.length === 1 ? ' la columna' : 'n las columnas') + ' obligatoria' + (faltantes.length === 1 ? '' : 's') + ' ' +
+        faltantes.map(function (c) { return '"' + CARGA_MASIVA_CAMPO_LABEL[c] + '"'; }).join(', ') +
+        ' en el archivo. Revisa que los encabezados de la primera fila existan (no es necesario que las tildes/espacios/mayúsculas coincidan exactamente, pero el nombre de la columna no puede faltar por completo).'
+    };
+  }
   var vistosCedula = {};
   var filas = filasCrudas.map(function (filaObj, idx) {
     var f = {
       numeroFila: idx + 2, // +2: la fila 1 del archivo es el encabezado
-      cedula: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.cedula)).trim(),
-      nombre: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.nombre)).trim(),
-      telefono: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.telefono)).trim(),
-      placa: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.placa)).trim(),
-      correo: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.correo)).trim(),
-      sede: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.sede)).trim(),
-      vehiculo: String(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.vehiculo)).trim(),
-      hora: normalizarHoraCargaMasiva(leerColumnaCargaMasiva(filaObj, CARGA_MASIVA_COLUMNAS.hora)),
+      cedula: String(leerColumnaCargaMasiva(filaObj, encabezados.cedula)).trim(),
+      nombre: String(leerColumnaCargaMasiva(filaObj, encabezados.nombre)).trim(),
+      telefono: String(leerColumnaCargaMasiva(filaObj, encabezados.telefono)).trim(),
+      placa: String(leerColumnaCargaMasiva(filaObj, encabezados.placa)).trim(),
+      correo: String(leerColumnaCargaMasiva(filaObj, encabezados.correo)).trim(),
+      sede: String(leerColumnaCargaMasiva(filaObj, encabezados.sede)).trim(),
+      vehiculo: String(leerColumnaCargaMasiva(filaObj, encabezados.vehiculo)).trim(),
+      hora: normalizarHoraCargaMasiva(leerColumnaCargaMasiva(filaObj, encabezados.hora)),
       incluirAdicional: false
     };
     var errores = [];
@@ -15973,8 +16042,17 @@ function clasificarFilasCargaMasiva(filas) {
   var yaProgramados = cedulasYaProgramadasParaManana();
   filas.forEach(function (f) {
     if (f.erroresForma.length) { f.clasificacion = 'error'; f.motivo = f.erroresForma.join('; '); return; }
-    if (sedesValidas.indexOf(f.sede) === -1) { f.clasificacion = 'error'; f.motivo = 'Bodega "' + f.sede + '" no es una sede activa.'; return; }
-    if (vehiculosValidos.indexOf(f.vehiculo) === -1) { f.clasificacion = 'error'; f.motivo = 'Tipo de Vehículo "' + f.vehiculo + '" no existe en el catálogo.'; return; }
+    /* Ver FIX "Carga Masiva rechaza el 100% de las filas sin motivo claro": comparación tolerante a
+       espacios/tildes/mayúsculas (normalizarTextoComparacionCargaMasiva) -- "medellin" o "Bogotá#2-
+       Montevideo" (sin espacios) SÍ resuelven contra la sede real; f.sede/f.vehiculo quedan reescritos al
+       valor CANÓNICO del catálogo para que el resto del flujo (cuotas, franjas, creación del turno) siga
+       comparando por igualdad exacta de string sin ningún otro cambio. */
+    var sedeCanonica = resolverValorCatalogoCargaMasiva(f.sede, sedesValidas);
+    if (!sedeCanonica) { f.clasificacion = 'error'; f.motivo = 'Bodega "' + f.sede + '" no es una sede activa.'; return; }
+    f.sede = sedeCanonica;
+    var vehiculoCanonico = resolverValorCatalogoCargaMasiva(f.vehiculo, vehiculosValidos);
+    if (!vehiculoCanonico) { f.clasificacion = 'error'; f.motivo = 'Tipo de Vehículo "' + f.vehiculo + '" no existe en el catálogo.'; return; }
+    f.vehiculo = vehiculoCanonico;
     /* Ver requerimiento "Corrección de Falsos Positivos de Cédula Duplicada en Carga Masiva": ya NO bloquea
        por la sola presencia de la cédula en yaProgramados -- un mensajero con turno AM ya creado y una fila
        PM en este archivo (franjas separadas por más de 4 horas) es un caso legítimo, el mismo que el
@@ -16030,7 +16108,8 @@ function generarPlantillaCargaMasivaDemo() {
     ['Bodegas válidas', activeWarehouseIds(country).join(', ')],
     ['Tipos de Vehículo válidos', vehiculosBaseForCountry(country).join(', ')],
     ['Hora de Citación', 'Formato HH:MM, en 24 horas (ej. 08:30, 14:00).'],
-    ['Campos obligatorios', 'Cédula / INE, Nombre, Teléfono, Placa, Bodega, Tipo de Vehículo y Hora de Citación. Correo es opcional.'],
+    ['Campos obligatorios', 'Cédula / INE, Nombre, Teléfono, Placa, Bodega, Tipo de Vehículo y Hora de Citación -- si alguno queda vacío, esa fila se marca "con error" y no se crea. Correo es opcional.'],
+    ['Espacios, tildes y mayúsculas', 'Si cargas el archivo desde tu propio sistema o un script (no editando la plantilla a mano), no es necesario que el texto de Bodega y Tipo de Vehículo coincida exactamente carácter por carácter: diferencias de mayúsculas/minúsculas, tildes o espacios se reconocen igual (ej. "medellin" o "Bogotá#2-Montevideo" sin espacios también funcionan). Lo único que SÍ debe existir es el encabezado de cada columna en la primera fila -- si falta una columna obligatoria por completo, el archivo se rechaza con el motivo exacto antes de leer ninguna fila.'],
     ['Cédulas duplicadas', 'Un mismo mensajero puede tener 2 filas (ej. turno AM y turno PM) solo si las horas tienen al menos 4 horas de diferencia -- si quedan más cerca, la 2ª fila se rechaza.'],
     ['¿Qué es un "Adicional"?', 'Una fila que excede tu cuota base contratada (por cupo ya completo, día festivo o domingo, o un Tipo de Vehículo no habilitado para ti en esa Bodega) no se rechaza: queda marcada como "Adicional" en el resumen de revisión antes de crear nada. Tú decides, fila por fila (o con "Incluir todos los Adicionales"), si se envía a aprobación de Planner o se omite de la carga.']
   ];
@@ -16134,10 +16213,16 @@ function renderCargaMasivaPreview() {
   var confirmarBtn = document.getElementById('btnCargaMasivaConfirmar');
   confirmarBtn.disabled = totalIncluidos === 0;
 }
+/* Ver requerimiento "Detección y Reporte de Errores Reales de Negocio": el motivo ya viajaba en data-tip
+   (hover), pero quedaba invisible hasta que alguien pasara el mouse por encima -- para un archivo con
+   varias filas con error, eso obliga a pasar fila por fila sin ningún resumen a simple vista. Ahora el
+   motivo también queda como texto visible bajo el badge, para Error (siempre) y Adicional (el motivo real
+   de por qué excede cupo), sin dejar de tener el mismo data-tip por consistencia con el resto de badges de
+   la plataforma. */
 function cargaMasivaClasificacionBadgeHtml(f) {
   if (f.clasificacion === 'base') return '<span class="badge badge-dispatched"><i></i>Dentro de cuota</span>';
-  if (f.clasificacion === 'adicional') return '<span class="badge-sobrecupo" data-tip="' + escapeHtml(f.motivo) + '">Adicional</span>';
-  return '<span class="badge badge-critical" data-tip="' + escapeHtml(f.motivo) + '"><i></i>Error</span>';
+  if (f.clasificacion === 'adicional') return '<span class="badge-sobrecupo" data-tip="' + escapeHtml(f.motivo) + '">Adicional</span><div class="courier-sub">' + escapeHtml(f.motivo) + '</div>';
+  return '<span class="badge badge-critical" data-tip="' + escapeHtml(f.motivo) + '"><i></i>Error</span><div class="courier-sub">Fila ' + f.numeroFila + ': ' + escapeHtml(f.motivo) + '</div>';
 }
 function cargaMasivaPreviewRowHtml(f, idx) {
   var checkboxHtml = f.clasificacion === 'adicional'

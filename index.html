@@ -2629,6 +2629,11 @@
     <div class="modal-head"><h3>Carga Masiva de Programación</h3><button class="modal-close" data-close>&times;</button></div>
     <div class="modal-body">
       <p class="modal-note">Sube un archivo Excel (.xlsx) o CSV con tu programación de <strong>mañana</strong>. Nada se guarda todavía — primero verás un resumen de qué se va a crear antes de confirmar.</p>
+      <!-- Ver requerimiento "Actualización/Reforzamiento de Instrucciones en Pantalla y Modal": aclara, ANTES
+           de subir el archivo, que mayúsculas/tildes/espacios de Bodega y Tipo de Vehículo se reconocen de
+           forma tolerante (ver resolverValorCatalogoCargaMasiva en app.js) -- pensado para Aliados que
+           generan el archivo con su propio sistema/script en vez de llenar la plantilla a mano en Excel. -->
+      <p class="modal-note">Si generas el archivo con tu propio sistema (no llenando la plantilla a mano), no es necesario que Bodega y Tipo de Vehículo coincidan exactamente en mayúsculas, tildes o espacios — solo que el encabezado de cada columna exista en la primera fila. Revisa la hoja "Instrucciones" de la plantilla para el detalle completo.</p>
       <button type="button" class="btn btn-ghost" id="btnDescargarPlantillaCargaMasiva" style="margin-bottom:16px;align-self:flex-start;">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M21 21H3"/></svg>
         Descargar Plantilla
