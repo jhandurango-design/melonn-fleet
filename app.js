@@ -14441,6 +14441,28 @@ function alertarVentanaRetorno(mensajeroId, conflicto) {
   toast('warn', 'Ventana de retorno no cumplida',
     'La cédula ' + m.cedula + ' ya se encuentra registrada con un turno activo a las ' + fmtTime12(conflicto.hora) + ' (' + m.nombre + '). Por tiempo de operación y retorno (4 hrs mínimas), solo puede volver a programarse a partir de las ' + fmtTime12(fmtTimeHM(horaPermitidaDT)) + '.');
 }
+/* Ver requerimiento "Corrección de Falsos Positivos de Cédula Duplicada en Carga Masiva": equivalente de
+   turnoEnVentanaRetorno (mismo criterio EXACTO: VENTANA_RETORNO_MINUTOS, 4 horas) pero operando sobre una
+   lista de horas 'HH:MM' en memoria en vez de turnos reales de state.turnos -- lo reutilizan Carga Masiva
+   (parsearFilasCargaMasiva/clasificarFilasCargaMasiva/procesarCargaMasivaTurnos) para comparar filas DEL
+   PROPIO ARCHIVO entre sí (todavía no existen como turnos reales, no hay nada que turnoEnVentanaRetorno
+   pueda consultar) y contra cédulas ya programadas (cedulasYaProgramadasParaManana). Antes, estos 3 puntos
+   bloqueaban CUALQUIER cédula repetida sin mirar la hora -- un mensajero con turno de mañana (AM) y de tarde
+   (PM), caso real y legítimo del negocio, quedaba marcado como "Cédula duplicada"/"Ya existe un turno..."
+   aunque la diferencia real fuera de 6-8 horas, muy por encima de la ventana real de 4. */
+function minutosDesdeHHMM(hhmm) {
+  var p = hhmm.split(':');
+  return parseInt(p[0], 10) * 60 + parseInt(p[1], 10);
+}
+function horaConflictivaEnVentanaRetorno(horasExistentes, horaNueva) {
+  var minNueva = minutosDesdeHHMM(horaNueva);
+  var conflicto = null, diferenciaMinima = Infinity;
+  horasExistentes.forEach(function (h) {
+    var diff = Math.abs(minNueva - minutosDesdeHHMM(h));
+    if (diff < VENTANA_RETORNO_MINUTOS && diff < diferenciaMinima) { diferenciaMinima = diff; conflicto = h; }
+  });
+  return conflicto;
+}
 /* Ver requerimiento "Validación de Exclusividad de Mensajeros por Fecha" + ampliación "4 Criterios de
    Identidad": un mismo mensajero (identidad real de la persona, no mensajeroId -- que es un registro
    independiente POR ALIADO, ver findOrCreateMensajero) no puede quedar programado el mismo día por 2 aliados
@@ -15354,12 +15376,21 @@ function eliminarFlotaHabitual() {
 /* Extraído de procesarCargaMasivaTurnos (ver esa función, justo abajo) para que la clasificación del preview
    de la carga por archivo (ver clasificarFilasCargaMasiva) pueda usar EXACTAMENTE el mismo criterio de
    "ya programado" que la propia carga aplicará al confirmar -- nunca 2 copias que puedan desalinearse. */
+/* Ver requerimiento "Corrección de Falsos Positivos de Cédula Duplicada en Carga Masiva": el mapa ya NO es
+   {cedula: true} (bloqueo ciego) -- ahora es {cedula: ['HH:MM', ...]}, la lista de horas ya reclamadas para
+   esa cédula mañana, para que los 3 llamadores puedan aplicar horaConflictivaEnVentanaRetorno (el mismo
+   criterio de 4 horas que ya usa el ruteador de Nuevo Turno) en vez de rechazar cualquier repetición de
+   cédula sin mirar si las horas en realidad están lejos entre sí (ej. AM y PM). */
 function cedulasYaProgramadasParaManana() {
   var fecha = TOMORROW_STR;
   var yaProgramados = {};
+  function registrarHoraCedula(cedula, hora) {
+    if (!cedula || !hora) return;
+    (yaProgramados[cedula] || (yaProgramados[cedula] = [])).push(hora);
+  }
   routesInScope('tomorrow').forEach(function (r) {
     var m = getMensajero(r.mensajeroId);
-    if (m && m.cedula) yaProgramados[m.cedula] = true;
+    if (m && m.cedula) registrarHoraCedula(m.cedula, r.hora);
   });
   /* Ver requerimiento "Idempotencia / Control de Duplicados en Solicitudes al Planner" (reporte de Easyway/
      Cabify, acumulación masiva de solicitudes pendientes): la rama "fuera de ventana" de procesarCargaMasivaTurnos
@@ -15371,7 +15402,7 @@ function cedulasYaProgramadasParaManana() {
   state.solicitudesGenerales.forEach(function (s) {
     if (s.estado !== 'pendiente' || s.aliado !== state.user.aliado) return;
     if ((s.tipo === 'nuevo_turno' || s.tipo === 'cupo_adicional') && s.detalle && s.detalle.fecha === fecha && s.detalle.cedula) {
-      yaProgramados[s.detalle.cedula] = true;
+      registrarHoraCedula(s.detalle.cedula, s.detalle.hora);
     }
   });
   return yaProgramados;
@@ -15400,8 +15431,14 @@ function procesarCargaMasivaTurnos(entries, opciones) {
     return id;
   }
   entries.forEach(function (entry) {
-    if (!entry.cedula || yaProgramados[entry.cedula]) return;
-    yaProgramados[entry.cedula] = true;
+    /* Ver requerimiento "Corrección de Falsos Positivos de Cédula Duplicada en Carga Masiva": antes, una
+       SEGUNDA fila con la misma cédula (ej. turno PM de un mensajero que ya tiene turno AM en este mismo
+       lote) se descartaba en silencio aquí, aunque el preview la hubiera mostrado como válida -- mismo
+       criterio de ventana de 4 horas que el resto de la carga, nunca un bloqueo ciego por cédula repetida. */
+    if (!entry.cedula) return;
+    var horasPreviasEntry = yaProgramados[entry.cedula];
+    if (horasPreviasEntry && horaConflictivaEnVentanaRetorno(horasPreviasEntry, entry.hora)) return;
+    (yaProgramados[entry.cedula] || (yaProgramados[entry.cedula] = [])).push(entry.hora);
     var payload = { sede: entry.sede, vehiculo: entry.vehiculo, hora: entry.hora, nombre: entry.nombre, telefono: entry.telefono, cedula: entry.cedula, placa: entry.placa, correo: entry.correo, pendiente: false, fecha: fecha };
     /* Ver requerimiento "Solicitud y Mensajes para Tipología No Habilitada": carga masiva, sin modal
        interactivo por fila (igual que festivo/domingo/cupo en esta misma función) -- se registra
@@ -15593,8 +15630,11 @@ function normalizarHoraCargaMasiva(valor) {
 }
 /* Fase 0 (ver plan, sección 3): valida la FORMA del archivo ya parseado por SheetJS (array de objetos
    {encabezado: valorCelda}) -- nunca toca Supabase ni state.turnos/mensajeros, solo normaliza y marca
-   errores de forma por fila. Cédulas duplicadas DENTRO del archivo (el Aliado se equivocó al llenarlo) se
-   marcan en la 2ª+ aparición -- la 1ª sigue su curso normal hacia la Fase 1/2. */
+   errores de forma por fila. Ver requerimiento "Corrección de Falsos Positivos de Cédula Duplicada en Carga
+   Masiva": una cédula repetida DENTRO del archivo (ej. el mismo mensajero con turno AM y turno PM, caso
+   legítimo y real del negocio) ya NO se rechaza de plano -- solo si la hora de la fila repetida cae dentro
+   de la ventana de retorno (4 horas, mismo criterio que turnoEnVentanaRetorno del ruteador de Nuevo Turno)
+   de alguna hora anterior de esa misma cédula. */
 function parsearFilasCargaMasiva(filasCrudas) {
   if (!filasCrudas.length) return { ok: false, error: 'El archivo no tiene ninguna fila con datos.' };
   if (filasCrudas.length > CARGA_MASIVA_LIMITE_FILAS) {
@@ -15622,9 +15662,18 @@ function parsearFilasCargaMasiva(filasCrudas) {
     if (!f.sede) errores.push('Bodega vacía');
     if (!f.vehiculo) errores.push('Tipo de Vehículo vacío');
     if (!f.hora) errores.push('Hora de Citación inválida (formato esperado HH:MM)');
-    if (f.cedula) {
-      if (vistosCedula[f.cedula]) errores.push('Cédula duplicada dentro del archivo (ya aparece en la fila ' + vistosCedula[f.cedula] + ')');
-      else vistosCedula[f.cedula] = f.numeroFila;
+    if (f.cedula && f.hora) {
+      var ocurrenciasPrevias = vistosCedula[f.cedula];
+      if (ocurrenciasPrevias) {
+        var horaConflictoArchivo = horaConflictivaEnVentanaRetorno(ocurrenciasPrevias.map(function (o) { return o.hora; }), f.hora);
+        if (horaConflictoArchivo) {
+          var filaConflicto = ocurrenciasPrevias.filter(function (o) { return o.hora === horaConflictoArchivo; })[0].numeroFila;
+          errores.push('Ventana de retorno no cumplida: esta cédula ya aparece en la fila ' + filaConflicto + ' a las ' + fmtTime12(horaConflictoArchivo) + ' (mínimo 4 horas de diferencia).');
+        }
+        ocurrenciasPrevias.push({ numeroFila: f.numeroFila, hora: f.hora });
+      } else {
+        vistosCedula[f.cedula] = [{ numeroFila: f.numeroFila, hora: f.hora }];
+      }
     }
     f.erroresForma = errores;
     return f;
@@ -15645,7 +15694,17 @@ function clasificarFilasCargaMasiva(filas) {
     if (f.erroresForma.length) { f.clasificacion = 'error'; f.motivo = f.erroresForma.join('; '); return; }
     if (sedesValidas.indexOf(f.sede) === -1) { f.clasificacion = 'error'; f.motivo = 'Bodega "' + f.sede + '" no es una sede activa.'; return; }
     if (vehiculosValidos.indexOf(f.vehiculo) === -1) { f.clasificacion = 'error'; f.motivo = 'Tipo de Vehículo "' + f.vehiculo + '" no existe en el catálogo.'; return; }
-    if (yaProgramados[f.cedula]) { f.clasificacion = 'error'; f.motivo = 'Ya existe un turno o solicitud pendiente para esta cédula en la fecha de mañana.'; return; }
+    /* Ver requerimiento "Corrección de Falsos Positivos de Cédula Duplicada en Carga Masiva": ya NO bloquea
+       por la sola presencia de la cédula en yaProgramados -- un mensajero con turno AM ya creado y una fila
+       PM en este archivo (franjas separadas por más de 4 horas) es un caso legítimo, el mismo que el
+       ruteador de Nuevo Turno ya permite vía turnoEnVentanaRetorno. Solo error si la hora nueva cae DENTRO
+       de la ventana de retorno de alguna hora ya reclamada para esa cédula. */
+    var horaConflictoYaProgramado = yaProgramados[f.cedula] ? horaConflictivaEnVentanaRetorno(yaProgramados[f.cedula], f.hora) : null;
+    if (horaConflictoYaProgramado) {
+      f.clasificacion = 'error';
+      f.motivo = 'Ventana de retorno no cumplida: ya tiene un turno o solicitud a las ' + fmtTime12(horaConflictoYaProgramado) + ' ese mismo día (mínimo 4 horas de diferencia).';
+      return;
+    }
     var conflictoOtroAliado = mensajeroProgramadoPorOtroAliado({ cedula: f.cedula, placa: f.placa, correo: f.correo, nombre: f.nombre }, TOMORROW_STR, state.user.aliado);
     if (conflictoOtroAliado) { f.clasificacion = 'error'; f.motivo = mensajeDuplicidadAliado(conflictoOtroAliado); return; }
     var mensajeroExistente = state.mensajeros.find(function (m) { return m.aliado === state.user.aliado && m.cedula === f.cedula && !m.superseded; });
@@ -15691,7 +15750,7 @@ function generarPlantillaCargaMasivaDemo() {
     ['Tipos de Vehículo válidos', vehiculosBaseForCountry(country).join(', ')],
     ['Hora de Citación', 'Formato HH:MM, en 24 horas (ej. 08:30, 14:00).'],
     ['Campos obligatorios', 'Cédula / INE, Nombre, Teléfono, Placa, Bodega, Tipo de Vehículo y Hora de Citación. Correo es opcional.'],
-    ['Cédulas duplicadas', 'No repitas la misma Cédula / INE dos veces en el archivo -- la 2ª aparición se rechaza.'],
+    ['Cédulas duplicadas', 'Un mismo mensajero puede tener 2 filas (ej. turno AM y turno PM) solo si las horas tienen al menos 4 horas de diferencia -- si quedan más cerca, la 2ª fila se rechaza.'],
     ['¿Qué es un "Adicional"?', 'Una fila que excede tu cuota base contratada (por cupo ya completo, día festivo o domingo, o un Tipo de Vehículo no habilitado para ti en esa Bodega) no se rechaza: queda marcada como "Adicional" en el resumen de revisión antes de crear nada. Tú decides, fila por fila (o con "Incluir todos los Adicionales"), si se envía a aprobación de Planner o se omite de la carga.']
   ];
   var blob = buildXlsxBlob([
