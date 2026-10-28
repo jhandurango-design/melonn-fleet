@@ -9620,10 +9620,17 @@ function rowHtmlSeguimiento(route) {
   } else {
     accion += primaryActions.join('') + rowMenuToggleHtml(route.id, '') + verHistorialInline;
   }
+  /* Ver requerimiento "Datos del mensajero agrupados + copiar, igual que Bodega/Planner, para el Aliado":
+     mismo bloque .courier (nombre/cédula/teléfono/placa/correo) + botón "Copiar datos del mensajero" que ya
+     usa rowHtmlDespacho/rowHtmlConsolidado -- el Aliado no lo tenía, aunque es exactamente su propia flota.
+     La columna "Vehículo / Placa" se queda solo con la tipología del vehículo (la placa ya vive en el bloque
+     del mensajero, no hace falta repetirla aparte). */
   return '<tr data-route="' + route.id + '">' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
-    '<td>' + m.nombre + '</td>' +
-    '<td>' + route.vehiculo + ' · ' + m.placa + '</td>' +
+    '<td><div class="courier"><div><div class="courier-name">' + m.nombre + '</div><div class="courier-sub">CÉDULA/INE ' + m.cedula + ' · Tel ' + m.telefono + '</div><div class="courier-sub">Placa ' + m.placa + '</div><div class="courier-sub">' + m.correo + '</div></div>' +
+      '<button class="copy-btn" data-act="copiar-info" data-id="' + route.id + '" data-tip="Copiar datos del mensajero">' + ICONS.copiar + '</button>' +
+      '</div></td>' +
+    '<td>' + route.vehiculo + '</td>' +
     '<td>' + route.sede + '</td>' +
     '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td><div class="row-actions">' + accion + '</div></td>' +
