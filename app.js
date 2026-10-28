@@ -18521,6 +18521,22 @@ function cuotasMatrizTablaHtml(sede, aliado, esProxima, editable) {
   var vehiculos = cuotasVehiculosPaisCompleto(country);
   var franjas = cuotasFranjasActivas(country);
   var matrizFuente = esProxima ? state.cuotasMatrizProxima : state.cuotasMatriz;
+  /* Ver requerimiento "Cuota Huérfana de Tipología Retirada/Dividida (Dedicado Rappi)": cuotasVehiculosPaisCompleto
+     (arriba) ya es dinámico (ver syncVehiculosDesdeTipologias -- CUOTAS_VEHICULOS_CO_BASE se recalcula solo
+     con las tipologías ACTIVAS del catálogo), así que al desactivar/dividir una tipología (ej. "Dedicado
+     Rappi" -> "Dedicado Rappi Moto"/"Dedicado Rappi Van") cualquier cupo REAL que ya tuviera asignado para
+     esta sede+aliado dejaba de tener fila en el editor -- invisible, sin forma de verla ni de llevarla a 0/
+     eliminarla -- mientras Avance de Cuotas (cuotasProgresoPorSede/cuotasProgresoPorAliadoManana) seguía
+     contándola, porque esas 2 funciones leen state.cuotasMatriz directo, sin pasar por este mismo filtro de
+     catálogo activo (caso real reportado: Cordiandina/Barranquilla seguía mostrando "Dedicado Rappi: 0/1" en
+     el resumen sin que Admin pudiera encontrarla en Cuotas de Flota para retirarla). Se agrega cualquier
+     vehículo con cupo real > 0 en esta sede+aliado que el catálogo activo ya no incluya -- así el editor
+     nunca vuelve a tener una fila con datos reales que sea imposible de gestionar. */
+  var vehiculosHuerfanosVistos = {};
+  matrizFuente.forEach(function (c) {
+    if (c.sede === sede && c.aliado === aliado && c.cantidad > 0 && vehiculos.indexOf(c.vehiculo) === -1) vehiculosHuerfanosVistos[c.vehiculo] = true;
+  });
+  vehiculos = vehiculos.concat(Object.keys(vehiculosHuerfanosVistos));
 
   /* colgroup + table-layout:fixed (ver .cuotas-matriz-tabla en styles.css) fuerza el MISMO ancho de columna
      en cabecera/cuerpo/pie de ESTA tabla — y entre bloques distintos de la vista en cascada, que son tablas
