@@ -1633,15 +1633,20 @@
           </div>
         </div>
 
+        <!-- Ver requerimiento "Retiquetado Dinámico por Rol en Solicitudes y Cambios": los 3 textos de cada
+             pestaña (botón del tab list, título H2 del panel y subtítulo de la página) ahora varían según el
+             rol activo -- ver SOLICITUDES_TABS_POR_ROL/solicitudesHeaderSync en app.js. El texto de abajo es
+             solo el fallback inicial antes del primer render. -->
         <div class="segmented" id="solicitudesTabSegment">
-          <button type="button" data-tab="pendientes" class="active">Solicitudes Pendientes</button>
+          <button type="button" data-tab="pendientes" id="solicitudesTabPendientes" class="active">Solicitudes Pendientes</button>
           <!-- Ver requerimiento "Corrección Exclusiva de Front-End: Filtrado de Bandeja en 'Solicitudes y
-               Cambios' (Vista Aliado)", punto 3: pestaña exclusiva de ALIADO (ver solicitudesHeaderSync, que la
-               oculta para el resto de roles) -- lo que el propio Aliado emitió y sigue esperando respuesta DE
-               Planner, separado de "Pendientes" (que ahora es solo lo que el Aliado debe revisar/responder
-               él mismo, ver solicitudesPendientesUnificadas). Informativa, sin Aceptar/Rechazar. -->
+               Cambios' (Vista Aliado)", punto 3: pestaña originalmente exclusiva de ALIADO -- lo que el propio
+               Aliado emitió y sigue esperando respuesta DE Planner, separado de "Pendientes" (que ahora es solo
+               lo que el Aliado debe revisar/responder él mismo, ver solicitudesPendientesUnificadas).
+               Informativa, sin Aceptar/Rechazar. Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega":
+               BODEGA también la usa ahora (ver solicitudesHeaderSync, que ya no la oculta para ese rol). -->
           <button type="button" data-tab="enviadas" id="solicitudesTabEnviadas" hidden>Mis Solicitudes Enviadas</button>
-          <button type="button" data-tab="historial">Historial de Solicitudes</button>
+          <button type="button" data-tab="historial" id="solicitudesTabHistorial">Historial de Solicitudes</button>
         </div>
 
         <div id="solicitudesPendPanel">
@@ -1652,8 +1657,8 @@
           <section class="table-card" id="solicitudesPendCard">
             <div class="table-head">
               <div>
-                <h2>Solicitudes pendientes</h2>
-                <div class="count"><span id="solicitudesCount">0</span> solicitudes por atender</div>
+                <h2 id="solicitudesPendTitle">Solicitudes pendientes</h2>
+                <div class="count"><span id="solicitudesCount">0</span> <span id="solicitudesCountLabel">solicitudes por atender</span></div>
               </div>
               <div class="filter-bar">
                 <div class="field" id="solicitudesBodegaField">

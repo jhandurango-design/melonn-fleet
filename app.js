@@ -13764,34 +13764,54 @@ function clampSolicitudesHistRango() {
   }
   document.getElementById('solicitudesHistFechaFin').value = fin;
 }
+/* Ver requerimiento "Retiquetado Dinámico por Rol en Solicitudes y Cambios": antes las 3 pestañas tenían
+   etiquetas genéricas iguales para los 3 roles ("Solicitudes Pendientes"/"Mis Solicitudes Enviadas"),
+   ambiguas sobre quién debe responder y de dónde viene cada solicitud -- especialmente para BODEGA, que
+   interactúa con Aliados Y con Planner a la vez, sobre la misma bandeja. Cada entrada cubre los 2 textos de
+   una pestaña: "tab" (botón del tab list Y título H2 del panel correspondiente -- mismo texto en los 2
+   lugares, a propósito, para reforzar la asociación visual entre pestaña y contenido) y "sub" (subtítulo de
+   la página bajo el H1, ver solicitudesHeaderSync -- cambia según cuál de las 3 pestañas esté activa en ese
+   momento). ADMIN no tiene entrada propia -- nunca llega a esta vista (no está en su ROLE_VIEWS); reutiliza
+   PLANNER solo como red de seguridad defensiva, por si esa restricción cambiara algún día. */
+var SOLICITUDES_TABS_POR_ROL = {
+  ALIADO: {
+    pendientes: { tab: 'Por Aprobar por Mí', sub: 'Solicitudes enviadas por Melonn que requieren tu respuesta' },
+    enviadas: { tab: 'Enviadas a Melonn', sub: 'Solicitudes que enviaste y están en revisión por el equipo Melonn' },
+    historial: { tab: 'Historial de Solicitudes', sub: 'Registro histórico de decisiones' }
+  },
+  PLANNER: {
+    pendientes: { tab: 'Por Aprobar por Melonn', sub: 'Solicitudes enviadas por los aliados pendientes de tu aprobación' },
+    enviadas: { tab: 'Enviadas a Aliados', sub: 'Solicitudes o ajustes que enviaste a los aliados' },
+    historial: { tab: 'Historial de Solicitudes', sub: 'Histórico general de cambios' }
+  },
+  BODEGA: {
+    pendientes: { tab: 'Enviadas por Aliados', sub: 'Novedades y solicitudes que enviaron las empresas de mensajería para esta bodega' },
+    enviadas: { tab: 'Enviadas por Planner', sub: 'Ajustes o autorizaciones enviadas por el equipo de Planeación para esta bodega' },
+    historial: { tab: 'Historial de Solicitudes', sub: 'Histórico de solicitudes resueltas en esta bodega' }
+  }
+};
+SOLICITUDES_TABS_POR_ROL.ADMIN = SOLICITUDES_TABS_POR_ROL.PLANNER;
 function solicitudesHeaderSync() {
   var role = state.user.role;
+  var textos = SOLICITUDES_TABS_POR_ROL[role] || SOLICITUDES_TABS_POR_ROL.PLANNER;
   var sub = document.getElementById('solicitudesSub');
   var btnNueva = document.getElementById('btnNuevaSolicitud');
+  var tabPendientes = document.getElementById('solicitudesTabPendientes');
+  var tabEnviadas = document.getElementById('solicitudesTabEnviadas');
+  var tabHistorial = document.getElementById('solicitudesTabHistorial');
+  var tituloPend = document.getElementById('solicitudesPendTitle');
+  var tituloEnviadas = document.getElementById('solicitudesEnviadasTitle');
   var histTitle = document.getElementById('solicitudesHistTitle');
-  /* Ver requerimiento "Ampliación de Arquitectura Simétrica y Bidireccional...": "Mis Solicitudes Enviadas"
+  /* Ver requerimiento "Ampliación de Arquitectura Simétrica y Bidireccional...": la pestaña "Enviadas"
      también aplica a PLANNER (emisor de Ajuste Extraordinario/Reprogramación Masiva/Cancelar-Reprogramar
      directo desde Consolidado) -- NO a ADMIN (no tiene 'solicitudes' en su ROLE_VIEWS, nunca llega a esta
-     vista). Si el rol activo pierde la pestaña mientras estaba parado en ella (switch de usuario), vuelve a
-     "Pendientes" para no quedar en un panel oculto.
-     Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega": BODEGA se suma a esta pestaña -- nunca
-     EMITE nada (sigue sin botón "+ Nueva Solicitud" ni "Cancelar Solicitud", ver más abajo y
-     renderSolicitudesEnviadas), pero SÍ necesita ver, aislado del resto, lo que Planner envió sobre turnos
-     de su propia sede -- antes vivía mezclado sin distinción dentro de "Solicitudes Pendientes" (ver el
-     filtro origen==='aliado' agregado ahí). El texto del botón cambia por rol más abajo (ver tabEnviadas.
-     textContent) porque, a diferencia de Aliado/Planner, Bodega no "envía" nada -- solo observa. */
-  var tabEnviadas = document.getElementById('solicitudesTabEnviadas');
+     vista). Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega": BODEGA también la usa -- nunca
+     EMITE nada (sigue sin botón "+ Nueva Solicitud" ni "Cancelar Solicitud", ver renderSolicitudesEnviadas),
+     pero sí necesita ver, aislado del resto, lo que Planner envió sobre turnos de su propia sede. Si el rol
+     activo pierde la pestaña mientras estaba parado en ella (switch de usuario), vuelve a "Pendientes" para
+     no quedar en un panel oculto. */
   var veEnviadas = role === 'ALIADO' || role === 'PLANNER' || role === 'BODEGA';
   tabEnviadas.hidden = !veEnviadas;
-  tabEnviadas.textContent = role === 'BODEGA' ? 'Enviado por Planner' : 'Mis Solicitudes Enviadas';
-  /* Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega": título + texto del contador del panel,
-     antes fijos en el HTML (solo tenían sentido para ALIADO) -- ahora reflejan los 3 roles que comparten
-     este panel. BODEGA nunca "envía" nada aquí (solo observa lo que Planner envió), así que su título evita
-     la palabra "Mis". */
-  var tituloEnviadas = document.getElementById('solicitudesEnviadasTitle');
-  var labelEnviadas = document.getElementById('solicitudesEnviadasCountLabel');
-  if (tituloEnviadas) tituloEnviadas.textContent = role === 'BODEGA' ? 'Enviado por Planner' : 'Mis solicitudes enviadas';
-  if (labelEnviadas) labelEnviadas.textContent = role === 'ALIADO' ? 'en revisión por Planner' : 'en revisión por el Aliado';
   if (!veEnviadas) {
     if (state.solicitudesTab === 'enviadas') state.solicitudesTab = 'pendientes';
     /* Vacía el contenedor (no solo lo oculta) -- mismo criterio que "Historial del Mes" en Despacho/
@@ -13800,28 +13820,26 @@ function solicitudesHeaderSync() {
        panel sigue oculto, pero no deben quedar ahí). */
     document.getElementById('solicitudesEnviadasTbody').innerHTML = '';
   }
-  if (role === 'ALIADO') {
-    sub.textContent = 'Solicitudes de cancelación / reprogramación entre ' + state.user.aliado + ' y el equipo Melonn';
-    btnNueva.hidden = false;
-    histTitle.textContent = 'Historial de solicitudes';
-  } else if (role === 'PLANNER') {
-    /* Refleja el alcance real de la bandeja (Pendientes), no la sede activa fija del Header — ahora que la
-       malla base es país-completo y el filtro local #solicitudesBodega puede acotarla a una bodega puntual o
-       dejarla en "Todas las bodegas" (ver solicitudesPendientesUnificadas). Planner ahora también puede crear
-       solicitudes hacia un Aliado (ver openNuevaSolicitudModalPlanner) — Admin se queda solo lectura, ver rama
-       siguiente. */
-    sub.textContent = (state.solicitudesFiltroBodega || 'Todas las bodegas') + ' — solicitudes enviadas por los aliados de flota';
-    btnNueva.hidden = !canDo('solicitud.create.planner');
-    histTitle.textContent = 'Historial de solicitudes';
-  } else if (role === 'ADMIN') {
-    sub.textContent = (state.solicitudesFiltroBodega || 'Todas las bodegas') + ' — solicitudes enviadas por los aliados de flota';
-    btnNueva.hidden = true;
-    histTitle.textContent = 'Historial de solicitudes';
-  } else {
-    sub.textContent = state.user.sede + ' — cambios operativos que afectan tus turnos (solo consulta)';
-    btnNueva.hidden = true;
-    histTitle.textContent = 'Historial de solicitudes resueltas';
-  }
+  /* Los 3 textos de pestaña/título se fijan siempre los 3, estén o no visibles ahora mismo -- así ya quedan
+     listos si el usuario cambia de pestaña, sin depender de volver a pasar por aquí. */
+  tabPendientes.textContent = textos.pendientes.tab;
+  if (tituloPend) tituloPend.textContent = textos.pendientes.tab;
+  tabEnviadas.textContent = textos.enviadas.tab;
+  if (tituloEnviadas) tituloEnviadas.textContent = textos.enviadas.tab;
+  tabHistorial.textContent = textos.historial.tab;
+  histTitle.textContent = textos.historial.tab;
+  /* Subtítulo de la página: depende de cuál de las 3 pestañas esté ACTIVA en este momento (cambia al
+     cambiar de pestaña, ver switchSolicitudesTab). */
+  sub.textContent = (textos[state.solicitudesTab] || textos.pendientes).sub;
+  var labelEnviadas = document.getElementById('solicitudesEnviadasCountLabel');
+  if (labelEnviadas) labelEnviadas.textContent = role === 'ALIADO' ? 'en revisión por Planner' : 'en revisión por el Aliado';
+  /* BODEGA nunca "atiende" nada en esta bandeja (solo lectura, sin Aceptar/Rechazar) -- "por atender"
+     implicaría una acción que este rol nunca tiene disponible aquí. */
+  var labelPend = document.getElementById('solicitudesCountLabel');
+  if (labelPend) labelPend.textContent = role === 'BODEGA' ? 'solicitudes recibidas' : 'solicitudes por atender';
+  if (role === 'ALIADO') btnNueva.hidden = false;
+  else if (role === 'PLANNER') btnNueva.hidden = !canDo('solicitud.create.planner');
+  else btnNueva.hidden = true;
 }
 function renderSolicitudesPendientes() {
   var role = state.user.role;
