@@ -508,12 +508,13 @@ a{color:inherit;}
 .franja-filter-btn:focus{border-color:var(--lilac-deep);box-shadow:0 0 0 3px var(--lilac-soft);}
 .franja-filter-btn.active{border-color:var(--lilac-deep);color:var(--lilac-deep);font-weight:700;}
 .franja-filter-menu{max-height:280px;overflow-y:auto;}
-.franja-filter-menu-actions{display:flex;gap:6px;padding:2px 2px 6px;border-bottom:1px solid var(--border);margin-bottom:4px;}
-.franja-filter-menu-actions button{flex:1;border:1px solid var(--border);background:none;border-radius:6px;padding:6px 8px;font-size:11px !important;font-weight:700;color:var(--text-secondary);cursor:pointer;}
-.franja-filter-menu-actions button:hover{background:var(--muted-soft);color:var(--text-primary);}
 .franja-filter-menu-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;font-size:12.5px !important;font-weight:500;color:var(--text-primary);}
 .franja-filter-menu-item:hover{background:var(--muted-soft);}
 .franja-filter-menu-item input[type="checkbox"]{width:15px;height:15px;flex-shrink:0;accent-color:var(--lilac-deep);cursor:pointer;}
+/* Checkbox maestro "Seleccionar todas" (ver requerimiento "Limpieza del menú de Franja/Hora", reemplaza los
+   botones "Todas"/"Ninguna" anteriores) -- separado visualmente del resto con una línea y texto en negrita,
+   mismo criterio que un encabezado de lista con checkbox maestro. */
+.franja-filter-menu-maestro{font-weight:700 !important;border-bottom:1px solid var(--border);border-radius:0;margin-bottom:4px;padding-bottom:9px;}
 
 /* ---------------- Body: sidebar + main ---------------- */
 .body{display:flex;flex:1;min-height:0;}

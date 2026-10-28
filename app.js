@@ -10292,23 +10292,32 @@ function toggleFranjaFilterMenu(btnId, stateKey, renderFn) {
     renderFn();
   }
 
+  /* Ver requerimiento "Limpieza del menú de Franja/Hora": reemplaza los 2 botones "Todas"/"Ninguna" por un
+     único checkbox maestro "Seleccionar todas" -- marcado selecciona todo, desmarcado limpia todo, y queda
+     en estado indeterminado (guion) cuando hay una selección parcial, mismo patrón estándar de "encabezado
+     de lista con checkbox maestro". */
+  var maestroCb = null;
+  function syncMaestro() {
+    if (!maestroCb) return;
+    maestroCb.checked = opciones.length > 0 && seleccion.length === opciones.length;
+    maestroCb.indeterminate = seleccion.length > 0 && seleccion.length < opciones.length;
+  }
   if (opciones.length > 1) {
-    var acciones = document.createElement('div');
-    acciones.className = 'franja-filter-menu-actions';
-    var btnTodas = document.createElement('button'); btnTodas.type = 'button'; btnTodas.textContent = 'Todas';
-    var btnNinguna = document.createElement('button'); btnNinguna.type = 'button'; btnNinguna.textContent = 'Ninguna';
-    btnTodas.addEventListener('click', function () {
-      seleccion = opciones.slice();
-      menu.querySelectorAll('input[type="checkbox"]').forEach(function (cb) { cb.checked = true; });
+    var maestroLabel = document.createElement('label');
+    maestroLabel.className = 'franja-filter-menu-item franja-filter-menu-maestro';
+    maestroCb = document.createElement('input');
+    maestroCb.type = 'checkbox';
+    maestroCb.addEventListener('change', function () {
+      seleccion = maestroCb.checked ? opciones.slice() : [];
+      menu.querySelectorAll('.franja-filter-menu-item:not(.franja-filter-menu-maestro) input[type="checkbox"]').forEach(function (cb) { cb.checked = maestroCb.checked; });
+      maestroCb.indeterminate = false;
       syncBtnYRender();
     });
-    btnNinguna.addEventListener('click', function () {
-      seleccion = [];
-      menu.querySelectorAll('input[type="checkbox"]').forEach(function (cb) { cb.checked = false; });
-      syncBtnYRender();
-    });
-    acciones.appendChild(btnTodas); acciones.appendChild(btnNinguna);
-    menu.appendChild(acciones);
+    var maestroSpan = document.createElement('span');
+    maestroSpan.textContent = 'Seleccionar todas';
+    maestroLabel.appendChild(maestroCb); maestroLabel.appendChild(maestroSpan);
+    menu.appendChild(maestroLabel);
+    syncMaestro();
   }
 
   if (!opciones.length) {
@@ -10328,6 +10337,7 @@ function toggleFranjaFilterMenu(btnId, stateKey, renderFn) {
     cb.addEventListener('change', function () {
       if (cb.checked) { if (seleccion.indexOf(h) === -1) seleccion.push(h); }
       else { seleccion = seleccion.filter(function (x) { return x !== h; }); }
+      syncMaestro();
       syncBtnYRender();
     });
     var span = document.createElement('span');
