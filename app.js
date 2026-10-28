@@ -8773,10 +8773,13 @@ function rowHtmlDespacho(route) {
   return '<tr data-route="' + route.id + '">' +
     bodegaCell +
     '<td>' + aliadoLabelHtml(m.aliado) + '</td>' +
-    '<td><div class="courier"><div><div class="courier-name">' + m.nombre + '</div><div class="courier-sub">CÉDULA/INE ' + m.cedula + ' · Tel ' + m.telefono + '</div><div class="courier-sub">' + m.correo + '</div></div>' +
+    /* Ver requerimiento "Placa dentro de los datos del mensajero, eliminar columna de Placa" (Programación en
+       Vivo, compartida Bodega/Planner): la Placa deja de ser su propia columna y pasa a ser una línea más del
+       bloque de datos del mensajero (como CÉDULA/Tel y el correo), igual que ya hace rowHtmlConsolidado con
+       la placa en el mismo bloque -- esta tabla era la única que la dejaba aparte. */
+    '<td><div class="courier"><div><div class="courier-name">' + m.nombre + '</div><div class="courier-sub">CÉDULA/INE ' + m.cedula + ' · Tel ' + m.telefono + '</div><div class="courier-sub">Placa ' + m.placa + '</div><div class="courier-sub">' + m.correo + '</div></div>' +
       '<button class="copy-btn" data-act="copiar-info" data-id="' + route.id + '" data-tip="Copiar datos del mensajero">' + ICONS.copiar + '</button>' +
       '</div></td>' +
-    '<td>' + m.placa + '</td>' +
     '<td>' + route.vehiculo + '</td>' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
     '<td>' + fmtTime12(route.llegada) + '</td>' +
