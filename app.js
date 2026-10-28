@@ -3513,6 +3513,22 @@ function turnosProgramadosGlobalCount(sede, aliado, fecha) {
     return true;
   }).length;
 }
+/* Ver requerimiento "Corrección de Conteo de Pendientes en Avance de Cuotas" (reporte real: "+5 Adicionales
+   (2 pendientes de aprobación)" cuando en realidad los 5 eran del mismo aliado y seguían pendientes):
+   equivalente GLOBAL de turnosPendientesAprobacionCount, mismo criterio exacto que turnosProgramadosGlobalCount
+   arriba (FIX "Desfase de conteo en Avance de Cuotas") -- turnosPendientesAprobacionCount exige franja+
+   vehiculo EXACTOS de una fila de la matriz de cuotas, así que un turno "Pendiente de Aprobación por Planner"
+   en una franja SIN cupo contratado (ver cuotasAgregarFranjasFueraDeMatriz, "sin cupo contratado en esta
+   franja" en el desglose) nunca se contaba: cuotasProgresoPorSede solo invoca esa función narrow dentro de
+   matriz.forEach (filas CONTRATADAS), nunca para las franjas fuera de matriz que el desglose sí agrega
+   después. actuales ya tenía este mismo arreglo (ver esa línea, unas líneas más abajo en cuotasProgresoPorSede)
+   -- pendientes se había quedado sin el mismo tratamiento. */
+function turnosPendientesAprobacionGlobalCount(sede, aliado, fecha) {
+  return state.turnos.filter(function (r) {
+    if (r.sede !== sede || r.fecha !== fecha || !r.pendienteAprobacionPlanner) return false;
+    return getMensajero(r.mensajeroId).aliado === aliado;
+  }).length;
+}
 function checkCuotaGlobalExceso(sede, aliado, fecha) {
   if (!cuotasActivoPais(countryForSede(sede)) || esFlotaPropia(aliado)) return { excedida: false };
   var cantidad = cuotaGlobalAsignada(sede, aliado, fecha);
@@ -18955,6 +18971,12 @@ function cuotasProgresoPorSede(aliado, fecha) {
        lógica real de bloqueo. Se sobreescribe aquí con el mismo conteo real, cierra la brecha entre lo que
        se ve y lo que de verdad cuenta. */
     porSede[s].actuales = turnosProgramadosGlobalCount(s, aliado, fecha);
+    /* Ver requerimiento "Corrección de Conteo de Pendientes en Avance de Cuotas": mismo criterio que la línea
+       de arriba, aplicado a pendientes (ver turnosPendientesAprobacionGlobalCount) -- sin esto, un Adicional
+       en una franja sin cupo contratado contaba en el total "+N Adicionales" pero no en "(N pendientes de
+       aprobación por Planner)", dando la impresión de que varios ya habían sido resueltos cuando en realidad
+       todos seguían pendientes. */
+    porSede[s].pendientes = turnosPendientesAprobacionGlobalCount(s, aliado, fecha);
   });
   return Object.keys(porSede).sort().map(function (s) { return porSede[s]; });
 }
