@@ -807,10 +807,13 @@
                  adicionales, visibles para los 3 roles de esta vista (Planner/Bodega/Auditor) sin importar
                  el resto de filtros de arriba -- opciones repobladas en cada render (ver
                  refreshFranjaFilterOptions/refreshEstadoFilterOptions en app.js) a partir de lo que de
-                 verdad queda en el alcance ya filtrado por Bodega/Aliado/Mensajero. -->
+                 verdad queda en el alcance ya filtrado por Bodega/Aliado/Mensajero.
+                 Ver requerimiento "Selección múltiple en Filtro de Franja/Hora": Franja/Hora pasó de
+                 <select> de un solo valor a un botón que abre un menú de checkboxes (toggleFranjaFilterMenu
+                 en app.js) -- Estado se queda como <select> normal, nunca tuvo ese pedido. -->
             <div class="field" id="despachoFranjaField" style="min-width:170px;">
-              <label for="despachoFiltroFranja">Franja / Hora</label>
-              <select id="despachoFiltroFranja"></select>
+              <label for="despachoFiltroFranjaBtn">Franja / Hora</label>
+              <button type="button" class="franja-filter-btn" id="despachoFiltroFranjaBtn">Todas las franjas</button>
             </div>
             <div class="field" id="despachoEstadoField" style="min-width:220px;">
               <label for="despachoFiltroEstado">Estado</label>
@@ -1119,10 +1122,12 @@
             </div>
             <!-- Ver requerimiento "Filtros de Franja y Estado en Programación en Vivo": mismos 2
                  desplegables que #view-despacho (ver ese comentario) -- aquí encadenados después de
-                 Bodega/Mensajero (ver refreshFranjaFilterOptions/refreshEstadoFilterOptions en app.js). -->
+                 Bodega/Mensajero (ver refreshFranjaFilterOptions/refreshEstadoFilterOptions en app.js).
+                 Ver requerimiento "Selección múltiple en Filtro de Franja/Hora" -- mismo botón+menú de
+                 checkboxes que #despachoFiltroFranjaBtn. -->
             <div class="field" id="seguimientoFranjaField" style="min-width:170px;">
-              <label for="seguimientoFiltroFranja">Franja / Hora</label>
-              <select id="seguimientoFiltroFranja"></select>
+              <label for="seguimientoFiltroFranjaBtn">Franja / Hora</label>
+              <button type="button" class="franja-filter-btn" id="seguimientoFiltroFranjaBtn">Todas las franjas</button>
             </div>
             <div class="field" id="seguimientoEstadoField" style="min-width:220px;">
               <label for="seguimientoFiltroEstado">Estado</label>

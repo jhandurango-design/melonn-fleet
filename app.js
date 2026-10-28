@@ -2209,15 +2209,18 @@ const state = {
      Estado en Programación en Vivo"): mismo patrón cascada que despachoFiltroMensajero -- encadenados
      DESPUÉS de Bodega/Aliado/Mensajero (ver renderDespacho/refreshFranjaFilterOptions/
      refreshEstadoFilterOptions), con opciones que se repueblan en cada render a partir de lo que de verdad
-     queda en el alcance ya filtrado hasta ese punto. */
-  despachoFiltroFranja: '',
+     queda en el alcance ya filtrado hasta ese punto.
+     Ver requerimiento "Selección múltiple en Filtro de Franja/Hora": despachoFiltroFranja pasó de string
+     (un solo valor, <select>) a array (varios valores a la vez, botón+menú de checkboxes, ver
+     toggleFranjaFilterMenu) -- [] sigue significando "todas las franjas", igual que '' antes. */
+  despachoFiltroFranja: [],
   despachoFiltroEstado: '',
   /* Programación (ALIADO) — Seguimiento en vivo: mismo filtro estandarizado, encadenado con el modo
      Día/Historial activo (ver renderSeguimiento). */
   seguimientoFiltroMensajero: '',
   /* Mismos 2 filtros que despachoFiltroFranja/despachoFiltroEstado, ver ese comentario -- aquí encadenados
      después de Bodega/Mensajero (ver renderSeguimiento). */
-  seguimientoFiltroFranja: '',
+  seguimientoFiltroFranja: [],
   seguimientoFiltroEstado: '',
   /* Rango de fechas de la pestaña Historial de Seguimiento — mismo patrón que consolHistDesde/Hasta
      (sustituye al selector de Mes fijo anterior). */
@@ -8399,8 +8402,8 @@ function renderDespacho() {
   /* Filtro por Franja/Hora de citación y por Estado del turno (ver requerimiento "Filtros de Franja y
      Estado en Programación en Vivo") -- encadenados después de Bodega/Aliado/Mensajero, para los 3 roles con
      acceso a esta vista (PLANNER/BODEGA/AUDITOR). */
-  state.despachoFiltroFranja = refreshFranjaFilterOptions('despachoFiltroFranja', routes, state.despachoFiltroFranja);
-  if (state.despachoFiltroFranja) routes = routes.filter(function (r) { return r.hora === state.despachoFiltroFranja; });
+  state.despachoFiltroFranja = refreshFranjaFilterOptions('despachoFiltroFranjaBtn', routes, state.despachoFiltroFranja);
+  if (state.despachoFiltroFranja.length) routes = routes.filter(function (r) { return state.despachoFiltroFranja.indexOf(r.hora) !== -1; });
   state.despachoFiltroEstado = refreshEstadoFilterOptions('despachoFiltroEstado', routes, state.despachoFiltroEstado);
   if (state.despachoFiltroEstado) routes = routes.filter(function (r) { return computeEstado(r).code === state.despachoFiltroEstado; });
   /* Ver requerimiento "Confirmación de Entregable Anterior...", punto 4: "Exportar Programación" -- mismo
@@ -9707,8 +9710,8 @@ function renderSeguimiento() {
   state.seguimientoFiltroMensajero = refreshMensajeroFilterOptions('seguimientoFiltroMensajero', routes, state.seguimientoFiltroMensajero, 'Todos mis mensajeros');
   if (state.seguimientoFiltroMensajero) routes = routes.filter(function (r) { return r.mensajeroId === state.seguimientoFiltroMensajero; });
   /* Mismos 2 filtros que renderDespacho (ver ese comentario), encadenados después de Bodega/Mensajero. */
-  state.seguimientoFiltroFranja = refreshFranjaFilterOptions('seguimientoFiltroFranja', routes, state.seguimientoFiltroFranja);
-  if (state.seguimientoFiltroFranja) routes = routes.filter(function (r) { return r.hora === state.seguimientoFiltroFranja; });
+  state.seguimientoFiltroFranja = refreshFranjaFilterOptions('seguimientoFiltroFranjaBtn', routes, state.seguimientoFiltroFranja);
+  if (state.seguimientoFiltroFranja.length) routes = routes.filter(function (r) { return state.seguimientoFiltroFranja.indexOf(r.hora) !== -1; });
   state.seguimientoFiltroEstado = refreshEstadoFilterOptions('seguimientoFiltroEstado', routes, state.seguimientoFiltroEstado);
   if (state.seguimientoFiltroEstado) routes = routes.filter(function (r) { return computeEstado(r).code === state.seguimientoFiltroEstado; });
   /* Ver requerimiento "Confirmación de Entregable Anterior...", punto 4: mismo criterio que
@@ -10226,16 +10229,115 @@ function refreshAliadoFilterOptions(selId, bodegaFieldId, bodegaSelId) {
    ese punto), nunca de la malla completa del día, así que solo ofrece horas de citación que de verdad tienen
    algún turno en el alcance actual. Devuelve el valor resuelto (el mismo si sigue siendo válido, o '' si ya
    no aplica) para que el llamador lo guarde de vuelta en su propio campo de state. */
-function refreshFranjaFilterOptions(selId, routesEnAlcance, currentValue) {
-  var sel = document.getElementById(selId);
-  if (!sel) return currentValue;
+/* Ver requerimiento "Selección múltiple en Filtro de Franja/Hora": antes refreshFranjaFilterOptions poblaba
+   un <select> de un solo valor; ahora btnId es un <button> (ver .franja-filter-btn/toggleFranjaFilterMenu
+   más abajo) y currentValues/el valor de retorno son un ARRAY -- mismo criterio de "podar lo que ya no
+   aplica" que antes (franjas seleccionadas que ya no están en el alcance filtrado se sueltan solas), pero
+   sin colapsar a "ninguna" si deja de calzar una sola de varias. Las opciones disponibles quedan en
+   btn.dataset.opciones (JSON) para que toggleFranjaFilterMenu las lea al abrir el menú, sin recalcularlas
+   de nuevo ni duplicar esta misma lógica de "qué horas existen realmente en este alcance". */
+function franjaFilterBtnLabel(selected, totalOpciones) {
+  if (!selected.length || selected.length === totalOpciones) return 'Todas las franjas';
+  if (selected.length === 1) return fmtTime12(selected[0]);
+  return selected.length + ' franjas';
+}
+function refreshFranjaFilterOptions(btnId, routesEnAlcance, currentValues) {
+  var btn = document.getElementById(btnId);
+  var valoresActuales = currentValues || [];
+  if (!btn) return valoresActuales;
   var vistos = {}, list = [];
   routesEnAlcance.forEach(function (r) { if (!vistos[r.hora]) { vistos[r.hora] = true; list.push(r.hora); } });
   list.sort();
-  sel.innerHTML = '<option value="">Todas las franjas</option>' + list.map(function (h) { return '<option value="' + h + '">' + fmtTime12(h) + '</option>'; }).join('');
-  var resolved = list.indexOf(currentValue) !== -1 ? currentValue : '';
-  sel.value = resolved;
+  var resolved = valoresActuales.filter(function (h) { return list.indexOf(h) !== -1; });
+  btn.dataset.opciones = JSON.stringify(list);
+  btn.textContent = franjaFilterBtnLabel(resolved, list.length);
+  btn.classList.toggle('active', resolved.length > 0 && resolved.length < list.length);
   return resolved;
+}
+/* Menú flotante de checkboxes del filtro de Franja/Hora -- mismo patrón de posicionamiento fijo + cierre al
+   hacer clic afuera que ya usan .sede-dropdown-menu (toggleSedeDropdown) y .row-actions-menu
+   (toggleRowMenu), reutilizado tal cual en vez de inventar un 3er mecanismo de popover. A diferencia de
+   esos 2 (que cierran el menú al elegir una opción), aquí cada checkbox NO cierra el menú -- es justo el
+   punto del requerimiento: poder marcar varias franjas seguidas sin tener que reabrir el menú entre cada
+   clic. stateKey/renderFn permiten reutilizar la misma función para Despacho y Seguimiento sin duplicarla. */
+function closeFranjaFilterMenu() {
+  var existing = document.getElementById('franjaFilterMenu');
+  if (existing) { existing.remove(); document.removeEventListener('click', closeFranjaFilterMenuOnce); }
+}
+function closeFranjaFilterMenuOnce(e) {
+  var menu = document.getElementById('franjaFilterMenu');
+  if (menu && !menu.contains(e.target) && e.target.id !== menu.dataset.forBtn) closeFranjaFilterMenu();
+}
+function toggleFranjaFilterMenu(btnId, stateKey, renderFn) {
+  var existing = document.getElementById('franjaFilterMenu');
+  var btn = document.getElementById(btnId);
+  var sameTarget = existing && existing.dataset.forBtn === btnId;
+  closeFranjaFilterMenu();
+  if (sameTarget || !btn) return;
+  var opciones = JSON.parse(btn.dataset.opciones || '[]');
+  var seleccion = (state[stateKey] || []).slice();
+  var menu = document.createElement('div');
+  menu.id = 'franjaFilterMenu'; menu.className = 'sede-dropdown-menu franja-filter-menu';
+  menu.dataset.forBtn = btnId;
+  var rect = btn.getBoundingClientRect();
+  var cabeAbajo = (rect.bottom + 6 + 280) <= window.innerHeight;
+  if (cabeAbajo) menu.style.top = (rect.bottom + 6) + 'px'; else menu.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+  menu.style.left = rect.left + 'px';
+  menu.style.minWidth = rect.width + 'px';
+
+  function syncBtnYRender() {
+    state[stateKey] = seleccion.slice();
+    btn.textContent = franjaFilterBtnLabel(seleccion, opciones.length);
+    btn.classList.toggle('active', seleccion.length > 0 && seleccion.length < opciones.length);
+    renderFn();
+  }
+
+  if (opciones.length > 1) {
+    var acciones = document.createElement('div');
+    acciones.className = 'franja-filter-menu-actions';
+    var btnTodas = document.createElement('button'); btnTodas.type = 'button'; btnTodas.textContent = 'Todas';
+    var btnNinguna = document.createElement('button'); btnNinguna.type = 'button'; btnNinguna.textContent = 'Ninguna';
+    btnTodas.addEventListener('click', function () {
+      seleccion = opciones.slice();
+      menu.querySelectorAll('input[type="checkbox"]').forEach(function (cb) { cb.checked = true; });
+      syncBtnYRender();
+    });
+    btnNinguna.addEventListener('click', function () {
+      seleccion = [];
+      menu.querySelectorAll('input[type="checkbox"]').forEach(function (cb) { cb.checked = false; });
+      syncBtnYRender();
+    });
+    acciones.appendChild(btnTodas); acciones.appendChild(btnNinguna);
+    menu.appendChild(acciones);
+  }
+
+  if (!opciones.length) {
+    var vacio = document.createElement('div');
+    vacio.className = 'courier-sub';
+    vacio.style.padding = '8px 10px';
+    vacio.textContent = 'No hay franjas en este alcance.';
+    menu.appendChild(vacio);
+  }
+
+  opciones.forEach(function (h) {
+    var label = document.createElement('label');
+    label.className = 'franja-filter-menu-item';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = seleccion.indexOf(h) !== -1;
+    cb.addEventListener('change', function () {
+      if (cb.checked) { if (seleccion.indexOf(h) === -1) seleccion.push(h); }
+      else { seleccion = seleccion.filter(function (x) { return x !== h; }); }
+      syncBtnYRender();
+    });
+    var span = document.createElement('span');
+    span.textContent = fmtTime12(h);
+    label.appendChild(cb); label.appendChild(span);
+    menu.appendChild(label);
+  });
+
+  document.body.appendChild(menu);
+  setTimeout(function () { document.addEventListener('click', closeFranjaFilterMenuOnce); }, 0);
 }
 /* Filtro por Estado del turno (ver mismo requerimiento) -- usa el código de computeEstado()/ESTADOS, EL
    MISMO que ya pinta la columna "Estado"/"Estado Actual" de cada tabla, para que el texto del desplegable
@@ -18386,7 +18488,7 @@ function limpiarFiltroDespacho() {
   refreshDespachoAliadoOptions();
   document.getElementById('despachoFiltroAliado').value = '';
   state.despachoFiltroMensajero = '';
-  state.despachoFiltroFranja = '';
+  state.despachoFiltroFranja = [];
   state.despachoFiltroEstado = '';
   renderDespacho();
   toast('ok', 'Filtro restablecido', 'Bodega, Aliado, Mensajero, Franja y Estado volvieron a "Todos".');
@@ -18395,7 +18497,7 @@ function limpiarFiltroSeguimiento() {
   state.seguimientoFiltroBodega = '';
   document.getElementById('seguimientoFiltroBodega').value = '';
   state.seguimientoFiltroMensajero = '';
-  state.seguimientoFiltroFranja = '';
+  state.seguimientoFiltroFranja = [];
   state.seguimientoFiltroEstado = '';
   renderSeguimiento();
   toast('ok', 'Filtro restablecido', 'Bodega, Mensajero, Franja y Estado volvieron a "Todos".');
@@ -21204,9 +21306,9 @@ document.addEventListener('DOMContentLoaded', function () {
     state.despachoFiltroMensajero = e.target.value;
     renderDespacho();
   });
-  document.getElementById('despachoFiltroFranja').addEventListener('change', function (e) {
-    state.despachoFiltroFranja = e.target.value;
-    renderDespacho();
+  document.getElementById('despachoFiltroFranjaBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    toggleFranjaFilterMenu('despachoFiltroFranjaBtn', 'despachoFiltroFranja', renderDespacho);
   });
   document.getElementById('despachoFiltroEstado').addEventListener('change', function (e) {
     state.despachoFiltroEstado = e.target.value;
@@ -22167,9 +22269,9 @@ document.addEventListener('DOMContentLoaded', function () {
     state.seguimientoFiltroMensajero = e.target.value;
     renderSeguimiento();
   });
-  document.getElementById('seguimientoFiltroFranja').addEventListener('change', function (e) {
-    state.seguimientoFiltroFranja = e.target.value;
-    renderSeguimiento();
+  document.getElementById('seguimientoFiltroFranjaBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    toggleFranjaFilterMenu('seguimientoFiltroFranjaBtn', 'seguimientoFiltroFranja', renderSeguimiento);
   });
   document.getElementById('seguimientoFiltroEstado').addEventListener('change', function (e) {
     state.seguimientoFiltroEstado = e.target.value;
