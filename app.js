@@ -3811,6 +3811,19 @@ function resolverSolicitud(routeId, aceptar, motivoRechazo) {
   /* Ver verificación "Historial y Reemplazo de Mensajeros": capturados solo cuando s.tipo === 'cambio_mensajero'
      (ver abajo) -- permanecen null para el resto de tipos, sin afectar su propio motivo. */
   var mensajeroSalienteNombre = null, mensajeroEntranteNombre = null;
+  /* FIX "Cambio de Mensajero aprobado no persiste" (reporte real: Cabify, TUR-1490, Maycol Andrés Mejía
+     Castro -> Luis Bolívar, aprobado por Planner pero "no quedó"): ejecutarReemplazoMensajeroUnificado ->
+     findOrCreateMensajeroParaAliado, al encontrar una cédula YA REGISTRADA para este aliado (mensajero
+     EXISTENTE, no nuevo), SOBREESCRIBE sus campos (nombre/teléfono/placa/sede/vehículo/correo) EN MEMORIA --
+     pero este código nunca empujaba ese mensajero a Supabase (solo el turno, ver scPushRows más abajo), así
+     que el cambio de nombre quedaba SOLO en la pestaña del Planner que aprobó; el siguiente pull (de
+     cualquier sesión, incluida la suya propia al refrescar) lo revertía a los datos viejos que Supabase
+     todavía tenía -- exactamente el síntoma reportado. Mismo mecanismo exacto ya corregido para el caso
+     "mensajero genuinamente nuevo" en submitTurno/aplicarSolicitudGeneral/procesarCargaMasivaTurnos/
+     cierreCuotasCompletarDeficit -- aquí se amplía al caso "mensajero EXISTENTE reutilizado y editado", que
+     ninguno de esos otros 4 lugares cubría tampoco hasta este mismo commit. Se empuja el mensajero resultante
+     de 'cambio_mensajero' SIEMPRE (nuevo o reutilizado-editado), nunca solo cuando su id es nuevo. */
+  var mensajeroParaPushResolver = null;
   if (aceptar) {
     if (s.tipo === 'reprogramacion') {
       route.hora = s.nuevaHora;
@@ -3827,6 +3840,7 @@ function resolverSolicitud(routeId, aceptar, motivoRechazo) {
       var resultadoCambioMensajero = ejecutarReemplazoMensajeroUnificado(route, aliadoDeLaRuta, s.mensajeroPropuesto);
       mensajeroSalienteNombre = resultadoCambioMensajero.mensajeroSaliente;
       mensajeroEntranteNombre = resultadoCambioMensajero.mensajeroEntrante;
+      mensajeroParaPushResolver = getMensajero(route.mensajeroId);
     } else if (s.tipo === 'enroque') {
       enroqueRoute2 = state.turnos.find(function (r) { return r.id === s.enroqueConRouteId; });
       if (enroqueRoute2) {
@@ -3848,12 +3862,19 @@ function resolverSolicitud(routeId, aceptar, motivoRechazo) {
   var tipoLabel = SOLICITUD_TIPO_LABEL[s.tipo] || s.tipo;
   var claseTxt = s.evaluacionAntelacion ? (' (' + s.evaluacionAntelacion.label + ')') : '';
   var rechazoNota = (!aceptar && s.tipo === 'reprogramacion') ? ' La ruta mantiene su T0 original (' + fmtTime12(s.horaAnterior) + ') y la ventana de tolerancia sigue su conteo normal desde ahí.' : '';
-  toast(aceptar ? 'ok' : 'warn', aceptar ? 'Solicitud aprobada' : 'Solicitud rechazada', route.id + claseTxt + ' — ' + tipoLabel + (aceptar ? ' aprobada.' : ' rechazada; la ruta continúa con su programación.') + rechazoNota);
-  /* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota": ninguna
-     resolución de Solicitud (reprogramación/cambio de mensajero/enroque) empujaba el turno afectado a
-     Supabase -- un enroque en particular muta 2 filas (ambas rutas intercambian mensajero). */
-  scPushRows('app_turnos', enroqueRoute2 ? [route, enroqueRoute2] : [route]);
-  syncAndRender(true);
+  /* Ver FIX "Cambio de Mensajero aprobado no persiste" (comentario completo más arriba, junto a
+     mensajeroParaPushResolver): el mensajero resultante de 'cambio_mensajero' (si aplica) PRIMERO, esperado,
+     antes del turno que lo referencia -- mismo orden exacto que submitTurno/aplicarSolicitudGeneral/
+     procesarCargaMasivaTurnos. Toast + syncAndRender ahora corren DESPUÉS de que el push realmente confirme
+     (antes eran síncronos, sin esperar nada), para que la pantalla nunca muestre "aprobada" antes de que el
+     guardado real haya terminado. */
+  var pushMensajerosResolver = mensajeroParaPushResolver ? scPushRows('app_mensajeros', [mensajeroParaPushResolver]) : Promise.resolve({ ok: true });
+  pushMensajerosResolver.then(function () {
+    scPushRows('app_turnos', enroqueRoute2 ? [route, enroqueRoute2] : [route]).then(function () {
+      toast(aceptar ? 'ok' : 'warn', aceptar ? 'Solicitud aprobada' : 'Solicitud rechazada', route.id + claseTxt + ' — ' + tipoLabel + (aceptar ? ' aprobada.' : ' rechazada; la ruta continúa con su programación.') + rechazoNota);
+      syncAndRender(true);
+    });
+  });
 }
 
 /* ---------------- Programar Flota (ALIADO) — ventana horaria, mensajeros y solicitudes generales ---------------- */
@@ -4532,11 +4553,27 @@ function aplicarSolicitudGeneral(sol) {
      (justo antes del return, ver abajo) en vez de instrumentar cada rama por separado. */
   var mensajerosIdsAntesSolicitud = state.mensajeros.map(function (m) { return m.id; });
   var mensajerosNuevosSolicitud = [];
+  /* AMPLIACIÓN del FIX de arriba (mismo hallazgo real que en resolverSolicitud/cambio_mensajero, ver ese
+     comentario -- Cabify, cédula ya registrada para el aliado, "Luis Bolívar" reemplazando a "Maycol Andrés
+     Mejía Castro"): findOrCreateMensajeroParaAliado, al encontrar una cédula YA REGISTRADA (mensajero
+     EXISTENTE, no nuevo), SOBREESCRIBE sus campos en memoria -- pero el snapshot ids-antes/ids-después de
+     abajo SOLO detecta ids genuinamente nuevos, nunca una edición sobre un id ya conocido. Se marca
+     explícitamente el mensajero resuelto en cada rama que usa findOrCreateMensajeroParaAliado (nuevo_turno/
+     cupo_adicional, edicion_turno modo 'confirm', reemplazo_alerta, reemplazo_cancelacion) para que SIEMPRE
+     se empuje, nuevo o reutilizado-editado -- crearMensajeroPendiente/forkMensajeroParaEdicion ya quedan
+     cubiertos por el snapshot de ids (ambas SIEMPRE crean un id genuinamente nuevo). */
+  var mensajerosTocadosIdsSolicitud = {};
+  function marcarMensajeroTocadoSolicitud(id) {
+    if (!id || mensajerosTocadosIdsSolicitud[id]) return;
+    mensajerosTocadosIdsSolicitud[id] = true;
+    mensajerosNuevosSolicitud.push(getMensajero(id));
+  }
   /* Quien aprueba (Planner) nunca tiene state.user.aliado propio — el mensajero/reemplazo siempre
      debe quedar asociado al aliado DUEÑO de la solicitud (sol.aliado), nunca al de la sesión que aprueba
      (ver findOrCreateMensajeroParaAliado/crearMensajeroPendiente). */
   if (sol.tipo === 'nuevo_turno' || sol.tipo === 'cupo_adicional') {
     var mensajeroId = sol.detalle.pendiente ? crearMensajeroPendiente(sol.detalle, sol.aliado) : findOrCreateMensajeroParaAliado(sol.aliado, sol.detalle);
+    marcarMensajeroTocadoSolicitud(mensajeroId);
     var nuevoTurno = { id: nextTurnoId(), sede: sol.detalle.sede, fecha: sol.detalle.fecha, mensajeroId: mensajeroId, vehiculo: sol.detalle.vehiculo, hora: sol.detalle.hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: !!sol.detalle.pendiente };
     /* Ver aclaración de negocio "Diferenciación de Solicitudes Extemporáneas vs. Recursos Adicionales": un
        alta fuera de la ventana horaria (post-cutoff) NO es, por sí sola, un Recurso Adicional -- solo lo es
@@ -4575,6 +4612,7 @@ function aplicarSolicitudGeneral(sol) {
       route.mensajeroId = sol.detalle.modoOriginal === 'confirm'
         ? findOrCreateMensajeroParaAliado(sol.aliado, sol.detalle)
         : forkMensajeroParaEdicion(sol.detalle, sol.aliado, route.mensajeroId);
+      marcarMensajeroTocadoSolicitud(route.mensajeroId);
       /* forkMensajeroParaEdicion marca el registro ANTERIOR como .superseded=true EN SITIO (mutación, no
          creación) -- esa mutación tampoco viajaba nunca a Supabase (ver FIX arriba). */
       if (mensajeroAnteriorIdSolicitud !== route.mensajeroId) {
@@ -4608,6 +4646,7 @@ function aplicarSolicitudGeneral(sol) {
       nombre: sol.detalle.nombre, telefono: sol.detalle.telefono, cedula: sol.detalle.cedula, placa: sol.detalle.placa,
       correo: sol.detalle.correo, sede: routeRe.sede, vehiculo: sol.detalle.vehiculo || routeRe.vehiculo
     }, { registrarAusentismo: !omitirAusentismoAlerta });
+    marcarMensajeroTocadoSolicitud(routeRe.mensajeroId);
     var mensajeroSalienteReemplazoAlerta = resultadoReemplazoAlerta.mensajeroSaliente;
     /* Ver requerimiento "Implementación y Estandarización de Flujo Integral: Retiro de Mensajero / No Se
        Autoriza Despacho...": el motivo distingue el origen real ANTES de limpiar los flags que lo describen,
@@ -4659,6 +4698,7 @@ function aplicarSolicitudGeneral(sol) {
       nombre: sol.detalle.nombre, telefono: sol.detalle.telefono, cedula: sol.detalle.cedula, placa: sol.detalle.placa,
       correo: sol.detalle.correo, sede: routeCr.sede, vehiculo: sol.detalle.vehiculo || routeCr.vehiculo
     }, { registrarAusentismo: true });
+    marcarMensajeroTocadoSolicitud(routeCr.mensajeroId);
     var mensajeroSalienteReemplazoCr = resultadoReemplazoCr.mensajeroSaliente;
     if (routeCr.retirado) { routeCr.retirado = false; routeCr.llegada = null; routeCr.salida = null; routeCr.rutaAsignada = false; routeCr.rutaAsignadaEn = null; routeCr.retiroTramo = null; desvincularEventoGuionado(routeCr); }
     routeCr.noAutorizaDespacho = false; routeCr.motivoNoAutoriza = null;
@@ -15446,13 +15486,22 @@ function procesarCargaMasivaTurnos(entries, opciones) {
   var solicitudesGeneralesNuevas = [];
   /* FIX "mensajero fantasma" (ver mismo fix en submitTurno): findOrCreateMensajero crea mensajeros nuevos
      SOLO en memoria -- esta carga masiva tampoco los empujaba nunca a app_mensajeros, quedaban a merced del
-     autoguardado periódico igual que submitTurno antes de su propio fix. Se detecta aquí cada mensajero
-     genuinamente NUEVO (no uno ya existente reutilizado por cédula) para empujarlo junto con los turnos. */
+     autoguardado periódico igual que submitTurno antes de su propio fix.
+     AMPLIACIÓN del mismo FIX (reporte real: carga masiva de Cabify con cédula 1017271567 -- el archivo decía
+     "Luis Bolívar" pero el turno siguió mostrando "Maycol Andrés Mejía Castro"): findOrCreateMensajero, al
+     encontrar una cédula YA REGISTRADA para este aliado (un mensajero EXISTENTE, no nuevo), SOBREESCRIBE sus
+     campos (nombre/teléfono/placa/sede/vehículo/correo) con los del archivo -- pero antes solo se detectaba y
+     empujaba el caso "id genuinamente nuevo" (ver comparación idsAntes/idsDespues de abajo); la edición de un
+     registro YA EXISTENTE nunca se consideraba "para empujar", así que ese cambio de nombre/datos quedaba
+     SOLO en memoria de esta pestaña -- el siguiente pull (de cualquier sesión) lo revertía a los datos viejos
+     que Supabase todavía tenía, exactamente el síntoma reportado. Ahora se empuja CUALQUIER mensajero que
+     este lote haya tocado (creado O editado por reutilización de cédula), sin importar si su id ya existía
+     antes de esta carga. */
   var mensajerosNuevos = [];
+  var mensajerosTocadosIds = {};
   function resolverMensajero(payload) {
-    var idsAntes = state.mensajeros.map(function (m) { return m.id; });
     var id = findOrCreateMensajero(payload);
-    if (idsAntes.indexOf(id) === -1) mensajerosNuevos.push(getMensajero(id));
+    if (!mensajerosTocadosIds[id]) { mensajerosTocadosIds[id] = true; mensajerosNuevos.push(getMensajero(id)); }
     return id;
   }
   entries.forEach(function (entry) {
