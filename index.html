@@ -1705,15 +1705,20 @@
           </section>
         </div>
 
-        <!-- Ver requerimiento "Corrección Exclusiva de Front-End... (Vista Aliado)", punto 3: exclusiva de
-             ALIADO -- lo que el propio Aliado emitió y sigue "En revisión por Planner". Nunca suma al contador
-             de "Pendientes" ni ofrece Aceptar/Rechazar (el Aliado no puede resolverse a sí mismo). -->
+        <!-- Ver requerimiento "Corrección Exclusiva de Front-End... (Vista Aliado)", punto 3: originalmente
+             exclusiva de ALIADO -- lo que el propio Aliado emitió y sigue "En revisión por Planner". Nunca
+             suma al contador de "Pendientes" ni ofrece Aceptar/Rechazar (el Aliado no puede resolverse a sí
+             mismo). Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega": título y texto del
+             contador pasan a ser dinámicos (ver solicitudesHeaderSync en app.js) -- ya no son exclusivos de
+             ALIADO (PLANNER también los usa, ver "Ampliación de Arquitectura Simétrica y Bidireccional"), y
+             BODEGA ahora los comparte con un texto propio ("Enviado por Planner" / "en revisión por el
+             Aliado", nunca "Mis solicitudes" porque Bodega nunca emite nada aquí). -->
         <div id="solicitudesEnviadasPanel" hidden>
           <section class="table-card" id="solicitudesEnviadasCard">
             <div class="table-head">
               <div>
-                <h2>Mis solicitudes enviadas</h2>
-                <div class="count"><span id="solicitudesEnviadasCount">0</span> en revisión por Planner</div>
+                <h2 id="solicitudesEnviadasTitle">Mis solicitudes enviadas</h2>
+                <div class="count"><span id="solicitudesEnviadasCount">0</span> <span id="solicitudesEnviadasCountLabel">en revisión por Planner</span></div>
               </div>
             </div>
             <div class="table-scroll">

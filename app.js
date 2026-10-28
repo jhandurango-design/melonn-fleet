@@ -13605,8 +13605,14 @@ function solicitudesPendientesUnificadas() {
      emite ni resuelve nada aquí (sigue sin Aceptar/Rechazar, ver puedeResolver en unifiedFromRouteSolicitud,
      que no la contempla), pero SÍ debe VER en vivo lo que esté pendiente sobre turnos de su propia sede --
      antes esta fuente quedaba vacía por completo para este rol, aunque solicitudesHistorialUnificado() ya
-     la incluía correctamente una vez resuelta (mismo filtro r.sede === state.user.sede, ver esa función). */
-  else if (role === 'BODEGA') routePend = state.turnos.filter(function (r) { return r.solicitud && r.solicitud.estado === 'pendiente' && r.sede === state.user.sede; });
+     la incluía correctamente una vez resuelta (mismo filtro r.sede === state.user.sede, ver esa función).
+     Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega": origen === 'aliado' (antes sin filtro de
+     origen) -- lo que el PROPIO Planner envía (Ajuste Extraordinario/Reprogramación Masiva, origen
+     'planner'/'admin') ya no se mezcla aquí mientras sigue pendiente; vive aparte, en
+     solicitudesEnviadasPlanner() con la rama BODEGA nueva, mismo criterio exacto que ya separa a
+     PLANNER/ADMIN de sus propios envíos en la línea de arriba. Una vez resuelto, sigue apareciendo igual en
+     el Historial de Bodega (ese filtro no cambia, ver solicitudesHistorialUnificado). */
+  else if (role === 'BODEGA') routePend = state.turnos.filter(function (r) { return r.solicitud && r.solicitud.estado === 'pendiente' && r.solicitud.origen === 'aliado' && r.sede === state.user.sede; });
   else routePend = [];
   routePend.forEach(function (r) { list.push(unifiedFromRouteSolicitud(r, true)); });
 
@@ -13640,7 +13646,10 @@ function solicitudesPendientesUnificadas() {
     var cuo = role === 'ALIADO' ? [] : state.turnos.filter(function (r) { return r.pendienteAprobacionPlanner && sedesAlcance.indexOf(r.sede) !== -1; });
     cuo.forEach(function (r) { list.push(unifiedFromCuota(r, true)); });
   } else {
-    var genBodega = state.solicitudesGenerales.filter(function (s) { return s.estado === 'pendiente' && s.tipo !== 'prolongacion' && s.detalle && s.detalle.sede === state.user.sede; });
+    /* origen !== 'planner' (antes sin ese filtro): excluye 'reprogramacion_masiva' (único tipo de
+       solicitudesGenerales con origen:'planner') mientras sigue pendiente -- mismo criterio que routePend de
+       arriba, vive en la pestaña nueva "Enviado por Planner". */
+    var genBodega = state.solicitudesGenerales.filter(function (s) { return s.estado === 'pendiente' && s.tipo !== 'prolongacion' && s.origen !== 'planner' && s.detalle && s.detalle.sede === state.user.sede; });
     genBodega.forEach(function (s) { list.push(unifiedFromGeneral(s)); });
   }
   return list;
@@ -13665,9 +13674,26 @@ function solicitudesEnviadasAliado() {
    solicitudesEnviadasAliado() para Planner -- lo que Planner/Admin emitieron hacia un Aliado (origen
    'planner' -- Ajuste Extraordinario/Reprogramación Masiva de Ventana -- u 'admin' -- Cancelar/Reprogramar
    directo desde Consolidado) y sigue en revisión DEL Aliado. Mismo alcance país-completo que
-   solicitudesPendientesUnificadas() para este rol. Informativa, nunca ofrece Aceptar/Rechazar. */
+   solicitudesPendientesUnificadas() para este rol. Informativa, nunca ofrece Aceptar/Rechazar.
+   Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega": BODEGA nunca emite ni revisa nada aquí
+   (sigue sin Aceptar/Rechazar/Cancelar, ver renderSolicitudesEnviadas), pero antes no tenía NINGUNA forma de
+   ver, aislado del resto, lo que Planner envió sobre turnos de su propia sede -- vivía mezclado dentro de
+   "Solicitudes Pendientes" (ver el filtro origen==='aliado' que ahora lo excluye de ahí). Misma función
+   compartida en vez de una paralela: la única diferencia real es el alcance (su propia sede fija, nunca
+   país-completo) y que BODEGA SÍ ve origen:'admin' además de 'planner' (Cancelar/Reprogramar directo desde
+   Consolidado también afecta turnos de su sede, aunque ella no lo haya solicitado ni deba resolverlo). */
 function solicitudesEnviadasPlanner() {
   var role = Auth.getUserRole();
+  if (role === 'BODEGA') {
+    var sedeBodega = state.user.sede;
+    var listBodega = [];
+    var routePropBodega = state.turnos.filter(function (r) { return r.solicitud && r.solicitud.estado === 'pendiente' && r.solicitud.origen !== 'aliado' && r.sede === sedeBodega; });
+    routePropBodega.forEach(function (r) { listBodega.push(unifiedFromRouteSolicitud(r, true)); });
+    var genPropBodega = state.solicitudesGenerales.filter(function (s) { return s.estado === 'pendiente' && s.origen === 'planner' && s.detalle && s.detalle.sede === sedeBodega; });
+    genPropBodega.forEach(function (s) { listBodega.push(unifiedFromGeneral(s)); });
+    listBodega.sort(function (a, b) { return (b.sortKey || '').localeCompare(a.sortKey || ''); });
+    return listBodega;
+  }
   if (role !== 'ADMIN' && role !== 'PLANNER') return [];
   var sedesAlcance = activeWarehouseIds(currentCountryCode());
   var list = [];
@@ -13745,15 +13771,27 @@ function solicitudesHeaderSync() {
   var histTitle = document.getElementById('solicitudesHistTitle');
   /* Ver requerimiento "Ampliación de Arquitectura Simétrica y Bidireccional...": "Mis Solicitudes Enviadas"
      también aplica a PLANNER (emisor de Ajuste Extraordinario/Reprogramación Masiva/Cancelar-Reprogramar
-     directo desde Consolidado) -- NO a BODEGA ni ADMIN. BODEGA nunca emite una solicitud en este modelo de
-     datos (su "Solicitudes y Cambios" ya es de solo lectura por completo, ver más abajo -- btnNueva.hidden
-     siempre true, sin ningún origen:'bodega' en ninguna parte del código), así que no hay nada que mostrarle
-     ahí; ADMIN no tiene 'solicitudes' en su ROLE_VIEWS, nunca llega a esta vista. Si el rol activo pierde la
-     pestaña mientras estaba parado en ella (switch de usuario), vuelve a "Pendientes" para no quedar en un
-     panel oculto. */
+     directo desde Consolidado) -- NO a ADMIN (no tiene 'solicitudes' en su ROLE_VIEWS, nunca llega a esta
+     vista). Si el rol activo pierde la pestaña mientras estaba parado en ella (switch de usuario), vuelve a
+     "Pendientes" para no quedar en un panel oculto.
+     Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega": BODEGA se suma a esta pestaña -- nunca
+     EMITE nada (sigue sin botón "+ Nueva Solicitud" ni "Cancelar Solicitud", ver más abajo y
+     renderSolicitudesEnviadas), pero SÍ necesita ver, aislado del resto, lo que Planner envió sobre turnos
+     de su propia sede -- antes vivía mezclado sin distinción dentro de "Solicitudes Pendientes" (ver el
+     filtro origen==='aliado' agregado ahí). El texto del botón cambia por rol más abajo (ver tabEnviadas.
+     textContent) porque, a diferencia de Aliado/Planner, Bodega no "envía" nada -- solo observa. */
   var tabEnviadas = document.getElementById('solicitudesTabEnviadas');
-  var veEnviadas = role === 'ALIADO' || role === 'PLANNER';
+  var veEnviadas = role === 'ALIADO' || role === 'PLANNER' || role === 'BODEGA';
   tabEnviadas.hidden = !veEnviadas;
+  tabEnviadas.textContent = role === 'BODEGA' ? 'Enviado por Planner' : 'Mis Solicitudes Enviadas';
+  /* Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega": título + texto del contador del panel,
+     antes fijos en el HTML (solo tenían sentido para ALIADO) -- ahora reflejan los 3 roles que comparten
+     este panel. BODEGA nunca "envía" nada aquí (solo observa lo que Planner envió), así que su título evita
+     la palabra "Mis". */
+  var tituloEnviadas = document.getElementById('solicitudesEnviadasTitle');
+  var labelEnviadas = document.getElementById('solicitudesEnviadasCountLabel');
+  if (tituloEnviadas) tituloEnviadas.textContent = role === 'BODEGA' ? 'Enviado por Planner' : 'Mis solicitudes enviadas';
+  if (labelEnviadas) labelEnviadas.textContent = role === 'ALIADO' ? 'en revisión por Planner' : 'en revisión por el Aliado';
   if (!veEnviadas) {
     if (state.solicitudesTab === 'enviadas') state.solicitudesTab = 'pendientes';
     /* Vacía el contenedor (no solo lo oculta) -- mismo criterio que "Historial del Mes" en Despacho/
@@ -13854,12 +13892,16 @@ function renderSolicitudesHistorial() {
 /* Ver requerimiento "Corrección Exclusiva de Front-End... (Vista Aliado)", punto 3, y su ampliación
    "Ampliación de Arquitectura Simétrica y Bidireccional..." (Planner): tabla de solo lectura (sin columna
    Aliado, redundante en la del propio Aliado) para lo que el usuario activo emitió y sigue en revisión de la
-   otra parte -- "Planner" si quien mira es ALIADO, "el Aliado" si quien mira es Planner/Admin. BODEGA nunca
-   llega aquí (la pestaña queda oculta para ese rol, ver solicitudesHeaderSync -- no emite solicitudes en este
-   modelo de datos). Ver requerimiento "Addendum... Botón 'Cancelar Solicitud'...": cada fila pendiente ofrece
-   "Cancelar Solicitud" -- EXCEPTO Cuota/Festivo (tipo 'cuota_festivo'), que no nace de un formulario de
-   solicitud propiamente dicho (route.pendienteAprobacionPlanner, ver evaluarAprobacionCuota) y no tiene un
-   flujo de retracto seguro equivalente. */
+   otra parte -- "Planner" si quien mira es ALIADO, "el Aliado" si quien mira es Planner/Admin.
+   Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega": BODEGA también llega aquí ahora (ver
+   solicitudesHeaderSync) -- pero a diferencia de Aliado/Planner, nunca es la EMISORA de nada que vea en esta
+   pestaña (solo observa lo que Planner envió sobre turnos de su sede), así que nunca recibe el botón
+   "Cancelar Solicitud" -- cancelarSolicitudPropia() ya la rechazaría igual por rol (esEmisor nunca es true
+   para BODEGA), pero mostrar un botón que no hace nada sería confuso. Ver requerimiento "Addendum...
+   Botón 'Cancelar Solicitud'...": cada fila pendiente de Aliado/Planner ofrece "Cancelar Solicitud" --
+   EXCEPTO Cuota/Festivo (tipo 'cuota_festivo'), que no nace de un formulario de solicitud propiamente dicho
+   (route.pendienteAprobacionPlanner, ver evaluarAprobacionCuota) y no tiene un flujo de retracto seguro
+   equivalente. */
 function renderSolicitudesEnviadas() {
   var role = Auth.getUserRole();
   var lista = role === 'ALIADO' ? solicitudesEnviadasAliado() : solicitudesEnviadasPlanner();
@@ -13870,7 +13912,7 @@ function renderSolicitudesEnviadas() {
        establecido por .row-actions button.danger (borde rojo suave, fondo transparente, texto rojo -- ver
        "Eliminar Mensajero") -- se envuelve en .row-actions como cualquier otra acción de fila de la
        plataforma, en vez de un botón suelto sin ese contenedor. */
-    var accionesHtml = r.tipo === 'cuota_festivo' ? '' :
+    var accionesHtml = (r.tipo === 'cuota_festivo' || role === 'BODEGA') ? '' :
       '<div class="row-actions"><button data-act="cancelar-solicitud-propia" data-id="' + r.rowId + '" data-es-ruta="' + (r.rowIsRoute ? '1' : '0') + '" class="danger" data-tip="Cancelar Solicitud">Cancelar Solicitud</button></div>';
     return '<tr ' + trAttrs + '>' +
       '<td>' + r.tipoHtml + '</td>' +
