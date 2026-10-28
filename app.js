@@ -487,14 +487,40 @@ function enviarCorreoTransaccional(to, type, data) {
    El rol `authenticated` no tiene ningún GRANT sobre las tablas todavía (eso es Etapa B/C de la Fase 2);
    adjuntar el token ahora solo rompería todo acceso a datos. Por ahora el token sirve EXCLUSIVAMENTE para
    restaurar la sesión de forma segura tras recargar la página, en vez de confiar ciegamente en un id. */
+/* FIX "Cambio Obligatorio de Contraseña atascado sin salida" (reporte real: Carol Paredes, Cabify -- nuevo
+   usuario, cambia su clave en el primer ingreso y se queda en 'No se pudo confirmar el cambio en Supabase'):
+   a diferencia de scPushRows/scPullTable (que ya tenían timeout + reintentos, ver SC_PUSH_RETRY_DELAYS_MS),
+   la llamada al Edge Function "session" era un fetch de UN SOLO intento, sin timeout -- un hipo de red (muy
+   plausible viniendo de una VPN/red corporativa externa, como el dominio @external.cabify.com de este
+   reporte) dejaba sessionTokenMintEnVuelo resuelta en falso de forma PERMANENTE para el resto de la sesión.
+   Como #formCambioObligatorio espera esa MISMA promesa ya resuelta (ver fijarSessionTokenConRol/su propio
+   await), ni siquiera reintentar manualmente el formulario volvía a intentar el mint -- solo repetía el
+   guardado con el mismo token (ausente), cayendo al cliente anon y siendo rechazado por RLS exactamente
+   igual, sin ninguna salida real para el usuario. Mismo patrón de timeout+backoff que scPushRows, reutilizado
+   también por fijarSessionTokenConRol (mint_with_role) más abajo -- esa llamada tenía la misma fragilidad. */
+var SESSION_TOKEN_RETRY_DELAYS_MS = [1000, 3000, 5000];
+var SESSION_TOKEN_TIMEOUT_MS = 10000;
+function llamarSessionFunction(body) {
+  function intentoUnico() {
+    var fetchPromise = fetch(SUPABASE_URL + '/functions/v1/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json(); });
+    var timeoutPromise = new Promise(function (resolve) { setTimeout(function () { resolve({ ok: false, timedOut: true }); }, SESSION_TOKEN_TIMEOUT_MS); });
+    return Promise.race([fetchPromise, timeoutPromise]).catch(function (e) { return { ok: false, error: String(e) }; });
+  }
+  function conReintentos(numeroIntento) {
+    return intentoUnico().then(function (res) {
+      if ((res && res.ok) || numeroIntento > SESSION_TOKEN_RETRY_DELAYS_MS.length) return res;
+      return new Promise(function (resolve) { setTimeout(resolve, SESSION_TOKEN_RETRY_DELAYS_MS[numeroIntento - 1]); })
+        .then(function () { return conReintentos(numeroIntento + 1); });
+    });
+  }
+  return conReintentos(1);
+}
 function solicitarSessionToken(email, password) {
-  return fetch(SUPABASE_URL + '/functions/v1/session', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'mint', email: email, password: password })
-  })
-    .then(function (r) { return r.json(); })
-    .catch(function (e) { return { ok: false, error: String(e) }; });
+  return llamarSessionFunction({ action: 'mint', email: email, password: password });
 }
 /* FIX CRÍTICO DE PRODUCCIÓN (hallazgo en vivo durante la verificación del fix de Cabify): fijarSessionTokenConRol()
    (entonces llamada fijarSessionTokenConRolNoBloqueante) leía localStorage.melonn_session de forma SÍNCRONA, asumiendo que el mint sin rol (disparado momentos
@@ -550,12 +576,11 @@ function fijarSessionTokenConRol(user) {
   return (sessionTokenMintEnVuelo || Promise.resolve()).then(function () {
     var tokenActual = localStorage.getItem('melonn_session');
     if (!tokenActual || !user || !user.role) return { ok: false };
-    return fetch(SUPABASE_URL + '/functions/v1/session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'mint_with_role', token: tokenActual, role: user.role })
-    })
-      .then(function (r) { return r.json(); })
+    /* Ver FIX junto a solicitarSessionToken/llamarSessionFunction: misma fragilidad (fetch de un solo
+       intento, sin timeout) que causaba el bloqueo sin salida en el Cambio Obligatorio de Contraseña --
+       aquí el mismo hipo de red dejaría a una cuenta recién logueada sin claim de rol (ver FIX CRÍTICO DE
+       PRODUCCIÓN arriba, "Propagación Síncrona del Token Multirol"). */
+    return llamarSessionFunction({ action: 'mint_with_role', token: tokenActual, role: user.role })
       .then(function (res) {
         if (res && res.ok && res.token) {
           localStorage.setItem('melonn_session', res.token);
