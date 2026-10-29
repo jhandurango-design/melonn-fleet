@@ -32,6 +32,16 @@
     'consolidado.manage': ['PLANNER'],
     'solicitud.resolve': ['PLANNER', 'ALIADO'],
     'solicitud.resolve.general': ['PLANNER'],
+    /* Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner",
+       punto 4 (Permisos de Contingencia en Excepciones de Cuota/Festivo): permiso DEDICADO, deliberadamente
+       separado de 'solicitud.resolve.general' -- ese sigue siendo PLANNER-only para Nuevo Turno/Cupo
+       Adicional/Edición/Reemplazos/Prolongación (Mecanismo B), donde ADMIN nunca debe gestionar ni decidir
+       operativamente (ver nota de ADMIN más abajo). Ampliar el permiso compartido en vez de crear este nuevo
+       habría abierto ADMIN a TODO el Mecanismo B sin que se haya pedido ni evaluado eso. Solo cubre
+       aprobarCuotaPlanner/rechazarCuotaPlanner (Mecanismo C) -- requiere además la migración SQL que concede
+       a ADMIN el UPDATE real sobre app_turnos para este caso (ver supabase/migrations/..._app_turnos_admin_cuota.sql);
+       sin ella, el botón se vería habilitado pero el guardado fallaría siempre por RLS. */
+    'cuota.resolve': ['PLANNER', 'ADMIN'],
     'solicitud.create.aliado': ['ALIADO'],
     'solicitud.create.planner': ['PLANNER'],
     'despacho.manage': ['BODEGA'],

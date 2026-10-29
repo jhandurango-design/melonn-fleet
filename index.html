@@ -3402,8 +3402,12 @@
     <form id="formNuevaSolicitudPlanner" class="modal-body">
       <!-- Ver requerimiento "Restructuración Integral...", Parte 4: reemplaza el campo único saturado
            "Bodega / Turno" (concatenaba todo en una sola cadena) por selección en cascada Bodega -> Aliado ->
-           Mensajero/Turno, y homologa el Tipo de Solicitud y los campos condicionales exactamente igual que el
-           modal del Aliado (ver #formNuevaSolicitud) -- misma matriz de opciones para ambos roles. -->
+           Mensajero/Turno, y homologa el Tipo de Solicitud y los campos condicionales con el modal del Aliado
+           (ver #formNuevaSolicitud) -- salvo "Cambio de Mensajero"/"Intercambio de Turno", exclusivos del
+           Aliado (ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol
+           Planner": gestión física de flota/mensajeros es exclusiva del Aliado, nunca algo que el Planner
+           inicie -- el Planner SÍ sigue pudiendo aprobar/rechazar esos 2 tipos cuando los inicia el Aliado,
+           ver resolverSolicitud/unifiedFromRouteSolicitud, que no cambian). -->
       <div class="field"><label for="npBodega">Bodega</label><select id="npBodega" required></select></div>
       <div class="field" id="npAliadoField"><label for="npAliado">Aliado</label><select id="npAliado"></select></div>
       <div class="field" id="npRutaField"><label for="npRuta">Mensajero / Turno</label><select id="npRuta" required></select></div>
@@ -3411,24 +3415,12 @@
         <select id="npTipo" required>
           <option value="cancelacion">Cancelación</option>
           <option value="reprogramacion">Reprogramación de hora</option>
-          <option value="cambio_mensajero">Cambio de Mensajero</option>
-          <option value="enroque">Intercambio de Turno</option>
           <option value="reprogramacion_masiva">Reprogramación masiva de ventana</option>
         </select>
       </div>
       <div class="field" id="npHoraField">
         <label for="npNuevaHora">Nueva hora propuesta</label>
         <input type="time" id="npNuevaHora">
-      </div>
-      <div class="filter-grid" id="npCambioMensajeroFields" style="grid-template-columns:1fr 1fr;" hidden>
-        <div class="field"><label for="npCmNombre">Nombre del nuevo mensajero</label><input type="text" id="npCmNombre"></div>
-        <div class="field"><label for="npCmTelefono">Teléfono</label><input type="text" id="npCmTelefono"></div>
-        <div class="field"><label for="npCmCedula">CÉDULA / INE</label><input type="text" id="npCmCedula"></div>
-        <div class="field"><label for="npCmPlaca">Placa</label><input type="text" id="npCmPlaca"></div>
-      </div>
-      <div class="field" id="npEnroqueField" hidden>
-        <label for="npEnroqueRuta">Turno con el que intercambiar</label>
-        <select id="npEnroqueRuta"></select>
       </div>
       <!-- Ver requerimiento "Prompt Consolidador Maestro...", Bloque 3 ("Reprogramación Masiva de Ventana"):
            reemplaza la cascada Aliado/Mensajero-Turno (pensada para UNA ruta) por una selección de

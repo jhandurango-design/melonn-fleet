@@ -1940,8 +1940,16 @@ const ROLE_VIEWS = {
   /* Ver requerimiento "Ajustes Integrales de Arquitectura, UX y Filtros en el Módulo de Comunicaciones",
      Bloque 2: ADMIN queda exclusivamente para configuración y gobernanza técnica -- ya no gestiona ni recibe
      comunicados operativos (antes sí tenía el módulo, ver historial de ROLE_VIEWS). PLANNER sigue siendo
-     quien redacta/publica; BODEGA/ALIADO/AUDITOR conservan su acceso de solo lectura, sin cambios. */
-  ADMIN: ['inicio', 'usuarios', 'vehiculos', 'bodegas-aliados', 'permisos', 'configuracion', 'ayuda', 'cuotas'],
+     quien redacta/publica; BODEGA/ALIADO/AUDITOR conservan su acceso de solo lectura, sin cambios.
+     Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner",
+     punto 4: se agrega 'solicitudes' -- toda la capa de datos de ese módulo (solicitudesPendientesUnificadas,
+     solicitudesHistorialUnificado, el badge del sidebar, SOLICITUDES_TABS_POR_ROL.ADMIN) YA contemplaba
+     explícitamente a ADMIN de antemano, simplemente inalcanzable hasta ahora por no estar aquí. ADMIN entra
+     en modo mayormente de solo lectura dentro de ese módulo (sin "+ Nueva Solicitud", ver
+     solicitudesHeaderSync -- btnNueva.hidden=true para cualquier rol que no sea ALIADO/PLANNER) -- la única
+     acción real que puede ejercer es Aprobar/Rechazar Cuota/Festivo/Domingo/Tipología, vía el permiso
+     dedicado 'cuota.resolve' (ver auth.js). */
+  ADMIN: ['inicio', 'usuarios', 'vehiculos', 'bodegas-aliados', 'permisos', 'configuracion', 'ayuda', 'cuotas', 'solicitudes'],
   PLANNER: ['inicio', 'consolidado', 'despacho', 'calculador', 'alertas', 'solicitudes', 'cumplimiento', 'ayuda', 'cuotas', 'comunicaciones'],
   /* 'flota-propia' (ver requerimiento "Reestructuración y Migración de Flota Propia México al Módulo
      Bodega"): registrado para TODOS los Bodega -- allowedViewsForUser la oculta igual que 'calculador' con
@@ -4838,6 +4846,16 @@ function aplicarSolicitudGeneral(sol) {
   });
   return { turnos: turnosAfectados, mensajerosNuevos: mensajerosNuevosSolicitud };
 }
+/* Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner", punto
+   2 (Blindaje de Aprobaciones y Race Conditions): mismo patrón exacto que botonesCuotaAprobacion (Mecanismo
+   C) -- esta función NUNCA tuvo ese blindaje, así que un doble clic (o un clic mientras el push de 2 fases
+   sigue en vuelo) podía disparar aplicarSolicitudGeneral() dos veces sobre la misma solicitud. */
+function botonesSolicitudGeneral(id) {
+  return {
+    aceptar: document.querySelector('button[data-act="aceptar-solicitud-general"][data-id="' + id + '"]'),
+    rechazar: document.querySelector('button[data-act="rechazar-solicitud-general"][data-id="' + id + '"]')
+  };
+}
 function resolverSolicitudGeneral(id, aceptar) {
   var sol = state.solicitudesGenerales.find(function (s) { return s.id === id; });
   if (!sol || sol.estado !== 'pendiente') return;
@@ -4849,6 +4867,12 @@ function resolverSolicitudGeneral(id, aceptar) {
     ? (Auth.getUserRole() === 'ALIADO' && sol.aliado === state.user.aliado)
     : canDo('solicitud.resolve.general');
   if (!puedeResolver) return;
+  var btnsSolGeneral = botonesSolicitudGeneral(id);
+  var btnEnUsoSolGeneral = aceptar ? btnsSolGeneral.aceptar : btnsSolGeneral.rechazar;
+  if (btnEnUsoSolGeneral && btnEnUsoSolGeneral.disabled) return;
+  if (btnsSolGeneral.aceptar) btnsSolGeneral.aceptar.disabled = true;
+  if (btnsSolGeneral.rechazar) btnsSolGeneral.rechazar.disabled = true;
+  if (btnEnUsoSolGeneral) btnEnUsoSolGeneral.textContent = aceptar ? 'Aprobando…' : 'Rechazando…';
   /* Ver requerimiento "Extensión al Flujo del Planner": la solicitud pudo quedar pendiente horas/días -- entre
      su creación y esta aprobación, otro aliado puede haber programado al mismo mensajero (por cédula, placa,
      correo o nombre) para la misma fecha. Mismo criterio de 4 vías y mismo mensaje que el flujo directo del
@@ -4863,6 +4887,9 @@ function resolverSolicitudGeneral(id, aceptar) {
     );
     if (conflictoPlanner) {
       toast('warn', 'No se puede aprobar la solicitud', mensajeDuplicidadAliado(conflictoPlanner));
+      if (btnsSolGeneral.aceptar) btnsSolGeneral.aceptar.disabled = false;
+      if (btnsSolGeneral.rechazar) btnsSolGeneral.rechazar.disabled = false;
+      if (btnEnUsoSolGeneral) btnEnUsoSolGeneral.textContent = aceptar ? 'Aceptar' : 'Rechazar';
       return;
     }
   }
@@ -11299,7 +11326,7 @@ function botonesCuotaAprobacion(routeId) {
   };
 }
 function aprobarCuotaPlanner(routeId) {
-  if (!canDo('solicitud.resolve.general')) return;
+  if (!canDo('cuota.resolve')) return;
   var route = state.turnos.find(function (r) { return r.id === routeId; });
   if (!route || !route.pendienteAprobacionPlanner) return;
   var btns = botonesCuotaAprobacion(routeId);
@@ -11341,7 +11368,7 @@ function aprobarCuotaPlanner(routeId) {
   });
 }
 function rechazarCuotaPlanner(routeId) {
-  if (!canDo('solicitud.resolve.general')) return;
+  if (!canDo('cuota.resolve')) return;
   var route = state.turnos.find(function (r) { return r.id === routeId; });
   if (!route || !route.pendienteAprobacionPlanner) return;
   var btns = botonesCuotaAprobacion(routeId);
@@ -13560,6 +13587,10 @@ function unifiedFromGeneral(sol) {
     detalleHtml: solicitudGeneralDetalleHtml(sol),
     sede: sol.detalle && sol.detalle.sede ? sol.detalle.sede : null,
     sortKey: (sol.fecha || '') + ' ' + (sol.solicitadoEn || ''),
+    /* Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner",
+       punto 3: solo reprogramacion_masiva lleva esta etiqueta (ver su creación en #formNuevaSolicitudPlanner)
+       -- null para cualquier otro tipo, así renderSolicitudesEnviadas sabe cuándo agrupar. */
+    grupoMasivoId: (sol.tipo === 'reprogramacion_masiva' && sol.detalle) ? sol.detalle.grupoMasivoId : null,
     rowId: sol.id, rowIsRoute: false
   };
   if (pendiente) {
@@ -13633,7 +13664,10 @@ function unifiedFromCuota(route, pendiente) {
     rec.motivoHtml = escapeHtml(route.pendienteAprobacionDetalle || '');
     rec.solicitadaTxt = fmtDateLong(route.fecha) + ' · ' + (route.pendienteAprobacionSolicitadoEn || '');
     rec.sortKey = route.fecha + ' ' + (route.pendienteAprobacionSolicitadoEn || '');
-    var puedeResolver = canDo('solicitud.resolve.general');
+    /* Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner",
+       punto 4: 'cuota.resolve' (PLANNER+ADMIN) -- dedicado, no 'solicitud.resolve.general' (PLANNER-only,
+       Mecanismo B). Ver comentario completo en auth.js. */
+    var puedeResolver = canDo('cuota.resolve');
     rec.actionsHtml = puedeResolver
       ? '<button data-act="cuota-aprobacion-aprobar" data-id="' + route.id + '" class="raised">Aprobar</button><button data-act="cuota-aprobacion-rechazar" data-id="' + route.id + '" class="danger">Rechazar</button>'
       : '<span class="courier-sub">Esperando respuesta</span>';
@@ -13787,6 +13821,16 @@ function solicitudesEnviadasAliado() {
    compartida en vez de una paralela: la única diferencia real es el alcance (su propia sede fija, nunca
    país-completo) y que BODEGA SÍ ve origen:'admin' además de 'planner' (Cancelar/Reprogramar directo desde
    Consolidado también afecta turnos de su sede, aunque ella no lo haya solicitado ni deba resolverlo). */
+/* Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner", punto
+   3: orden cronológico descendente de siempre (sortKey), con un desempate por grupoMasivoId -- las filas de
+   una misma campaña (creadas en el mismo submit, casi siempre con sortKey idéntico al segundo) quedan
+   SIEMPRE contiguas, para que renderSolicitudesEnviadas pueda agruparlas visualmente sin perseguir filas
+   sueltas entre otras solicitudes de un sortKey casi igual. */
+function solicitudesEnviadasSortConGrupo(a, b) {
+  var bySortKey = (b.sortKey || '').localeCompare(a.sortKey || '');
+  if (bySortKey !== 0) return bySortKey;
+  return (a.grupoMasivoId || '').localeCompare(b.grupoMasivoId || '');
+}
 function solicitudesEnviadasPlanner() {
   var role = Auth.getUserRole();
   if (role === 'BODEGA') {
@@ -13796,7 +13840,7 @@ function solicitudesEnviadasPlanner() {
     routePropBodega.forEach(function (r) { listBodega.push(unifiedFromRouteSolicitud(r, true)); });
     var genPropBodega = state.solicitudesGenerales.filter(function (s) { return s.estado === 'pendiente' && s.origen === 'planner' && s.detalle && s.detalle.sede === sedeBodega; });
     genPropBodega.forEach(function (s) { listBodega.push(unifiedFromGeneral(s)); });
-    listBodega.sort(function (a, b) { return (b.sortKey || '').localeCompare(a.sortKey || ''); });
+    listBodega.sort(solicitudesEnviadasSortConGrupo);
     return listBodega;
   }
   if (role !== 'ADMIN' && role !== 'PLANNER') return [];
@@ -13807,15 +13851,16 @@ function solicitudesEnviadasPlanner() {
   var paisActivo = currentCountryCode();
   var genProp = state.solicitudesGenerales.filter(function (s) { return s.estado === 'pendiente' && s.origen === 'planner' && (!paisActivo || countryForAliado(s.aliado) === paisActivo); });
   genProp.forEach(function (s) { list.push(unifiedFromGeneral(s)); });
-  list.sort(function (a, b) { return (b.sortKey || '').localeCompare(a.sortKey || ''); });
+  list.sort(solicitudesEnviadasSortConGrupo);
   return list;
 }
 function solicitudesHistorialUnificado() {
   var role = state.user.role;
   var list = [];
   /* Mismo criterio de alcance base que solicitudesPendientesUnificadas: malla completa del país activo para
-     PLANNER (ADMIN no tiene acceso a esta vista, ver ROLE_VIEWS -- la rama 'ADMIN' de más abajo queda
-     inalcanzable en la práctica, sin tocarla para no alterar el comportamiento si algún día se reactivara),
+     PLANNER (ADMIN ahora también llega aquí, ver ROLE_VIEWS y requerimiento "Reestructuración y Optimización
+     Integral de Solicitudes y Cambios -- Rol Planner", punto 4 -- la rama 'ADMIN' de abajo ya estaba escrita
+     de antemano, simplemente inalcanzable hasta este cambio),
      acotada después por el selector local #solicitudesHistBodega (ver renderSolicitudesHistorial,
      que ya aplicaba este post-filtro sobre r.sede — antes no tenía efecto real porque la lista base ya venía
      fija a una sola sede). */
@@ -13876,8 +13921,10 @@ function clampSolicitudesHistRango() {
    una pestaña: "tab" (botón del tab list Y título H2 del panel correspondiente -- mismo texto en los 2
    lugares, a propósito, para reforzar la asociación visual entre pestaña y contenido) y "sub" (subtítulo de
    la página bajo el H1, ver solicitudesHeaderSync -- cambia según cuál de las 3 pestañas esté activa en ese
-   momento). ADMIN no tiene entrada propia -- nunca llega a esta vista (no está en su ROLE_VIEWS); reutiliza
-   PLANNER solo como red de seguridad defensiva, por si esa restricción cambiara algún día. */
+   momento). ADMIN no tiene entrada propia -- reutiliza los textos de PLANNER tal cual (ver requerimiento
+   "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner", punto 4: ADMIN SÍ
+   llega a esta vista ahora, con permiso real solo sobre Cuota/Festivo -- "Por Aprobar por Melonn" sigue
+   siendo una etiqueta razonable aunque ADMIN no pueda accionar cada fila que vea ahí). */
 var SOLICITUDES_TABS_POR_ROL = {
   ALIADO: {
     pendientes: { tab: 'Por Aprobar por Mí', sub: 'Solicitudes enviadas por Melonn que requieren tu respuesta' },
@@ -13909,8 +13956,10 @@ function solicitudesHeaderSync() {
   var histTitle = document.getElementById('solicitudesHistTitle');
   /* Ver requerimiento "Ampliación de Arquitectura Simétrica y Bidireccional...": la pestaña "Enviadas"
      también aplica a PLANNER (emisor de Ajuste Extraordinario/Reprogramación Masiva/Cancelar-Reprogramar
-     directo desde Consolidado) -- NO a ADMIN (no tiene 'solicitudes' en su ROLE_VIEWS, nunca llega a esta
-     vista). Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega": BODEGA también la usa -- nunca
+     directo desde Consolidado) -- NO a ADMIN, que ya llega a esta vista (ver ROLE_VIEWS) pero nunca EMITE
+     nada (ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol
+     Planner", punto 4: su único permiso real es Aprobar/Rechazar Cuota/Festivo, nunca crear una solicitud).
+     Ver requerimiento "Pestaña 'Enviado por Planner' para Bodega": BODEGA también la usa -- nunca
      EMITE nada (sigue sin botón "+ Nueva Solicitud" ni "Cancelar Solicitud", ver renderSolicitudesEnviadas),
      pero sí necesita ver, aislado del resto, lo que Planner envió sobre turnos de su propia sede. Si el rol
      activo pierde la pestaña mientras estaba parado en ella (switch de usuario), vuelve a "Pendientes" para
@@ -13957,7 +14006,8 @@ function renderSolicitudesPendientes() {
     if (bodegaSelEl.value !== state.solicitudesFiltroBodega) bodegaSelEl.value = state.solicitudesFiltroBodega;
   }
   /* Filtro de Aliado (ver "Prompt de Ejecución Global - Ajustes de UI/UX y CSS en Plataforma", 3): PLANNER y
-     BODEGA lo ven -- ADMIN no llega a este módulo (no tiene 'solicitudes' en ROLE_VIEWS) y ALIADO ya está
+     BODEGA lo ven -- ADMIN no lo necesita (solo accionable sobre Cuota/Festivo, no tiene nada que filtrar por
+     Aliado en la práctica) y ALIADO ya está
      implícitamente acotado a su propio alcance (todas sus solicitudes son de su propio aliado). A diferencia
      del filtro "Bodega" (sin sentido para BODEGA, ya fija a su propia sede), BODEGA sí puede tener VARIOS
      aliados operando en su misma bodega, así que "Aliado" sigue siendo un filtro real para ese rol —
@@ -14029,15 +14079,31 @@ function renderSolicitudesEnviadas() {
   var role = Auth.getUserRole();
   var lista = role === 'ALIADO' ? solicitudesEnviadasAliado() : solicitudesEnviadasPlanner();
   var etiquetaEspera = role === 'ALIADO' ? 'En revisión por Planner' : 'En revisión por el Aliado';
+  /* Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner",
+     punto 3: cuenta cuántas filas comparten cada grupoMasivoId (fan-out de Reprogramación Masiva) para poder
+     mostrar "N aliado(s)" en el encabezado de campaña -- puramente visual, nunca cambia qué ve el Aliado ni
+     cómo resuelve su propia SOL-NNN individual (ver unifiedFromGeneral/resolverSolicitudGeneral). */
+  var conteoGrupoMasivo = {};
+  lista.forEach(function (r) { if (r.grupoMasivoId) conteoGrupoMasivo[r.grupoMasivoId] = (conteoGrupoMasivo[r.grupoMasivoId] || 0) + 1; });
+  var grupoMasivoAnterior = null;
   document.getElementById('solicitudesEnviadasTbody').innerHTML = lista.map(function (r) {
-    var trAttrs = 'data-id="' + r.rowId + '"' + (r.rowIsRoute ? ' data-route="' + r.rowId + '"' : '');
+    /* Las filas de una misma campaña quedan SIEMPRE contiguas (ver solicitudesEnviadasSortConGrupo) -- el
+       encabezado se inserta una sola vez, justo antes de la primera fila de cada grupo nuevo. */
+    var encabezadoGrupoMasivo = '';
+    if (r.grupoMasivoId && r.grupoMasivoId !== grupoMasivoAnterior) {
+      encabezadoGrupoMasivo = '<tr class="solicitud-grupo-masivo-header"><td colspan="6">' +
+        '<strong>Campaña de Reprogramación Masiva</strong> · ' + conteoGrupoMasivo[r.grupoMasivoId] + ' aliado(s)' +
+        (r.sede ? ' · ' + escapeHtml(r.sede) : '') + '</td></tr>';
+    }
+    grupoMasivoAnterior = r.grupoMasivoId || null;
+    var trAttrs = 'data-id="' + r.rowId + '"' + (r.rowIsRoute ? ' data-route="' + r.rowId + '"' : '') + (r.grupoMasivoId ? ' class="solicitud-grupo-masivo-fila"' : '');
     /* Ver requerimiento "Refactor de Arquitectura...", punto 7: mismo patrón visual "Outline Destructivo" ya
        establecido por .row-actions button.danger (borde rojo suave, fondo transparente, texto rojo -- ver
        "Eliminar Mensajero") -- se envuelve en .row-actions como cualquier otra acción de fila de la
        plataforma, en vez de un botón suelto sin ese contenedor. */
     var accionesHtml = (r.tipo === 'cuota_festivo' || role === 'BODEGA') ? '' :
       '<div class="row-actions"><button data-act="cancelar-solicitud-propia" data-id="' + r.rowId + '" data-es-ruta="' + (r.rowIsRoute ? '1' : '0') + '" class="danger" data-tip="Cancelar Solicitud">Cancelar Solicitud</button></div>';
-    return '<tr ' + trAttrs + '>' +
+    return encabezadoGrupoMasivo + '<tr ' + trAttrs + '>' +
       '<td>' + r.tipoHtml + '</td>' +
       '<td class="courier-sub">' + r.detalleHtml + '</td>' +
       '<td class="courier-sub">' + r.motivoHtml + '</td>' +
@@ -14235,11 +14301,14 @@ function openReprogramarSeguimientoModal(routeId) {
   openModal('modalReprogramarSeguimiento');
 }
 /* ---------------- Nueva Solicitud — PLANNER (habilita crear una solicitud HACIA un Aliado) ----------------
-   Ver requerimiento "Restructuración Integral...", Parte 4 (Homologación Planner = Aliado): mismos 4 tipos de
-   solicitud y mismos campos condicionales que el modal del Aliado (ver arriba), con selección en cascada
-   Bodega -> Aliado -> Mensajero/Turno en vez del campo único "Bodega / Turno" que concatenaba todo en una
-   sola cadena. routesEligiblesSolicitud (compartida arriba) sigue siendo la única fuente de las reglas de
-   elegibilidad. */
+   Ver requerimiento "Restructuración Integral...", Parte 4: selección en cascada Bodega -> Aliado ->
+   Mensajero/Turno en vez del campo único "Bodega / Turno" que concatenaba todo en una sola cadena.
+   routesEligiblesSolicitud (compartida arriba) sigue siendo la única fuente de las reglas de elegibilidad.
+   Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner": el
+   catálogo de tipos que el Planner puede INICIAR quedó reducido a Cancelación/Reprogramación/Reprogramación
+   Masiva -- "Cambio de Mensajero" e "Intercambio de Turno" son gestión física de flota, exclusiva del Aliado
+   (ver #nsTipo); el Planner sigue pudiendo APROBARLOS cuando el Aliado los inicia (resolverSolicitud/
+   unifiedFromRouteSolicitud, sin cambios). */
 function routesEligiblesPlannerEnBodega(sede) {
   return routesEligiblesSolicitud(function (r) { return r.sede === sede; });
 }
@@ -14295,13 +14364,17 @@ function refreshNpMasivaFields() {
     return '<label class="maleta-toggle"><input type="checkbox" class="np-masiva-franja" value="' + h + '"' + (franjasMarcadasAntes.indexOf(h) !== -1 ? ' checked' : '') + '> ' + fmtTime12(h) + '</label>';
   }).join('');
 }
+/* Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner": el
+   catálogo del Planner quedó en 3 tipos (cancelacion/reprogramacion/reprogramacion_masiva) -- "Cambio de
+   Mensajero" e "Intercambio de Turno" son gestión física de flota, exclusiva del Aliado (ver #nsTipo). Las
+   ramas esCambioMensajero/esEnroque y los campos #npCambioMensajeroFields/#npEnroqueField/#npEnroqueRuta se
+   retiran de aquí -- resolverSolicitud/unifiedFromRouteSolicitud (motor compartido que APRUEBA, no inicia,
+   una solicitud ya existente) siguen soportando esos 2 tipos intactos para cuando el Aliado los inicia. */
 function refreshNpFieldsForTipo() {
   var tipo = document.getElementById('npTipo').value;
-  var esReprog = tipo === 'reprogramacion', esCambioMensajero = tipo === 'cambio_mensajero', esEnroque = tipo === 'enroque', esMasiva = tipo === 'reprogramacion_masiva';
+  var esReprog = tipo === 'reprogramacion', esMasiva = tipo === 'reprogramacion_masiva';
   document.getElementById('npHoraField').hidden = !esReprog;
   document.getElementById('npNuevaHora').required = esReprog;
-  document.getElementById('npCambioMensajeroFields').hidden = !esCambioMensajero;
-  document.getElementById('npEnroqueField').hidden = !esEnroque;
   /* Ver requerimiento "Prompt Consolidador Maestro...", Bloque 3: la cascada Aliado/Mensajero-Turno (pensada
      para elegir UNA sola ruta) no aplica a "Reprogramación masiva de ventana" -- opera sobre Bodega + varios
      Aliados + Franjas a la vez (ver #npMasivaFields). */
@@ -14309,13 +14382,6 @@ function refreshNpFieldsForTipo() {
   document.getElementById('npRutaField').hidden = esMasiva;
   document.getElementById('npRuta').required = !esMasiva;
   document.getElementById('npMasivaFields').hidden = !esMasiva;
-  if (esEnroque) {
-    var origenId = document.getElementById('npRuta').value;
-    var sede = document.getElementById('npBodega').value;
-    var opciones = (sede ? routesEligiblesPlannerEnBodega(sede) : []).filter(function (r) { return r.id !== origenId; });
-    var esel = document.getElementById('npEnroqueRuta');
-    esel.innerHTML = opciones.map(function (r) { return '<option value="' + r.id + '">' + r.id + ' · ' + getMensajero(r.mensajeroId).nombre + ' · ' + fmtDateLong(r.fecha) + ' ' + fmtTime12(r.hora) + '</option>'; }).join('');
-  }
   if (esMasiva) refreshNpMasivaFields();
 }
 function openNuevaSolicitudModalPlanner() {
@@ -14326,10 +14392,6 @@ function openNuevaSolicitudModalPlanner() {
   bodegaSel.value = sedes.indexOf(state.activeSede) !== -1 ? state.activeSede : (sedes[0] || '');
   document.getElementById('npTipo').value = 'cancelacion';
   document.getElementById('npNuevaHora').value = '';
-  document.getElementById('npCmNombre').value = '';
-  document.getElementById('npCmTelefono').value = '';
-  document.getElementById('npCmCedula').value = '';
-  document.getElementById('npCmPlaca').value = '';
   document.getElementById('npMotivo').value = '';
   document.getElementById('npMasivaTodosAliados').checked = true;
   document.getElementById('npMasivaDesplazamiento').value = '30';
@@ -22174,12 +22236,20 @@ document.addEventListener('DOMContentLoaded', function () {
         : Array.from(document.querySelectorAll('.np-masiva-aliado:checked')).map(function (el) { return el.value; });
       if (!aliadosObjetivo.length) { toast('warn', 'Selecciona al menos un Aliado', 'Elige "Todos los aliados" o marca al menos uno de la lista.'); return; }
       var desplazamientoMasiva = parseInt(document.getElementById('npMasivaDesplazamiento').value, 10);
+      /* Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner",
+         punto 3 (Filtrado y Agrupación de Reprogramación Masiva): cada Aliado elegido sigue recibiendo su
+         propio SOL-NNN 100% independiente (fan-out real, ver comentario de más arriba sobre por qué nunca es
+         UNA sola solicitud compartida) -- grupoMasivoId es puramente una etiqueta de trazabilidad para que el
+         Planner pueda identificar, en "Enviadas a Aliados", cuáles SOL-NNN nacieron de la MISMA campaña (sede+
+         franjas+desplazamiento+motivo enviados en un solo submit). No cambia en nada ni lo que el Aliado
+         recibe ni cómo la acepta/rechaza -- unifiedFromGeneral/resolverSolicitudGeneral no lo leen. */
+      var grupoMasivoId = 'GM-' + Date.now().toString(36);
       var solsMasivas = aliadosObjetivo.map(function (aliadoObjetivo) {
         var solMasiva = {
           id: nextSolicitudGeneralId(), tipo: 'reprogramacion_masiva', estado: 'pendiente',
           aliado: aliadoObjetivo, motivo: motivoMasiva, fecha: TODAY_STR,
           solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), origen: 'planner',
-          detalle: { sede: sedeMasiva, franjas: franjasMasiva, desplazamientoMinutos: desplazamientoMasiva }
+          detalle: { sede: sedeMasiva, franjas: franjasMasiva, desplazamientoMinutos: desplazamientoMasiva, grupoMasivoId: grupoMasivoId }
         };
         /* nextSolicitudGeneralId() deriva del máximo id YA en state.solicitudesGenerales -- hay que
            empujar cada una antes de pedir el siguiente id, o las N solicitudes de este lote colisionarían
@@ -22198,42 +22268,30 @@ document.addEventListener('DOMContentLoaded', function () {
     /* Segunda barrera (ver routesEligiblesPlannerEnBodega, que ya excluye estas rutas del selector): un
        turno cerrado en Incumplimiento Confirmado o Sin Reemplazo queda inmutable. */
     var codeNp = computeEstado(route).code;
-    if (codeNp === 'afectacion_confirmada' || codeNp === 'sin_reemplazo') { toast('warn', 'Turno cerrado', route.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite Cancelar, Reprogramar, Cambio de Mensajero ni Intercambio de Turno.'); closeModal(); return; }
+    if (codeNp === 'afectacion_confirmada' || codeNp === 'sin_reemplazo') { toast('warn', 'Turno cerrado', route.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite Cancelar ni Reprogramar.'); closeModal(); return; }
     var motivo = document.getElementById('npMotivo').value.trim();
     if (!motivo) return;
     var nuevaHora = tipo === 'reprogramacion' ? document.getElementById('npNuevaHora').value : null;
     if (tipo === 'reprogramacion' && !nuevaHora) return;
-    var mensajeroPropuestoNp = null;
-    if (tipo === 'cambio_mensajero') {
-      mensajeroPropuestoNp = {
-        nombre: document.getElementById('npCmNombre').value.trim(), telefono: document.getElementById('npCmTelefono').value.trim(),
-        cedula: document.getElementById('npCmCedula').value.trim(), placa: document.getElementById('npCmPlaca').value.trim(),
-        sede: route.sede, vehiculo: route.vehiculo
-      };
-      if (!mensajeroPropuestoNp.nombre || !mensajeroPropuestoNp.telefono || !mensajeroPropuestoNp.cedula || !mensajeroPropuestoNp.placa) {
-        toast('warn', 'Completa los datos del mensajero propuesto', 'Nombre, teléfono, cédula y placa son obligatorios.'); return;
-      }
-    }
-    var enroqueConRouteIdNp = null;
-    if (tipo === 'enroque') {
-      enroqueConRouteIdNp = document.getElementById('npEnroqueRuta').value;
-      if (!enroqueConRouteIdNp) { toast('warn', 'Selecciona un turno', 'Elige el turno con el que quieres intercambiar mensajeros.'); return; }
-    }
     /* origen:'planner' (mismo valor ya usado en rechazarCuotaPlanner) — nunca 'aliado', así resolverSolicitud/
        unifiedFromRouteSolicitud dirigen correctamente la aprobación/rechazo hacia el Aliado dueño del turno,
        igual que ya ocurre con las solicitudes origen:'admin' creadas desde Consolidado. solicitadoPor guarda el
        nombre real del Planner (no un texto genérico) para que nombreConRol la muestre como "Nombre (Planner)"
-       en la trazabilidad — mismo criterio que cualquier otra solicitud creada por un usuario real de USERS. */
+       en la trazabilidad — mismo criterio que cualquier otra solicitud creada por un usuario real de USERS.
+       mensajeroPropuesto/enroqueConRouteId quedan siempre null aquí (ver requerimiento "Reestructuración y
+       Optimización Integral de Solicitudes y Cambios -- Rol Planner": el Planner ya no inicia Cambio de
+       Mensajero ni Intercambio de Turno) -- el shape del objeto se conserva igual porque resolverSolicitud/
+       unifiedFromRouteSolicitud lo comparten con las solicitudes que SÍ inicia el Aliado con esos 2 tipos. */
     var solicitud = {
       tipo: tipo, estado: 'pendiente', motivo: motivo, horaAnterior: route.hora, nuevaHora: nuevaHora,
-      mensajeroPropuesto: mensajeroPropuestoNp, enroqueConRouteId: enroqueConRouteIdNp,
+      mensajeroPropuesto: null, enroqueConRouteId: null,
       solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), solicitadaDesdeHM: fmtTimeHM(state.now), fecha: TODAY_STR, origen: 'planner'
     };
     if (tipo === 'reprogramacion') solicitud.evaluacionAntelacion = reprogramacionClasificacion(route);
     route.solicitud = solicitud;
     registrarHistorialCambio(route, { tipo: tipo, accion: 'solicitada', motivo: motivo, horaAnterior: route.hora, horaPropuesta: nuevaHora, por: state.user.nombre, rol: state.user.role });
     var toastMsgReprogNp = solicitud.evaluacionAntelacion ? (' (' + solicitud.evaluacionAntelacion.label + ')') : '';
-    var tipoToastLabelNp = { reprogramacion: 'Solicitud de reprogramación enviada', cancelacion: 'Solicitud de cancelación enviada', cambio_mensajero: 'Solicitud de cambio de mensajero enviada', enroque: 'Solicitud de intercambio de turno enviada' }[tipo];
+    var tipoToastLabelNp = { reprogramacion: 'Solicitud de reprogramación enviada', cancelacion: 'Solicitud de cancelación enviada' }[tipo];
     toast('warn', tipoToastLabelNp, route.id + toastMsgReprogNp + ' — a la espera de respuesta de ' + getMensajero(route.mensajeroId).aliado + '.');
     closeModal();
     syncAndRender(true);

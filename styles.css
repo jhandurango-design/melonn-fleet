@@ -1578,3 +1578,10 @@ body:has(#modalOverlay.open) .cumplimiento-export-fab{display:none;}
 body,p,span,td,input,select{font-size:12px !important;font-weight:500;line-height:1.43;}
 th,label{font-size:11px !important;font-weight:600;color:#666666;}
 button,.btn{font-size:12px !important;font-weight:600;padding:6px 12px;}
+
+/* Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner", punto
+   3: encabezado de campaña para el fan-out de Reprogramación Masiva en "Enviadas a Aliados" (ver
+   renderSolicitudesEnviadas) -- puramente visual, agrupa las filas SOL-NNN individuales que ya nacieron
+   contiguas (ver solicitudesEnviadasSortConGrupo). */
+.solicitud-grupo-masivo-header td{background:var(--muted-soft);font-size:11px !important;font-weight:700;color:var(--text-secondary);padding:7px 14px;border-top:1px solid var(--border);}
+.solicitud-grupo-masivo-fila td{border-left:2px solid var(--lilac-deep);}
