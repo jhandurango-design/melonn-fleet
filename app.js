@@ -7690,6 +7690,16 @@ function routesForConsolidadoDate() {
       : r.fecha === state.consolidadoFecha;
     if (!fechaOk || sedes.indexOf(r.sede) === -1) return false;
     if (qAliado && getMensajero(r.mensajeroId).aliado !== qAliado) return false;
+    /* Ver requerimiento "Un turno con excepción de Cuota/Festivo/Tipología RECHAZADA no debe aparecer en las
+       tablas de programación en vivo" (reporte Planner): a diferencia de una cancelación directa de un turno
+       que SÍ llegó a operar (origen:'planner'/'admin' sin cuotaAprobacion), este nunca pasó de estado
+       pendiente de aprobación -- Planner lo rechazó antes de que existiera como ruta real. Mostrarlo en
+       Consolidado/Despacho/Seguimiento como si fuera una ruta cancelada genera confusión operativa sin
+       aportar nada que Historial de Solicitudes (ver unifiedFromCuota/solicitudesHistorialUnificado) no
+       muestre ya con más detalle (causal, quién resolvió, cuándo). Mismo criterio aplicado en los 3 módulos
+       (Despacho/Seguimiento/Consolidado), en Operación del Día Y en Historial del Mes -- este turno nunca
+       perteneció a la operación real de ningún día. */
+    if (r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada') return false;
     return true;
   });
 }
@@ -8440,11 +8450,15 @@ function routesForDespacho() {
   var fechaOk = function (fecha) {
     return enModoHistorial ? (fecha >= state.despachoHistDesde && fecha <= state.despachoHistHasta) : fecha === state.despachoFecha;
   };
+  /* Ver requerimiento "Un turno con excepción de Cuota/Festivo/Tipología RECHAZADA no debe aparecer en las
+     tablas de programación en vivo" (ver comentario completo en routesForConsolidadoDate, mismo criterio) --
+     Bodega no tiene nada que hacer con un turno que nunca llegó a operar: ni esperarlo ni despacharlo. */
   if (Auth.getUserRole() === 'BODEGA') {
     var sedeFija = Auth.getUserScopes().bodegaId;
     return state.turnos.filter(function (r) {
       if (!fechaOk(r.fecha) || r.sede !== sedeFija) return false;
       if (qAliado && getMensajero(r.mensajeroId).aliado !== qAliado) return false;
+      if (r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada') return false;
       return true;
     });
   }
@@ -8452,6 +8466,7 @@ function routesForDespacho() {
   return state.turnos.filter(function (r) {
     if (!fechaOk(r.fecha) || sedes.indexOf(r.sede) === -1) return false;
     if (qAliado && getMensajero(r.mensajeroId).aliado !== qAliado) return false;
+    if (r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada') return false;
     return true;
   });
 }
@@ -9871,12 +9886,16 @@ function renderSeguimiento() {
     if (sHastaInput.value !== rangoS.hasta) sHastaInput.value = rangoS.hasta;
     syncHistModoFields('seguimiento');
     document.getElementById('seguimientoSub').textContent = 'Historial de operación de ' + state.user.aliado + ' · ' + fmtDateRangeLong(state.seguimientoHistDesde, state.seguimientoHistHasta);
-    routes = state.turnos.filter(function (r) { return getMensajero(r.mensajeroId).aliado === state.user.aliado && r.fecha >= state.seguimientoHistDesde && r.fecha <= state.seguimientoHistHasta; });
+    routes = state.turnos.filter(function (r) { return getMensajero(r.mensajeroId).aliado === state.user.aliado && r.fecha >= state.seguimientoHistDesde && r.fecha <= state.seguimientoHistHasta && !(r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada'); });
   } else {
     /* "Operación del Día" queda SIEMPRE fija a TODAY_STR (sin selector de fecha en esta pestaña, en ningún
        rol). */
     document.getElementById('seguimientoSub').textContent = 'Seguimiento en vivo de la operación de ' + state.user.aliado;
-    routes = state.turnos.filter(function (r) { return getMensajero(r.mensajeroId).aliado === state.user.aliado && r.fecha === TODAY_STR; });
+    /* Ver requerimiento "Un turno con excepción de Cuota/Festivo/Tipología RECHAZADA no debe aparecer en las
+       tablas de programación en vivo" (ver comentario completo en routesForConsolidadoDate, mismo criterio):
+       el propio Aliado ya se entera del rechazo por Solicitudes y Cambios -- no necesita verlo también aquí
+       como si fuera una ruta suya que se canceló. */
+    routes = state.turnos.filter(function (r) { return getMensajero(r.mensajeroId).aliado === state.user.aliado && r.fecha === TODAY_STR && !(r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada'); });
   }
   routes = routes.slice().sort(function (a, b) { return a.fecha === b.fecha ? a.hora.localeCompare(b.hora) : a.fecha.localeCompare(b.fecha); });
   refreshSeguimientoFiltroBodegaOptions();
