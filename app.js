@@ -13481,15 +13481,24 @@ function reprogramacionClasificacionBadgeHtml(s) {
 /* Vocabulario e identidad visual de TODOS los tipos que puede contener la Bandeja Unificada, sin importar de
    cuál de las 3 fuentes provengan — el badge de color es la única señal que el Planner necesita para
    distinguirlos de un vistazo (ver requerimiento "Bandeja Unificada"). */
+/* Ver requerimiento "Especificidad de Terminología: Confirmación de Recurso Pendiente vs. Edición de Turno"
+   (reporte Planner): 'edicion_turno_confirmacion' es una clave puramente de PRESENTACIÓN -- nunca un tipo
+   real de solicitudesGenerales (sol.tipo sigue siendo 'edicion_turno' en todos los casos, ver submitTurno) --
+   usada SOLO por unifiedFromGeneral cuando sol.detalle.modoOriginal === 'confirm', para que el Planner
+   distinga de un vistazo "el Aliado confirmó el mensajero de un cupo que ya estaba reservado" (rutinario, el
+   cupo/franja/hora ya existían y fueron aprobados antes) de "el Aliado cambió datos de un turno que ya
+   operaba con un mensajero real" (edicion_turno "genuina", amerita más atención). */
 var SOLICITUD_TIPO_LABEL_TABLA = {
   reprogramacion: 'Reprogramación', cancelacion: 'Cancelación', cambio_mensajero: 'Cambio de Mensajero', enroque: 'Intercambio de Turno',
   cuota_festivo: 'Cuota / Festivo', prolongacion: 'Prolongación de Flota', nuevo_turno: 'Nuevo Turno', cupo_adicional: 'Cupo Adicional', edicion_turno: 'Cambio de Programación',
+  edicion_turno_confirmacion: 'Confirmación de Recurso Pendiente',
   reemplazo_alerta: 'Reemplazo Pendiente de Aprobación', reemplazo_cancelacion: 'Cancelación con Reemplazo Pendiente de Aprobación', ajuste_extraordinario: 'Ajuste Extraordinario',
   reprogramacion_masiva: 'Reprogramación Masiva de Ventana'
 };
 var SOLICITUD_TIPO_BADGE_CLASS = {
   reprogramacion: 'badge-warn', cancelacion: 'badge-critical', cambio_mensajero: 'badge-dispatched', enroque: 'badge-pending',
   cuota_festivo: 'badge-justified', prolongacion: 'badge-dock', nuevo_turno: 'badge-dock', cupo_adicional: 'badge-dock', edicion_turno: 'badge-warn',
+  edicion_turno_confirmacion: 'badge-dock',
   reemplazo_alerta: 'badge-critical', reemplazo_cancelacion: 'badge-critical', ajuste_extraordinario: 'badge-dock',
   reprogramacion_masiva: 'badge-warn'
 };
@@ -13508,6 +13517,7 @@ var SOLICITUD_TIPO_INFO_TIP = {
   nuevo_turno: 'Alta de turno enviada fuera de la ventana horaria habitual, pendiente de aprobación por Planner.',
   cupo_adicional: 'Solicitud de un cupo extra por encima de la cuota ya asignada al Aliado.',
   edicion_turno: 'Cambio de datos de un turno ya confirmado, enviado fuera de la ventana horaria habitual.',
+  edicion_turno_confirmacion: 'El Aliado asignó su mensajero real a un cupo que había quedado "Pendiente / Por Confirmar"; pendiente de aprobación por Planner por enviarse fuera de la ventana horaria habitual.',
   reemplazo_alerta: 'Reemplazo de mensajero propuesto por el Aliado tras una alerta de incumplimiento, pendiente de aprobación.',
   reemplazo_cancelacion: 'Cancelación con reemplazo propuesto por el Aliado en el mismo envío, pendiente de aprobación.',
   reprogramacion_masiva: 'Solicitud de Planner hacia el Aliado para desplazar en bloque la hora de varias franjas/turnos de un día, pendiente de aprobación del Aliado.'
@@ -13650,8 +13660,15 @@ function fechaOperativaDeGeneral(sol) {
 }
 function unifiedFromGeneral(sol) {
   var pendiente = sol.estado === 'pendiente';
+  /* Ver requerimiento "Especificidad de Terminología: Confirmación de Recurso Pendiente vs. Edición de
+     Turno": rec.tipo se queda SIEMPRE en el valor real (sol.tipo, 'edicion_turno') -- lo usan los filtros de
+     "Tipo de Solicitud" (state.solicitudesTipoFilter) y no deben dejar de encontrar esta fila. Solo el BADGE
+     visual (tipoHtml) usa la clave distinta cuando aplica, ver SOLICITUD_TIPO_LABEL_TABLA/BADGE_CLASS/
+     INFO_TIP. */
+  var tipoParaBadge = (sol.tipo === 'edicion_turno' && sol.detalle && sol.detalle.modoOriginal === 'confirm')
+    ? 'edicion_turno_confirmacion' : sol.tipo;
   var rec = {
-    tipo: sol.tipo, tipoHtml: solicitudTipoBadgeHtml(sol.tipo),
+    tipo: sol.tipo, tipoHtml: solicitudTipoBadgeHtml(tipoParaBadge),
     aliado: sol.aliado, aliadoHtml: escapeHtml(sol.aliado),
     detalleHtml: solicitudGeneralDetalleHtml(sol),
     sede: sol.detalle && sol.detalle.sede ? sol.detalle.sede : null,
@@ -15632,9 +15649,17 @@ function submitTurno(e) {
        en esta sede+aliado+hoy (o viniendo de modo='confirm'/'edit'). */
     var detalle = payload;
     if (modo !== 'create') { detalle.routeId = routeId; detalle.modoOriginal = modo; }
+    /* Ver requerimiento "Especificidad de Terminología: Confirmación de Recurso Pendiente vs. Edición de
+       Turno": modo==='confirm' (botón "Confirmar recurso" sobre un turno "Pendiente/Por Confirmar") es
+       conceptualmente distinto de modo==='edit' (cambiar datos de un turno que YA operaba con un mensajero
+       real) -- aunque ambos caen en el mismo tipoSol='edicion_turno' (mismo motor de aprobación/aplicación,
+       ver aplicarSolicitudGeneral), el texto que ve el Planner ahora lo distingue con claridad en vez de
+       usar la misma redacción genérica de "edición" para los dos casos. */
     var motivoSol = tipoSol === 'nuevo_turno'
       ? 'Alta de nuevo turno enviada fuera del horario de programación.'
-      : (ws === 'today_solicitud' ? 'Edición de un turno de hoy — toda modificación del día en curso requiere aprobación de Planner.' : 'Edición de turno enviada fuera del horario de programación.');
+      : modo === 'confirm'
+        ? 'El Aliado confirmó el mensajero para un cupo que quedó "Pendiente / Por Confirmar"; al enviarse fuera del horario de programación, requiere aprobación de Planner antes de quedar en firme.'
+        : (ws === 'today_solicitud' ? 'Edición de un turno de hoy — toda modificación del día en curso requiere aprobación de Planner.' : 'Edición de turno enviada fuera del horario de programación.');
     solGeneralCreada = {
       id: nextSolicitudGeneralId(), tipo: tipoSol, estado: 'pendiente', aliado: state.user.aliado,
       solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), fecha: TODAY_STR,
