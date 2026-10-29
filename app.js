@@ -8005,6 +8005,12 @@ function routesForConsolidadoManana(sedeFiltro, aliadoFiltro) {
     return true;
   }).sort(function (a, b) { return a.sede.localeCompare(b.sede) || a.hora.localeCompare(b.hora); });
 }
+/* FIX "No muestra si es Adicional alguno" (reporte real, tabla de detalle de 'Avance y Carga T+1'): esta
+   fila nunca llamaba a turnoAdicionalRowBadgeHtml/descalceFranjaTagHtml -- a diferencia de las otras 3
+   tablas de turnos de la plataforma (rowHtmlConsolidado/rowHtmlDespacho/rowHtmlSeguimiento, que sí las
+   incluyen), así que un turno marcado como Adicional (o con Descalce de Franja) por dentro no tenía ningún
+   indicio visual en ESTA tabla puntual -- el chip agregado de "Avance de Cuotas" arriba sí lo contaba, pero
+   nada en la fila real del mensajero afectado lo mostraba. */
 function consolManDetalleRowHtml(route) {
   var m = getMensajero(route.mensajeroId), est = computeEstado(route);
   return '<tr data-route="' + route.id + '">' +
@@ -8012,7 +8018,7 @@ function consolManDetalleRowHtml(route) {
     '<td><div class="courier"><div><div class="courier-name">' + escapeHtml(m.nombre) + '</div><div class="courier-sub">Placa ' + escapeHtml(m.placa) + '</div></div></div></td>' +
     '<td>' + escapeHtml(route.vehiculo) + '</td>' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
-    '<td><span class="badge ' + badgeClassFor(est.code) + '"><i></i>' + est.label + '</span></td>' +
+    '<td><span class="badge ' + badgeClassFor(est.code) + '"><i></i>' + est.label + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + '</td>' +
     '<td>' + escapeHtml(route.sede) + '</td>' +
     '</tr>';
 }
@@ -19300,7 +19306,17 @@ function cuotasAgregarFranjasFueraDeMatriz(franjas, sede, aliado, fecha) {
     if (getMensajero(r.mensajeroId).aliado !== aliado) return;
     if (r.solicitud && r.solicitud.tipo === 'cancelacion' && r.solicitud.estado === 'aceptada' && r.solicitud.origen === 'aliado') return;
     if (r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada') return;
-    var franjaReal = franjaForHora(r.hora, country);
+    /* FIX "Hora real del Adicional no coincide con la que muestra el desglose" (reporte real: Cordiandina,
+       turnos a las 07:00 AM mostrados como "—" o como una hora distinta, 09:00 AM, en vez de 07:00 AM):
+       franjaForHora() solo encuentra una franja oficial si existe alguna que empiece con la MISMA hora en
+       punto (ver su propio fallback por hh) -- para una hora como "07:00" sin ninguna franja oficial que
+       empiece en "07", devuelve null, y el desglose terminaba mostrando fmtTime12(null) ("—"), ocultando la
+       hora real del recurso. franjaForHora() se queda intacta (la usan checkCuotaExceso/evaluarAprobacionCuota
+       y otros 7 llamadores más para el conteo REAL de cupos, donde "agrupar por la hora en punto más cercana"
+       sí es el comportamiento correcto) -- aquí, que es puramente una ETIQUETA DE DESGLOSE VISUAL para turnos
+       que por definición ya están fuera de cualquier franja configurada, se usa la hora real del turno como
+       respaldo en vez de perderla. */
+    var franjaReal = franjaForHora(r.hora, country) || r.hora;
     var key = franjaReal + '|' + r.vehiculo;
     if (yaListadas[key]) return;
     if (!fueraDeMatriz[key]) fueraDeMatriz[key] = { franja: franjaReal, vehiculo: r.vehiculo, cuota: 0, actuales: 0, fueraDeFranja: true };
