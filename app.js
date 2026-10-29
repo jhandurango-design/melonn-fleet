@@ -14780,6 +14780,25 @@ function showLoadingOverlay() {
     loadingOverlayFadeTimer = setTimeout(function () { overlay.hidden = true; overlay.classList.remove('fade-out'); }, 350);
   }, 650);
 }
+/* Ver requerimiento "Pantalla de carga al cambiar de bodega activa" (reporte Planner, tras confirmar en vivo
+   que cambiarBodegaActivaUsuario ya trae los datos correctos): a diferencia de showLoadingOverlay() de
+   arriba -- un flash puramente decorativo de duración FIJA (650ms), pensado para login/F5, donde la carga
+   real ya iba a tardar más de todos modos -- este par queda atado a la duración REAL del push+remint+pull
+   (variable, puede ser más de 1-2s), así el overlay no se cierra antes de que los datos de la bodega nueva
+   de verdad hayan llegado. Mismo elemento visual (#loadingOverlay), mismos timers de fade-out, pero
+   controlados por finalización real en vez de por un setTimeout fijo. */
+function showLoadingOverlayHastaCompletar() {
+  var overlay = document.getElementById('loadingOverlay');
+  if (loadingOverlayTimer) clearTimeout(loadingOverlayTimer);
+  if (loadingOverlayFadeTimer) clearTimeout(loadingOverlayFadeTimer);
+  overlay.classList.remove('fade-out');
+  overlay.hidden = false;
+}
+function hideLoadingOverlayConFade() {
+  var overlay = document.getElementById('loadingOverlay');
+  overlay.classList.add('fade-out');
+  loadingOverlayFadeTimer = setTimeout(function () { overlay.hidden = true; overlay.classList.remove('fade-out'); }, 350);
+}
 
 function openRutaModal(routeId) {
   if (!canDo('schedule.create')) return;
@@ -20909,20 +20928,30 @@ async function cambiarBodegaActivaUsuario(sedeId) {
   });
   persistUsers();
   renderContextPill();
-  toast('warn', 'Cambiando de bodega…', 'Actualizando a ' + sedeId + '.');
-  /* mint_with_role (dentro de fijarSessionTokenConRol) relee el usuario FRESCO desde la base de datos con la
-     Service Role Key -- necesita que este push ya haya comprometido su transacción, o remintearía todavía con
-     la bodega vieja. Mismo criterio de "Auditoría de Desconexiones Intermitentes con Supabase" que antes: un
-     fallo de red aquí no debe disparar el aviso intrusivo de reconexión, silencioso=true. */
-  var pushUsuarioBodega = { ok: true };
-  try { pushUsuarioBodega = await scPushRows('app_users', [state.user], undefined, true); } catch (e) {}
-  var mintResultadoBodega = await fijarSessionTokenConRol(state.user);
-  if (!mintResultadoBodega.ok || (pushUsuarioBodega && pushUsuarioBodega.ok === false)) {
-    toast('warn', 'Cambio de bodega sin confirmar con el servidor', 'No se pudo validar el cambio a ' + sedeId + ' -- si los datos no se actualizan, recarga la página.');
+  /* Ver requerimiento "Pantalla de carga al cambiar de bodega activa": el proceso real (push + remint +
+     pull) puede tardar un par de segundos -- antes esos segundos se veían como la pantalla ya "vacía" de la
+     bodega nueva (0 en todo), dando la impresión de que algo estaba roto en vez de simplemente cargando. Se
+     cubre con el mismo overlay de marca que ya usa login/F5, pero atado a que el proceso termine de verdad
+     (ver showLoadingOverlayHastaCompletar, no el flash de duración fija). try/finally para nunca dejarlo
+     pegado en pantalla si algo de la cadena falla inesperadamente. */
+  showLoadingOverlayHastaCompletar();
+  try {
+    /* mint_with_role (dentro de fijarSessionTokenConRol) relee el usuario FRESCO desde la base de datos con
+       la Service Role Key -- necesita que este push ya haya comprometido su transacción, o remintearía
+       todavía con la bodega vieja. Mismo criterio de "Auditoría de Desconexiones Intermitentes con Supabase"
+       que antes: un fallo de red aquí no debe disparar el aviso intrusivo de reconexión, silencioso=true. */
+    var pushUsuarioBodega = { ok: true };
+    try { pushUsuarioBodega = await scPushRows('app_users', [state.user], undefined, true); } catch (e) {}
+    var mintResultadoBodega = await fijarSessionTokenConRol(state.user);
+    if (!mintResultadoBodega.ok || (pushUsuarioBodega && pushUsuarioBodega.ok === false)) {
+      toast('warn', 'Cambio de bodega sin confirmar con el servidor', 'No se pudo validar el cambio a ' + sedeId + ' -- si los datos no se actualizan, recarga la página.');
+    }
+    await scPullAll();
+    toast('ok', 'Bodega activa cambiada', 'Ahora estás operando en ' + sedeId + '.');
+    syncAndRender(true);
+  } finally {
+    hideLoadingOverlayConFade();
   }
-  await scPullAll();
-  toast('ok', 'Bodega activa cambiada', 'Ahora estás operando en ' + sedeId + '.');
-  syncAndRender(true);
 }
 function logout() {
   /* Ver nota "Supabase" junto a scPushAll: empuja el snapshot final de la sesión antes de cerrarla. */
