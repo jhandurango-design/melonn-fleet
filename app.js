@@ -10341,9 +10341,23 @@ function refreshFranjaFilterOptions(btnId, routesEnAlcance, currentValues) {
    esos 2 (que cierran el menú al elegir una opción), aquí cada checkbox NO cierra el menú -- es justo el
    punto del requerimiento: poder marcar varias franjas seguidas sin tener que reabrir el menú entre cada
    clic. stateKey/renderFn permiten reutilizar la misma función para Despacho y Seguimiento sin duplicarla. */
+/* FIX "Filtro de Franja queda flotando en la pantalla al hacer scroll" (reporte Planner, Programación/
+   Despacho): el menú usa position:fixed con top/left calculados UNA sola vez (getBoundingClientRect del
+   botón) al abrirse -- correcto mientras nada se mueve, pero esta tabla vive dentro de un contenedor con
+   scroll propio (no de la página). Al hacer scroll de la tabla, el botón se desplaza bajo el menú, que se
+   queda fijo en su posición original en pantalla: se ve "flotando", desalineado del botón que lo abrió. Ni
+   .sede-dropdown-menu (ancla en el Header, que nunca hace scroll) ni .row-actions-menu enfrentan este caso
+   en la práctica, así que el hueco nunca se había notado. Reposicionar en vivo en cada evento de scroll
+   sería frágil (hay que escuchar el contenedor correcto, no solo window) -- en su lugar, igual que YA hace
+   un clic afuera, un scroll (de la tabla o de la página; capture:true para oír el scroll del contenedor
+   interno, que no burbujea hasta window) simplemente cierra el menú. */
 function closeFranjaFilterMenu() {
   var existing = document.getElementById('franjaFilterMenu');
-  if (existing) { existing.remove(); document.removeEventListener('click', closeFranjaFilterMenuOnce); }
+  if (existing) {
+    existing.remove();
+    document.removeEventListener('click', closeFranjaFilterMenuOnce);
+    document.removeEventListener('scroll', closeFranjaFilterMenu, true);
+  }
 }
 function closeFranjaFilterMenuOnce(e) {
   var menu = document.getElementById('franjaFilterMenu');
@@ -10429,6 +10443,7 @@ function toggleFranjaFilterMenu(btnId, stateKey, renderFn) {
 
   document.body.appendChild(menu);
   setTimeout(function () { document.addEventListener('click', closeFranjaFilterMenuOnce); }, 0);
+  document.addEventListener('scroll', closeFranjaFilterMenu, true);
 }
 /* Filtro por Estado del turno (ver mismo requerimiento) -- usa el código de computeEstado()/ESTADOS, EL
    MISMO que ya pinta la columna "Estado"/"Estado Actual" de cada tabla, para que el texto del desplegable
