@@ -2574,8 +2574,8 @@ var TRANSLATIONS = {
     'kpi.adicionales.conAdicionales': 'Fuera de la cuota base',
     'kpi.adicionales.sinAdicionales': 'Sin adicionales',
     'kpi.pendProg.label': 'Pendientes en Programación',
-    'kpi.pendProg.requiereAprobacion': 'Requieren aprobación',
-    'kpi.pendProg.sinPendientes': 'Sin cupos pendientes',
+    'kpi.pendProg.requiereAprobacion': 'Falta asignar mensajero',
+    'kpi.pendProg.sinPendientes': 'Sin mensajeros pendientes',
 
     'table.aliado': 'Aliado',
     'table.mensajero': 'Mensajero',
@@ -2677,8 +2677,8 @@ var TRANSLATIONS = {
     'kpi.adicionales.conAdicionales': 'Outside base quota',
     'kpi.adicionales.sinAdicionales': 'No additional resources',
     'kpi.pendProg.label': 'Pending in Scheduling',
-    'kpi.pendProg.requiereAprobacion': 'Require approval',
-    'kpi.pendProg.sinPendientes': 'No pending quotas',
+    'kpi.pendProg.requiereAprobacion': 'Courier not assigned yet',
+    'kpi.pendProg.sinPendientes': 'No pending couriers',
 
     'table.aliado': 'Partner',
     'table.mensajero': 'Courier',
@@ -7766,12 +7766,14 @@ function consolKpiMatch(route, key) {
   /* Ver requerimiento "Tarjetas 'Adicionales' y 'Pendientes en Programación' en Operación del Día": 2 KPI
      nuevas, mismo patrón clickeable-para-filtrar que las 4 ya existentes. 'adicionales' reutiliza la MISMA
      definición que ya usa el badge "+1 Adicional" de cada fila (esTurnoAdicional -- cupo excedido/domingo,
-     ya aprobados) -- nunca inventa un criterio propio. 'pendientes_programacion' es route.pendienteAprobacionPlanner
-     (cupo/festivo/domingo/tipología a la espera de Planner) -- distinto de 'pendientes' (que es route.solicitud,
-     solicitudes de cambio/cancelación del Aliado, nunca cuotas) -- antes esta cifra no tenía NINGUNA tarjeta
-     propia en Operación del Día, solo visible entrando a Solicitudes y Cambios o al chip de Avance de Cuotas. */
+     ya aprobados) -- nunca inventa un criterio propio.
+     Ver corrección del usuario: 'pendientes_programacion' NO son cuotas pendientes de aprobación (eso ya lo
+     cubre 'pendientes_programacion' originalmente apuntaba mal) -- son los MENSAJEROS que quedaron
+     "Pendiente / Por Confirmar" dentro de la programación (route.pendienteAsignacion, ver detalleTxt en
+     unifiedFromCuota/rowHtml*: "Pendiente / Por Confirmar" en vez del nombre real del mensajero) -- una
+     plaza ya reservada en el turno pero sin un mensajero real asignado todavía. */
   if (key === 'adicionales') return esTurnoAdicional(route);
-  if (key === 'pendientes_programacion') return !!route.pendienteAprobacionPlanner;
+  if (key === 'pendientes_programacion') return !!route.pendienteAsignacion;
   return true;
 }
 /* Rango activo de Consolidado para el nombre del archivo exportado -- mismo criterio que cumplimientoRango,
@@ -8179,18 +8181,22 @@ function renderConsolMetrics(routes) {
   var pendientes = routes.filter(function (r) { return r.solicitud && r.solicitud.estado === 'pendiente' && r.solicitud.origen === 'aliado'; }).length;
   var riesgoAusencia = routes.filter(function (r) { return consolKpiMatch(r, 'riesgo'); }).length;
   var incumplimientos = routes.filter(function (r) { return consolKpiMatch(r, 'incumplimientos'); }).length;
-  /* Ver requerimiento "Tarjetas 'Adicionales' y 'Pendientes en Programación' en Operación del Día": mismo
-     criterio exacto que ya usan el badge "+1 Adicional" (esTurnoAdicional) y el badge de Estado "Pendiente
-     de Aprobación por Planner" (route.pendienteAprobacionPlanner) -- nunca un cálculo nuevo/paralelo. */
+  /* Ver requerimiento "Tarjetas 'Adicionales' y 'Pendientes en Programación' en Operación del Día" y su
+     corrección: "Pendientes en Programación" = mensajeros que quedaron "Pendiente / Por Confirmar" dentro
+     de la programación (route.pendienteAsignacion -- una plaza ya reservada en el turno, sin un mensajero
+     real asignado todavía), nunca cuotas pendientes de aprobación (eso ya es un concepto aparte, sin
+     tarjeta propia). Mismo criterio exacto que ya usan el badge "+1 Adicional" (esTurnoAdicional) y el
+     texto "Pendiente / Por Confirmar" (route.pendienteAsignacion) que ya se muestra en el detalle de cada
+     fila -- nunca un cálculo nuevo/paralelo. */
   var adicionales = routes.filter(function (r) { return esTurnoAdicional(r); }).length;
-  var pendientesProgramacion = routes.filter(function (r) { return r.pendienteAprobacionPlanner; }).length;
+  var pendientesProgramacion = routes.filter(function (r) { return r.pendienteAsignacion; }).length;
   renderMetricsIfChanged('consolMetrics',
     kpiCardOpen('pendientes', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.pendientes.label">' + t('kpi.pendientes.label') + '</span>' + metricTip('Solicitudes Pendientes', 'Total de solicitudes (reprogramaciones, cancelaciones o cambios de vehículo) enviadas por el Aliado que están pendientes de revisión y aprobación por el Planner.') + '</span><span class="metric-icon" style="background:var(--warn-soft);color:#946200;">' + ICONS.alert + '</span></div><div class="metric-value">' + pendientes + '</div><div class="metric-foot ' + (pendientes > 0 ? 'warn' : 'ok') + '" data-i18n="' + (pendientes > 0 ? 'kpi.pendientes.requiereAprobacion' : 'kpi.pendientes.sinPendientes') + '">' + (pendientes > 0 ? t('kpi.pendientes.requiereAprobacion') : t('kpi.pendientes.sinPendientes')) + '</div></div>' +
     kpiCardOpen('mensajeros', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.mensajeros.label">' + t('kpi.mensajeros.label') + '</span>' + metricTip('Mensajeros Programados', 'Total de vehículos y mensajeros actualmente registrados para la fecha consultada.') + '</span><span class="metric-icon" style="background:#EAF1FF;color:#2563EB;">' + ICONS.route + '</span></div><div class="metric-value">' + routes.length + '</div><div class="metric-foot">' + fmtDateLong(state.consolidadoFecha) + '</div></div>' +
     kpiCardOpen('riesgo', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.riesgo.label">' + t('kpi.riesgo.label') + '</span>' + metricTip('Riesgo de Ausencia', KPI_METRIC_DEFINITIONS.riesgo.tooltip) + '</span><span class="metric-icon" style="background:var(--warn-soft);color:#946200;">' + ICONS.warnT + '</span></div><div class="metric-value">' + riesgoAusencia + '</div><div class="metric-foot ' + (riesgoAusencia > 0 ? 'warn' : 'ok') + '" data-i18n="' + (riesgoAusencia > 0 ? 'kpi.riesgo.enObservacion' : 'kpi.riesgo.sinRiesgo') + '">' + (riesgoAusencia > 0 ? t('kpi.riesgo.enObservacion') : t('kpi.riesgo.sinRiesgo')) + '</div></div>' +
     kpiCardOpen('incumplimientos', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.incumplimientos.label">' + t('kpi.incumplimientos.label') + '</span>' + metricTip('Incumplimientos', KPI_METRIC_DEFINITIONS.incumplimientos.tooltip, true) + '</span><span class="metric-icon" style="background:var(--danger-soft);color:var(--danger);">' + ICONS.critT + '</span></div><div class="metric-value">' + incumplimientos + '</div><div class="metric-foot ' + (incumplimientos > 0 ? 'danger' : 'ok') + '" data-i18n="' + (incumplimientos > 0 ? 'kpi.incumplimientos.sinLlegada' : 'kpi.incumplimientos.sinIncumplimientos') + '">' + (incumplimientos > 0 ? t('kpi.incumplimientos.sinLlegada') : t('kpi.incumplimientos.sinIncumplimientos')) + '</div></div>' +
     kpiCardOpen('adicionales', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.adicionales.label">' + t('kpi.adicionales.label') + '</span>' + metricTip('Adicionales', 'Turnos fuera de la cuota base contratada (cupo excedido o Recurso Adicional de domingo) ya aprobados por Planner -- mismo criterio que el badge "+1 Adicional" de cada fila.') + '</span><span class="metric-icon" style="background:#F4ECFF;color:#7C3AED;">' + ICONS.plusCircle + '</span></div><div class="metric-value">' + adicionales + '</div><div class="metric-foot ' + (adicionales > 0 ? 'warn' : 'ok') + '" data-i18n="' + (adicionales > 0 ? 'kpi.adicionales.conAdicionales' : 'kpi.adicionales.sinAdicionales') + '">' + (adicionales > 0 ? t('kpi.adicionales.conAdicionales') : t('kpi.adicionales.sinAdicionales')) + '</div></div>' +
-    kpiCardOpen('pendientes_programacion', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.pendProg.label">' + t('kpi.pendProg.label') + '</span>' + metricTip('Pendientes en Programación', 'Turnos a la espera de aprobación de Planner por cupo excedido, día festivo, domingo o tipología no habilitada -- distinto de "Solicitudes Pendientes" (reprogramaciones/cancelaciones del Aliado).') + '</span><span class="metric-icon" style="background:var(--warn-soft);color:#946200;">' + ICONS.alert + '</span></div><div class="metric-value">' + pendientesProgramacion + '</div><div class="metric-foot ' + (pendientesProgramacion > 0 ? 'warn' : 'ok') + '" data-i18n="' + (pendientesProgramacion > 0 ? 'kpi.pendProg.requiereAprobacion' : 'kpi.pendProg.sinPendientes') + '">' + (pendientesProgramacion > 0 ? t('kpi.pendProg.requiereAprobacion') : t('kpi.pendProg.sinPendientes')) + '</div></div>');
+    kpiCardOpen('pendientes_programacion', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.pendProg.label">' + t('kpi.pendProg.label') + '</span>' + metricTip('Pendientes en Programación', 'Mensajeros que quedaron "Pendiente / Por Confirmar" dentro de la programación -- la plaza ya está reservada en el turno, pero todavía no tiene un mensajero real asignado.') + '</span><span class="metric-icon" style="background:var(--warn-soft);color:#946200;">' + ICONS.alert + '</span></div><div class="metric-value">' + pendientesProgramacion + '</div><div class="metric-foot ' + (pendientesProgramacion > 0 ? 'warn' : 'ok') + '" data-i18n="' + (pendientesProgramacion > 0 ? 'kpi.pendProg.requiereAprobacion' : 'kpi.pendProg.sinPendientes') + '">' + (pendientesProgramacion > 0 ? t('kpi.pendProg.requiereAprobacion') : t('kpi.pendProg.sinPendientes')) + '</div></div>');
   syncKpiActiveClass('consolMetrics', filtro);
   renderKpiActiveFilterBar('consolKpiActiveBar', 'consolMetrics', filtro);
 }
