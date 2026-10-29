@@ -3093,6 +3093,19 @@ function rutaAsignadaTagHtml(route, est) {
   if (!route.rutaAsignada || est.code !== 'dock_overdue') return '';
   return ' <span class="badge badge-justified" data-tag="ruta-asignada-en-demora" data-tip="Bodega ya confirmó la asignación de ruta para este mensajero — se está despachando, aunque superó el tiempo de SLA de Bodega.">Ruta Asignada</span>';
 }
+/* Ver requerimiento "Visibilidad de Descalce de Franja por fila" (reporte real: Cordiandina/Bogotá --
+   "si el aliado no tiene cuotas en esa franja no se da visual, solo se toma lo primero"): evaluarAprobacionCuota
+   ya marcaba route.descalceFranjaAlerta al crear el turno (cuota GLOBAL cubierta, pero esta hora puntual no
+   tiene cupo base asignado o ya está completo) -- requiere:false, nunca bloquea ni pide aprobación de
+   Planner, así que el turno se crea como uno más, sin ningún distintivo visual en Consolidado/Despacho/
+   Seguimiento. Antes SOLO se veía agregado en el chip "Avance de Cuotas" (ver cuotasResumenHtml,
+   "(Descalce de Franja)"), nunca en la fila puntual del mensajero afectado -- quedaba invisible a nivel de
+   turno individual, exactamente el hueco reportado. Mismo patrón que rutaAsignadaTagHtml/
+   dockOverduePagoTagHtml (badge secundario junto al Estado, nunca lo reemplaza). */
+function descalceFranjaTagHtml(route) {
+  if (!route.descalceFranjaAlerta) return '';
+  return ' <span class="badge badge-warn" data-tag="descalce-franja" data-tip="' + escapeHtml(route.descalceFranjaAlerta.detalle) + '">Descalce de Franja</span>';
+}
 /* ---------------- Cierre automático del ciclo por incumplimiento (T0 + 120 min) — regionalización CO/MX ----------------
    Cubre los 2 caminos que la FSM cierra sola al vencer los 120 min sin resolución (ver computeEstado): (1)
    'sin_reemplazo' — cancelación del Aliado sin reemplazo confirmado (route.reemplazoPendiente), y (2)
@@ -8208,7 +8221,7 @@ function rowHtmlConsolidado(route) {
       '</div></td>' +
     '<td>' + route.vehiculo + '</td>' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td><div class="row-actions">' + actions + '</div></td>' +
     '</tr>';
 }
@@ -8786,7 +8799,7 @@ function rowHtmlDespacho(route) {
     '<td>' + fmtTime12(route.salida) + '</td>' +
     '<td>' + maletaCell + '</td>' +
     '<td>' + celularCell + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + demoraPreviaTagHtml + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + demoraPreviaTagHtml + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td class="courier-sub">' + observacionesDespachoCellHtml(route, puedeGestionar && !route.salida) + '</td>' +
     '<td><div class="row-actions">' + actions + '</div></td>' +
     '</tr>';
@@ -9632,7 +9645,7 @@ function rowHtmlSeguimiento(route) {
       '</div></td>' +
     '<td>' + route.vehiculo + '</td>' +
     '<td>' + route.sede + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td><div class="row-actions">' + accion + '</div></td>' +
     '</tr>';
 }
@@ -16084,8 +16097,15 @@ function clasificarFilasCargaMasiva(filas) {
       f.clasificacion = 'adicional';
       f.motivo = cuotaCausalLabel(aprobacion.motivo) + ': ' + aprobacion.detalle;
     } else {
+      /* Ver requerimiento "Visibilidad de Descalce de Franja por fila": antes esta rama ignoraba por
+         completo aprobacion.descalceFranja -- la fila se veía en el preview EXACTAMENTE igual a una
+         "Dentro de cuota" normal, aunque procesarCargaMasivaTurnos (al confirmar) SÍ terminaba marcando el
+         turno real como descalceFranjaAlerta (cuota global cubierta, pero esta hora puntual sin cupo base
+         propio). El preview ahora anticipa lo mismo que va a pasar al confirmar, en vez de mostrar menos
+         información de la que el sistema realmente tiene. */
       f.clasificacion = 'base';
-      f.motivo = null;
+      f.descalceFranja = aprobacion.descalceFranja || null;
+      f.motivo = aprobacion.descalceFranja ? ('Descalce de Franja: ' + aprobacion.descalceFranja.detalle) : null;
     }
   });
   return filas;
@@ -16220,7 +16240,10 @@ function renderCargaMasivaPreview() {
    de por qué excede cupo), sin dejar de tener el mismo data-tip por consistencia con el resto de badges de
    la plataforma. */
 function cargaMasivaClasificacionBadgeHtml(f) {
-  if (f.clasificacion === 'base') return '<span class="badge badge-dispatched"><i></i>Dentro de cuota</span>';
+  if (f.clasificacion === 'base') {
+    if (f.descalceFranja) return '<span class="badge badge-warn" data-tip="' + escapeHtml(f.motivo) + '">Dentro de cuota (Descalce de Franja)</span><div class="courier-sub">' + escapeHtml(f.motivo) + '</div>';
+    return '<span class="badge badge-dispatched"><i></i>Dentro de cuota</span>';
+  }
   if (f.clasificacion === 'adicional') return '<span class="badge-sobrecupo" data-tip="' + escapeHtml(f.motivo) + '">Adicional</span><div class="courier-sub">' + escapeHtml(f.motivo) + '</div>';
   return '<span class="badge badge-critical" data-tip="' + escapeHtml(f.motivo) + '"><i></i>Error</span><div class="courier-sub">Fila ' + f.numeroFila + ': ' + escapeHtml(f.motivo) + '</div>';
 }
