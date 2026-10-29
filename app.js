@@ -8046,19 +8046,27 @@ function renderConsolidado() {
     } else {
       var chipsHoyEl = document.getElementById('consolHoyComplianceChips');
       var huboResultadosHoy;
+      /* FIX "Avance de Cuotas por Aliado — Hoy no respeta el filtro de Aliado" (reporte Consolidado/Operación
+         del Día): este panel solo acotaba por Bodega (consolFiltroBodega) -- a diferencia de
+         renderConsolidadoManana (Avance y Carga T+1), que sí filtra por qAliado en ambas ramas (ver líneas
+         ~8233/8244), este se copió de ese mismo patrón pero se quedó sin esa parte. Mismo elemento
+         #consolFiltroAliado que ya usa routesForConsolidadoDate para la tabla/KPIs de esta misma vista. */
+      var qAliadoHoy = document.getElementById('consolFiltroAliado').value;
       if (!state.consolFiltroBodega) {
         var gruposHoy = cuotasProgresoPorBodegaYAliadoHoy();
         var htmlHoy = '';
         gruposHoy.forEach(function (g) {
-          if (!g.aliados.length) return;
+          var aliadosHoy = qAliadoHoy ? g.aliados.filter(function (p) { return p.aliado === qAliadoHoy; }) : g.aliados;
+          if (!aliadosHoy.length) return;
           htmlHoy += '<div class="consol-man-grupo-bodega"><p class="consol-man-grupo-titulo">📍 ' + g.sede + '</p>' +
-            '<div class="cuotas-resumen-chips">' + g.aliados.map(consolManChipHtml).join('') + '</div></div>';
+            '<div class="cuotas-resumen-chips">' + aliadosHoy.map(consolManChipHtml).join('') + '</div></div>';
         });
         chipsHoyEl.className = 'consol-man-chips-agrupadas';
         chipsHoyEl.innerHTML = htmlHoy;
         huboResultadosHoy = !!htmlHoy;
       } else {
         var progresoHoy = cuotasProgresoPorAliadoHoy(state.consolFiltroBodega);
+        if (qAliadoHoy) progresoHoy = progresoHoy.filter(function (p) { return p.aliado === qAliadoHoy; });
         chipsHoyEl.className = 'cuotas-resumen-chips';
         chipsHoyEl.innerHTML = progresoHoy.map(consolManChipHtml).join('');
         huboResultadosHoy = progresoHoy.length > 0;
