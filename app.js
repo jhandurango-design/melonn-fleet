@@ -1855,6 +1855,7 @@ const ICONS = {
   warnT: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#946200" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4M12 17h.01"/></svg>',
   critT: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#E5484D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>',
   okT: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="M22 4 12 14.01l-3-3"/></svg>',
+  plusCircle: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>',
   consolidado: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M9 16l2 2 4-4"/></svg>',
   solicitudes: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3l4 4-4 4"/><path d="M20 7H4"/><path d="M8 21l-4-4 4-4"/><path d="M4 17h16"/></svg>',
   historial: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z"/><circle cx="12" cy="12" r="3"/></svg>',
@@ -2569,6 +2570,12 @@ var TRANSLATIONS = {
     'kpi.incumplimientos.label': 'Incumplimientos',
     'kpi.incumplimientos.sinLlegada': 'Sin llegada y sin reemplazo',
     'kpi.incumplimientos.sinIncumplimientos': 'Sin incumplimientos',
+    'kpi.adicionales.label': 'Adicionales',
+    'kpi.adicionales.conAdicionales': 'Fuera de la cuota base',
+    'kpi.adicionales.sinAdicionales': 'Sin adicionales',
+    'kpi.pendProg.label': 'Pendientes en Programación',
+    'kpi.pendProg.requiereAprobacion': 'Requieren aprobación',
+    'kpi.pendProg.sinPendientes': 'Sin cupos pendientes',
 
     'table.aliado': 'Aliado',
     'table.mensajero': 'Mensajero',
@@ -2666,6 +2673,12 @@ var TRANSLATIONS = {
     'kpi.incumplimientos.label': 'Non-compliance',
     'kpi.incumplimientos.sinLlegada': 'No arrival and no replacement',
     'kpi.incumplimientos.sinIncumplimientos': 'No non-compliance',
+    'kpi.adicionales.label': 'Additional',
+    'kpi.adicionales.conAdicionales': 'Outside base quota',
+    'kpi.adicionales.sinAdicionales': 'No additional resources',
+    'kpi.pendProg.label': 'Pending in Scheduling',
+    'kpi.pendProg.requiereAprobacion': 'Require approval',
+    'kpi.pendProg.sinPendientes': 'No pending quotas',
 
     'table.aliado': 'Partner',
     'table.mensajero': 'Courier',
@@ -7750,6 +7763,15 @@ function consolKpiMatch(route, key) {
      'aceptar-solicitud'/formSolicitudAccion) NUNCA suma aquí — al contrario, exonera al Aliado de
      penalizaciones por No-Show (ver CANCELADO_POR_MELONN / Sección 3A). */
   if (key === 'incumplimientos') return computeEstado(route).code === 'afectacion_confirmada';
+  /* Ver requerimiento "Tarjetas 'Adicionales' y 'Pendientes en Programación' en Operación del Día": 2 KPI
+     nuevas, mismo patrón clickeable-para-filtrar que las 4 ya existentes. 'adicionales' reutiliza la MISMA
+     definición que ya usa el badge "+1 Adicional" de cada fila (esTurnoAdicional -- cupo excedido/domingo,
+     ya aprobados) -- nunca inventa un criterio propio. 'pendientes_programacion' es route.pendienteAprobacionPlanner
+     (cupo/festivo/domingo/tipología a la espera de Planner) -- distinto de 'pendientes' (que es route.solicitud,
+     solicitudes de cambio/cancelación del Aliado, nunca cuotas) -- antes esta cifra no tenía NINGUNA tarjeta
+     propia en Operación del Día, solo visible entrando a Solicitudes y Cambios o al chip de Avance de Cuotas. */
+  if (key === 'adicionales') return esTurnoAdicional(route);
+  if (key === 'pendientes_programacion') return !!route.pendienteAprobacionPlanner;
   return true;
 }
 /* Rango activo de Consolidado para el nombre del archivo exportado -- mismo criterio que cumplimientoRango,
@@ -8157,11 +8179,18 @@ function renderConsolMetrics(routes) {
   var pendientes = routes.filter(function (r) { return r.solicitud && r.solicitud.estado === 'pendiente' && r.solicitud.origen === 'aliado'; }).length;
   var riesgoAusencia = routes.filter(function (r) { return consolKpiMatch(r, 'riesgo'); }).length;
   var incumplimientos = routes.filter(function (r) { return consolKpiMatch(r, 'incumplimientos'); }).length;
+  /* Ver requerimiento "Tarjetas 'Adicionales' y 'Pendientes en Programación' en Operación del Día": mismo
+     criterio exacto que ya usan el badge "+1 Adicional" (esTurnoAdicional) y el badge de Estado "Pendiente
+     de Aprobación por Planner" (route.pendienteAprobacionPlanner) -- nunca un cálculo nuevo/paralelo. */
+  var adicionales = routes.filter(function (r) { return esTurnoAdicional(r); }).length;
+  var pendientesProgramacion = routes.filter(function (r) { return r.pendienteAprobacionPlanner; }).length;
   renderMetricsIfChanged('consolMetrics',
     kpiCardOpen('pendientes', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.pendientes.label">' + t('kpi.pendientes.label') + '</span>' + metricTip('Solicitudes Pendientes', 'Total de solicitudes (reprogramaciones, cancelaciones o cambios de vehículo) enviadas por el Aliado que están pendientes de revisión y aprobación por el Planner.') + '</span><span class="metric-icon" style="background:var(--warn-soft);color:#946200;">' + ICONS.alert + '</span></div><div class="metric-value">' + pendientes + '</div><div class="metric-foot ' + (pendientes > 0 ? 'warn' : 'ok') + '" data-i18n="' + (pendientes > 0 ? 'kpi.pendientes.requiereAprobacion' : 'kpi.pendientes.sinPendientes') + '">' + (pendientes > 0 ? t('kpi.pendientes.requiereAprobacion') : t('kpi.pendientes.sinPendientes')) + '</div></div>' +
     kpiCardOpen('mensajeros', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.mensajeros.label">' + t('kpi.mensajeros.label') + '</span>' + metricTip('Mensajeros Programados', 'Total de vehículos y mensajeros actualmente registrados para la fecha consultada.') + '</span><span class="metric-icon" style="background:#EAF1FF;color:#2563EB;">' + ICONS.route + '</span></div><div class="metric-value">' + routes.length + '</div><div class="metric-foot">' + fmtDateLong(state.consolidadoFecha) + '</div></div>' +
     kpiCardOpen('riesgo', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.riesgo.label">' + t('kpi.riesgo.label') + '</span>' + metricTip('Riesgo de Ausencia', KPI_METRIC_DEFINITIONS.riesgo.tooltip) + '</span><span class="metric-icon" style="background:var(--warn-soft);color:#946200;">' + ICONS.warnT + '</span></div><div class="metric-value">' + riesgoAusencia + '</div><div class="metric-foot ' + (riesgoAusencia > 0 ? 'warn' : 'ok') + '" data-i18n="' + (riesgoAusencia > 0 ? 'kpi.riesgo.enObservacion' : 'kpi.riesgo.sinRiesgo') + '">' + (riesgoAusencia > 0 ? t('kpi.riesgo.enObservacion') : t('kpi.riesgo.sinRiesgo')) + '</div></div>' +
-    kpiCardOpen('incumplimientos', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.incumplimientos.label">' + t('kpi.incumplimientos.label') + '</span>' + metricTip('Incumplimientos', KPI_METRIC_DEFINITIONS.incumplimientos.tooltip, true) + '</span><span class="metric-icon" style="background:var(--danger-soft);color:var(--danger);">' + ICONS.critT + '</span></div><div class="metric-value">' + incumplimientos + '</div><div class="metric-foot ' + (incumplimientos > 0 ? 'danger' : 'ok') + '" data-i18n="' + (incumplimientos > 0 ? 'kpi.incumplimientos.sinLlegada' : 'kpi.incumplimientos.sinIncumplimientos') + '">' + (incumplimientos > 0 ? t('kpi.incumplimientos.sinLlegada') : t('kpi.incumplimientos.sinIncumplimientos')) + '</div></div>');
+    kpiCardOpen('incumplimientos', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.incumplimientos.label">' + t('kpi.incumplimientos.label') + '</span>' + metricTip('Incumplimientos', KPI_METRIC_DEFINITIONS.incumplimientos.tooltip, true) + '</span><span class="metric-icon" style="background:var(--danger-soft);color:var(--danger);">' + ICONS.critT + '</span></div><div class="metric-value">' + incumplimientos + '</div><div class="metric-foot ' + (incumplimientos > 0 ? 'danger' : 'ok') + '" data-i18n="' + (incumplimientos > 0 ? 'kpi.incumplimientos.sinLlegada' : 'kpi.incumplimientos.sinIncumplimientos') + '">' + (incumplimientos > 0 ? t('kpi.incumplimientos.sinLlegada') : t('kpi.incumplimientos.sinIncumplimientos')) + '</div></div>' +
+    kpiCardOpen('adicionales', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.adicionales.label">' + t('kpi.adicionales.label') + '</span>' + metricTip('Adicionales', 'Turnos fuera de la cuota base contratada (cupo excedido o Recurso Adicional de domingo) ya aprobados por Planner -- mismo criterio que el badge "+1 Adicional" de cada fila.') + '</span><span class="metric-icon" style="background:#F4ECFF;color:#7C3AED;">' + ICONS.plusCircle + '</span></div><div class="metric-value">' + adicionales + '</div><div class="metric-foot ' + (adicionales > 0 ? 'warn' : 'ok') + '" data-i18n="' + (adicionales > 0 ? 'kpi.adicionales.conAdicionales' : 'kpi.adicionales.sinAdicionales') + '">' + (adicionales > 0 ? t('kpi.adicionales.conAdicionales') : t('kpi.adicionales.sinAdicionales')) + '</div></div>' +
+    kpiCardOpen('pendientes_programacion', filtro) + '<div class="metric-top"><span class="metric-label-row"><span class="metric-label" data-i18n="kpi.pendProg.label">' + t('kpi.pendProg.label') + '</span>' + metricTip('Pendientes en Programación', 'Turnos a la espera de aprobación de Planner por cupo excedido, día festivo, domingo o tipología no habilitada -- distinto de "Solicitudes Pendientes" (reprogramaciones/cancelaciones del Aliado).') + '</span><span class="metric-icon" style="background:var(--warn-soft);color:#946200;">' + ICONS.alert + '</span></div><div class="metric-value">' + pendientesProgramacion + '</div><div class="metric-foot ' + (pendientesProgramacion > 0 ? 'warn' : 'ok') + '" data-i18n="' + (pendientesProgramacion > 0 ? 'kpi.pendProg.requiereAprobacion' : 'kpi.pendProg.sinPendientes') + '">' + (pendientesProgramacion > 0 ? t('kpi.pendProg.requiereAprobacion') : t('kpi.pendProg.sinPendientes')) + '</div></div>');
   syncKpiActiveClass('consolMetrics', filtro);
   renderKpiActiveFilterBar('consolKpiActiveBar', 'consolMetrics', filtro);
 }

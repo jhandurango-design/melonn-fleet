@@ -722,6 +722,10 @@ main{flex:1;min-width:0;padding:26px 30px 60px;overflow-x:hidden;}
    reparte siempre exactamente 25%/25%/25%/25% sin importar el contenido. */
 .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:20px;align-items:stretch;}
 #alertasMetrics{grid-template-columns:repeat(2,minmax(0,1fr));max-width:620px;}
+/* Ver requerimiento "Tarjetas 'Adicionales' y 'Pendientes en Programación' en Operación del Día": #consolMetrics
+   pasó de 4 a 6 tarjetas -- mismo criterio ya establecido por #alertasMetrics (override propio por sección,
+   nunca forzar las 6 en una sola fila de 4 columnas, que dejaría 2 sueltas en una 2ª fila a medio ancho). */
+#consolMetrics{grid-template-columns:repeat(3,minmax(0,1fr));}
 .metric-card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-card);padding:16px 18px;box-shadow:none;display:flex;flex-direction:column;gap:8px;min-height:116px;min-width:0;}
 /* Estandarización global de tarjetas KPI (ver requerimiento "Refactorización Integral UI/UX, Estandarización
    de KPI Cards y Fix de Tests", punto 2): el ícono de ayuda (?) y el ícono de estado quedan ANCLADOS en la
