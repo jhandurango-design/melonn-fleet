@@ -22320,6 +22320,10 @@ document.addEventListener('DOMContentLoaded', function () {
     u.modulosDeshabilitados = disabled;
     u.modulosAdicionales = adicionales;
     persistUsers();
+    /* Ver nota "Supabase" (mismo criterio que toggleUsuarioActivo, línea ~14411): sin este push el cambio
+       quedaba solo en el localStorage de ESTE navegador -- el próximo autoguardado de 30s (scPullAll) lo
+       pisaba con los datos viejos de Supabase, y la sesión real del usuario afectado nunca lo recibía. */
+    scPushRows('app_users', [u]);
     toast('ok', 'Permisos actualizados', 'Los módulos activos de ' + u.nombre + ' fueron actualizados.');
     closeModal();
     renderUsuarios();
