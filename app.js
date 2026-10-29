@@ -9964,15 +9964,20 @@ function rowHtmlProg(route) {
      alcance de "editar datos de programación" — mismo guard que openTurnoModal (segunda barrera). Incluye
      también el cierre por Incumplimiento Confirmado / Sin Reemplazo (bloqueo total de acciones extemporáneas):
      una vez el ciclo cerró en esos estados, el ID_Programación y el mensajero quedan inmutables para el
-     Aliado — ni Editar ni Cambiar Mensajero/Vehículo pueden reabrirlo (ver rama dedicada abajo). */
-  var cerradoIncumplimiento = est.code === 'afectacion_confirmada' || est.code === 'sin_reemplazo';
+     Aliado — ni Editar ni Cambiar Mensajero/Vehículo pueden reabrirlo (ver rama dedicada abajo).
+     FIX "Turno rechazado/cancelado sigue editable" (ver mismo FIX en openTurnoModal): est.code==='cancelled'
+     (cancelación ya aceptada, incluido el rechazo de una excepción de Cuota/Festivo/Tipología vía
+     rechazarCuotaPlanner) es el mismo tipo de estado terminal/inmutable -- se agrega aquí para que el botón
+     "Editar" ni siquiera se ofrezca sobre un turno que ya está cerrado. */
+  var cerradoIncumplimiento = est.code === 'afectacion_confirmada' || est.code === 'sin_reemplazo' || est.code === 'cancelled';
   var yaEnCiclo = !!route.salida || !!route.retirado || cerradoIncumplimiento;
   var solicitudEnCurso = route.solicitudEdicionPendiente || (route.solicitud && route.solicitud.estado === 'pendiente');
   if (route.pendienteAprobacionPlanner) {
     actions = '<span class="courier-sub">Pendiente de Aprobación por Planner</span>';
   } else if (cerradoIncumplimiento) {
     /* Sin texto adicional: el badge de estado ya muestra el desenlace (Incumplimiento Confirmado / Sin
-       Reemplazo); esta tabla no tiene ícono de Ver historial, así que el guion indica "sin acciones". */
+       Reemplazo / Cancelado); esta tabla no tiene ícono de Ver historial, así que el guion indica "sin
+       acciones". */
     actions = '<span class="courier-sub">—</span>';
   } else if (solicitudEnCurso) {
     /* Ya existe una Solicitud de Cambio en curso para este turno (edición vía submitTurno, o una
@@ -14802,7 +14807,14 @@ function openTurnoModal(mode, routeId) {
       toast('warn', 'No disponible', 'Este turno se encuentra Pendiente de Aprobación por Planner y no admite edición directa.');
       return;
     }
-    if (route.fecha < TODAY_STR || route.salida || route.retirado || route.solicitudEdicionPendiente || (route.solicitud && route.solicitud.estado === 'pendiente') || codeTm === 'afectacion_confirmada' || codeTm === 'sin_reemplazo') {
+    /* FIX "Turno rechazado/cancelado sigue editable" (reporte real: Cordiandina, Roberto/Moto xs -- un turno
+       cuya excepción de Cuota/Festivo/Tipología fue RECHAZADA por Planner, o cualquier otra cancelación ya
+       aceptada, queda con codeTm==='cancelled' -- el mismo estado terminal/inmutable de "Cancelación
+       confirmada; el turno queda retirado de la programación" (ver ESTADOS.cancelled) que afectacion_confirmada/
+       sin_reemplazo ya bloqueaban aquí, pero 'cancelled' nunca se había incluido en este guard. El Aliado
+       podía seguir editándolo como si siguiera vivo, generando una Solicitud de Cambio confusa sobre un turno
+       que ya estaba cerrado -- en vez de usar "Confirmar recurso" sobre el cupo realmente pendiente. */
+    if (route.fecha < TODAY_STR || route.salida || route.retirado || route.solicitudEdicionPendiente || (route.solicitud && route.solicitud.estado === 'pendiente') || codeTm === 'afectacion_confirmada' || codeTm === 'sin_reemplazo' || codeTm === 'cancelled') {
       toast('warn', 'No disponible', 'Este turno no admite edición en este momento.');
       return;
     }
