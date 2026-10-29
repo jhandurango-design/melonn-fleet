@@ -11310,8 +11310,18 @@ function aprobarCuotaPlanner(routeId) {
      contra un pull de foco/visibilitychange/autoguardado concurrente -- este await es una segunda capa,
      puramente de UX (el toast/re-render de ESTA pestaña esperan la confirmación real en vez de asumirla),
      nunca el único mecanismo de protección. */
-  scPushRows('app_turnos', [route]).then(function () {
-    toast('ok', 'Programación aprobada', route.id + ' retomó el ciclo operativo normal.');
+  /* FIX "Aprobar Cuota/Festivo no persiste, la fila reaparece" (reporte Planner): a diferencia de
+     resolverSolicitudGeneral (mismo módulo, ver su propio scPushRows(...).then), este .then() daba por hecho
+     que el push había funcionado -- mostraba "Programación aprobada" y SIEMPRE llamaba a syncAndRender(true)
+     sin mirar res.ok, aunque el upsert hubiera fallado (timeout/red). Esa combinación es justo el síntoma
+     reportado: toast de éxito falso + syncAndRender(true) trae de vuelta el turno todavía 'pendiente' desde
+     Supabase, "deshaciendo" la aprobación sin ningún aviso real de qué pasó. */
+  scPushRows('app_turnos', [route]).then(function (res) {
+    if (res && res.ok === false) {
+      toast('warn', 'No se pudo confirmar en la nube', 'La aprobación no se guardó — revisa tu conexión e inténtalo de nuevo.');
+    } else {
+      toast('ok', 'Programación aprobada', route.id + ' retomó el ciclo operativo normal.');
+    }
     syncAndRender(true);
   });
 }
@@ -11339,8 +11349,14 @@ function rechazarCuotaPlanner(routeId) {
     motivo: 'Planner rechazó la programación (' + cuotaCausalFrase(route.pendienteAprobacionMotivo) + '); el turno quedó Cancelado.',
     horaAnterior: null, horaPropuesta: null, por: state.user.nombre
   });
-  scPushRows('app_turnos', [route]).then(function () {
-    toast('warn', 'Programación rechazada', route.id + ' quedó Cancelado.');
+  /* Mismo FIX que aprobarCuotaPlanner (ver su comentario arriba): chequea res.ok antes de dar por confirmado
+     el rechazo. */
+  scPushRows('app_turnos', [route]).then(function (res) {
+    if (res && res.ok === false) {
+      toast('warn', 'No se pudo confirmar en la nube', 'El rechazo no se guardó — revisa tu conexión e inténtalo de nuevo.');
+    } else {
+      toast('warn', 'Programación rechazada', route.id + ' quedó Cancelado.');
+    }
     syncAndRender(true);
   });
 }
