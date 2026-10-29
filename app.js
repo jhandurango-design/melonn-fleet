@@ -3106,6 +3106,21 @@ function descalceFranjaTagHtml(route) {
   if (!route.descalceFranjaAlerta) return '';
   return ' <span class="badge badge-warn" data-tag="descalce-franja" data-tip="' + escapeHtml(route.descalceFranjaAlerta.detalle) + '">Descalce de Franja</span>';
 }
+/* Ver requerimiento "Indicador de Excepción de Tipología ya aprobada" (reporte real: Cordiandina/Dedicado
+   Rappi Van -- "no me muestra si es adicional alguno", el chip de Avance de Cuotas SÍ cuenta estos turnos
+   como "+1 Adicional" porque caen fuera de la matriz de cuotas, pero esTurnoAdicional()/turnoAdicionalRowBadgeHtml
+   NUNCA los cubre -- esa función es exclusiva de pendienteAprobacionMotivo 'cupo'/'domingo', nunca
+   'tipologia' (que sigue su propio flujo: aprobarCuotaPlanner deja route.cuotaAprobacion.causal:'tipologia',
+   estado:'aprobada', pero NUNCA toca pendienteAprobacionMotivo ni activa descalceFranjaAlerta). Antes, una
+   vez aprobada, la Excepción de Tipología no dejaba NINGÚN rastro visible en la fila del turno -- el badge
+   "Pendiente Autorización de Tipología" solo existía MIENTRAS seguía pendiente (es el propio badge de
+   Estado, no uno secundario), así que al resolverse desaparecía sin dejar ninguna marca persistente, a
+   diferencia de "+1 Adicional" (cupo/domingo), que sí queda para siempre. Mismo patrón que
+   turnoAdicionalRowBadgeHtml/descalceFranjaTagHtml -- badge secundario junto al Estado, nunca lo reemplaza. */
+function tipologiaExcepcionTagHtml(route) {
+  if (!route.cuotaAprobacion || route.cuotaAprobacion.causal !== 'tipologia' || route.cuotaAprobacion.estado !== 'aprobada') return '';
+  return ' <span class="badge-sobrecupo" data-tag="excepcion-tipologia" data-tip="' + escapeHtml(route.cuotaAprobacion.motivo) + '">Excepción de Tipología</span>';
+}
 /* ---------------- Cierre automático del ciclo por incumplimiento (T0 + 120 min) — regionalización CO/MX ----------------
    Cubre los 2 caminos que la FSM cierra sola al vencer los 120 min sin resolución (ver computeEstado): (1)
    'sin_reemplazo' — cancelación del Aliado sin reemplazo confirmado (route.reemplazoPendiente), y (2)
@@ -8018,7 +8033,7 @@ function consolManDetalleRowHtml(route) {
     '<td><div class="courier"><div><div class="courier-name">' + escapeHtml(m.nombre) + '</div><div class="courier-sub">Placa ' + escapeHtml(m.placa) + '</div></div></div></td>' +
     '<td>' + escapeHtml(route.vehiculo) + '</td>' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
-    '<td><span class="badge ' + badgeClassFor(est.code) + '"><i></i>' + est.label + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClassFor(est.code) + '"><i></i>' + est.label + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + tipologiaExcepcionTagHtml(route) + '</td>' +
     '<td>' + escapeHtml(route.sede) + '</td>' +
     '</tr>';
 }
@@ -8227,7 +8242,7 @@ function rowHtmlConsolidado(route) {
       '</div></td>' +
     '<td>' + route.vehiculo + '</td>' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + tipologiaExcepcionTagHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td><div class="row-actions">' + actions + '</div></td>' +
     '</tr>';
 }
@@ -8805,7 +8820,7 @@ function rowHtmlDespacho(route) {
     '<td>' + fmtTime12(route.salida) + '</td>' +
     '<td>' + maletaCell + '</td>' +
     '<td>' + celularCell + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + demoraPreviaTagHtml + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + tipologiaExcepcionTagHtml(route) + demoraPreviaTagHtml + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td class="courier-sub">' + observacionesDespachoCellHtml(route, puedeGestionar && !route.salida) + '</td>' +
     '<td><div class="row-actions">' + actions + '</div></td>' +
     '</tr>';
@@ -9651,7 +9666,7 @@ function rowHtmlSeguimiento(route) {
       '</div></td>' +
     '<td>' + route.vehiculo + '</td>' +
     '<td>' + route.sede + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + tipologiaExcepcionTagHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td><div class="row-actions">' + accion + '</div></td>' +
     '</tr>';
 }
