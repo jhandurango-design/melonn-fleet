@@ -3328,6 +3328,13 @@
         <div class="field"><label for="nsNtCedula">CÉDULA / INE</label><input type="text" id="nsNtCedula"></div>
         <div class="field"><label for="nsNtPlaca">Placa</label><input type="text" id="nsNtPlaca"></div>
       </div>
+      <!-- FIX "Cambiar mensajero disponible sobre un turno ya en alerta" (reporte Planner): routesEligiblesSolicitud
+           excluye turnos retirados/cerrados del selector #nsRuta, pero NO excluye 'critical' (Incumplimiento /
+           Requiere Reemplazo, 60-120 min después de la hora pactada, ver computeEstado) -- ese caso SÍ debe
+           resolverse exclusivamente desde Alertas Activas -> "Confirmar Reemplazo" (preserva franja/cuota,
+           registra ausentismo y reabre el ciclo de llegada; "Cambiar mensajero" no hace nada de eso). Ver
+           refreshNsFieldsForTipo. -->
+      <div class="cutoff-banner danger" id="nsCambioMensajeroNoSanoBanner" hidden></div>
       <!-- 'cambio_mensajero' (ver comentario de #nsTipo arriba): datos del mensajero propuesto, mismo set
            de campos (Vehículo/Correo incluidos) que ya usaba el modal unificado "Novedad de Transporte". -->
       <div id="nsCambioMensajeroFields" class="filter-grid" style="grid-template-columns:1fr 1fr;" hidden>

@@ -14312,11 +14312,33 @@ function refreshNsFieldsForTipo() {
      ocurría cuando este flujo vivía en el modal unificado "Novedad de Transporte". Oculta + desmarca
      "required" en #nsMotivo para ese caso (mismo patrón que #nsNtHora, ver nota más abajo sobre el bug de
      validación nativa con display:none). */
-  document.getElementById('nsCambioMensajeroFields').hidden = !esCambioMensajero;
   document.getElementById('nsMotivoField').hidden = esCambioMensajero;
   document.getElementById('nsMotivo').required = !esCambioMensajero;
+  /* FIX "Cambiar mensajero disponible sobre un turno ya en alerta" (ver comentario de #nsCambioMensajeroNoSanoBanner
+     en index.html): un turno en 'critical' (Incumplimiento / Requiere Reemplazo) sigue en el pool de #nsRuta
+     (routesEligiblesSolicitud solo excluye retirado/afectacion_confirmada/sin_reemplazo), así que el Aliado
+     podía elegirlo aquí en vez de usar "Confirmar Reemplazo" en Alertas Activas -- el único flujo que de verdad
+     reabre el ciclo de llegada y registra el ausentismo para ese caso. Se bloquea EN VIVO (banner + campos
+     ocultos) y de nuevo en el submit (segunda barrera, ver #formNuevaSolicitud) por si el turno escaló a
+     'critical' DESPUÉS de haberlo seleccionado, sin que el Aliado haya vuelto a tocar ningún campo. */
+  var noSanoCmNs = false;
+  var bannerCmNs = document.getElementById('nsCambioMensajeroNoSanoBanner');
   if (esCambioMensajero) {
     var routeCmNs = state.turnos.find(function (r) { return r.id === document.getElementById('nsRuta').value; });
+    noSanoCmNs = !!routeCmNs && computeEstado(routeCmNs).code === 'critical';
+    if (noSanoCmNs) {
+      bannerCmNs.hidden = false;
+      bannerCmNs.innerHTML = ICONS.alert + '<span><strong>' + routeCmNs.id + ' ya está en "Incumplimiento / Requiere Reemplazo".</strong> ' +
+        'Este cambio ya no se gestiona por aquí -- ve a <strong>Alertas Activas</strong> y usa el botón <strong>"Confirmar Reemplazo"</strong> sobre esta fila: ' +
+        'ese flujo sí reabre el ciclo de llegada/despacho y registra el ausentismo del mensajero saliente correctamente.</span>';
+    } else {
+      bannerCmNs.hidden = true;
+    }
+  } else {
+    bannerCmNs.hidden = true;
+  }
+  document.getElementById('nsCambioMensajeroFields').hidden = !esCambioMensajero || noSanoCmNs;
+  if (esCambioMensajero && !noSanoCmNs) {
     var countryCmNs = routeCmNs ? countryForSede(routeCmNs.sede) : countryForAliado(state.user.aliado);
     /* Ver requerimiento "Limpieza de Adicionales en Selectores de Vehículo": mismo criterio que
        vehiculosBaseForCountry ya aplica en #nsNtVehiculo/#turnoVehiculo -- "Cambio de Mensajero" tampoco
@@ -22278,7 +22300,10 @@ document.addEventListener('DOMContentLoaded', function () {
   });
   document.getElementById('nsBodega').addEventListener('change', function () { refreshNsRutaOptions(); refreshNsFieldsForTipo(); });
   document.getElementById('nsTipo').addEventListener('change', refreshNsFieldsForTipo);
-  document.getElementById('nsRuta').addEventListener('change', function () { if (document.getElementById('nsTipo').value === 'enroque') refreshNsFieldsForTipo(); });
+  document.getElementById('nsRuta').addEventListener('change', function () {
+    var tipoNsRutaChange = document.getElementById('nsTipo').value;
+    if (tipoNsRutaChange === 'enroque' || tipoNsRutaChange === 'cambio_mensajero') refreshNsFieldsForTipo();
+  });
   document.getElementById('nsNtPendiente').addEventListener('change', function (e) {
     document.getElementById('nsNtDatosMensajero').hidden = e.target.checked;
   });
@@ -22331,6 +22356,13 @@ document.addEventListener('DOMContentLoaded', function () {
     var codeNs = computeEstado(route).code;
     if (codeNs === 'afectacion_confirmada' || codeNs === 'sin_reemplazo') { toast('warn', 'Turno cerrado', route.id + ' quedó cerrado en Incumplimiento Confirmado — ya no admite gestión de novedades.'); closeModal(); return; }
     var esCambioMensajeroNs = tipo === 'cambio_mensajero';
+    /* Tercera barrera (ver #nsCambioMensajeroNoSanoBanner/refreshNsFieldsForTipo, que ya bloquea esto en vivo):
+       cubre al Aliado que seleccionó el turno/tipo ANTES de que escalara a 'critical' y envía el formulario sin
+       volver a tocar #nsRuta/#nsTipo (ninguno de los 2 listeners se dispara en ese caso). */
+    if (esCambioMensajeroNs && codeNs === 'critical') {
+      toast('warn', 'Usa Confirmar Reemplazo en Alertas', route.id + ' ya está en Incumplimiento / Requiere Reemplazo — asigna el reemplazo desde Alertas Activas, no desde aquí.');
+      return;
+    }
     var mensajeroPropuesto = null;
     var motivo;
     /* 'cambio_mensajero' (ver comentario de #nsTipo en index.html): el motivo que ve Planner se autogenera --
