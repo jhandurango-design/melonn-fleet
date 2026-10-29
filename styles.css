@@ -1584,4 +1584,8 @@ button,.btn{font-size:12px !important;font-weight:600;padding:6px 12px;}
    renderSolicitudesEnviadas) -- puramente visual, agrupa las filas SOL-NNN individuales que ya nacieron
    contiguas (ver solicitudesEnviadasSortConGrupo). */
 .solicitud-grupo-masivo-header td{background:var(--muted-soft);font-size:11px !important;font-weight:700;color:var(--text-secondary);padding:7px 14px;border-top:1px solid var(--border);}
-.solicitud-grupo-masivo-fila td{border-left:2px solid var(--lilac-deep);}
+/* FIX "Rayas verticales repetidas en cada columna" (reporte Planner): el selector "td" aplicaba el acento a
+   TODAS las celdas de la fila, no solo a la primera -- cada columna dibujaba su propio borde izquierdo,
+   viéndose como varias rayas sueltas entre columna y columna en vez de un único acento limpio en el borde
+   izquierdo de la fila completa. */
+.solicitud-grupo-masivo-fila td:first-child{border-left:2px solid var(--lilac-deep);}
