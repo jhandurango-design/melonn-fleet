@@ -20872,12 +20872,26 @@ async function confirmarSeleccionPerfil(rolElegido, btnOrigen) {
   }
   if (!state.user) return;
   state.user.role = rolElegido;
-  var mintResultado = await fijarSessionTokenConRol(state.user);
-  closeModal();
-  if (!mintResultado.ok) {
-    toast('warn', 'Cambio de perfil sin confirmar con el servidor', 'No se pudo validar tu nuevo rol (' + (ROLE_LABEL_ES[rolElegido] || rolElegido) + ') -- algunas acciones podrían rechazarse hasta que vuelvas a intentarlo o recargues la página.');
+  /* FIX "Cambio de rol en caliente (multirol) no trae datos del alcance nuevo sin recargar" (mismo hallazgo
+     exacto que cambiarBodegaActivaUsuario, ver su propio comentario): fijarSessionTokenConRol SÍ reminteaba
+     el JWT con el rol correcto, pero aplicarRolActivo() de abajo solo hacía syncAndRender(true) -- un
+     re-render puramente local, nunca un pull real. Un usuario que pasara de un rol con alcance angosto (ver
+     RLS: ALIADO por su propio aliadoId, BODEGA por su propia sede) a uno con alcance amplio (ADMIN/PLANNER/
+     AUDITOR, global) se quedaba viendo solo el recorte viejo en state.turnos/state.mensajeros hasta
+     refrescar la página. Mismo overlay de carga que cambiarBodegaActivaUsuario -- este remint+pull también
+     puede tardar un par de segundos. */
+  showLoadingOverlayHastaCompletar();
+  try {
+    var mintResultado = await fijarSessionTokenConRol(state.user);
+    closeModal();
+    if (!mintResultado.ok) {
+      toast('warn', 'Cambio de perfil sin confirmar con el servidor', 'No se pudo validar tu nuevo rol (' + (ROLE_LABEL_ES[rolElegido] || rolElegido) + ') -- algunas acciones podrían rechazarse hasta que vuelvas a intentarlo o recargues la página.');
+    }
+    await scPullAll();
+    aplicarRolActivo();
+  } finally {
+    hideLoadingOverlayConFade();
   }
-  aplicarRolActivo();
 }
 /* Cambio de rol EN CALIENTE (ver btnCambiarPerfil) -- misma cola de pasos que completarInicioSesion, salvo
    los que son exclusivos del ARRANQUE de la sesión (overlay de carga, reset de vista, localStorage, ocultar
