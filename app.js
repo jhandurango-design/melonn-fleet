@@ -3588,6 +3588,35 @@ function turnosProgramadosGlobalCount(sede, aliado, fecha) {
     return true;
   }).length;
 }
+/* Ver requerimiento "Avance de Cuotas no debe mostrarse 'Completo' con un Pendiente/Por Confirmar sin
+   resolver" (reporte real: Cordiandina/Barranquilla, el Sistema había generado una plaza automática de
+   déficit -- ver cierreCuotasCompletarDeficit -- y el panel mostraba "5/5 Completo" aunque uno de esos 5
+   nunca tuvo un mensajero real asignado). Decisión del usuario: el conteo que BLOQUEA Adicionales
+   (turnosProgramadosCount/turnosProgramadosGlobalCount, evaluarAprobacionCuota) NO cambia -- una plaza
+   reservada sigue ocupando su cupo para ese propósito. Esto es EXCLUSIVO de la capa de presentación (Avance
+   de Cuotas / desglose por franja): permite a consolManChipHtml/renderProgCuotasResumen/cuotasDesgloseHtml
+   restar los "Pendiente/Por Confirmar" del total mostrado como "confirmado", en vez de mezclarlos sin
+   distinción con mensajeros reales. Mismos criterios de exclusión (cancelación propia del Aliado, rechazo de
+   cuota) que turnosProgramadosCount/turnosProgramadosGlobalCount, más el filtro adicional pendienteAsignacion. */
+function turnosPendienteAsignacionCount(sede, aliado, fecha, franja, vehiculo) {
+  return state.turnos.filter(function (r) {
+    if (r.sede !== sede || r.fecha !== fecha || r.vehiculo !== vehiculo || !r.pendienteAsignacion) return false;
+    if (franjaForHora(r.hora, countryForSede(sede)) !== franja) return false;
+    if (getMensajero(r.mensajeroId).aliado !== aliado) return false;
+    if (r.solicitud && r.solicitud.tipo === 'cancelacion' && r.solicitud.estado === 'aceptada' && r.solicitud.origen === 'aliado') return false;
+    if (r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada') return false;
+    return true;
+  }).length;
+}
+function turnosPendienteAsignacionGlobalCount(sede, aliado, fecha) {
+  return state.turnos.filter(function (r) {
+    if (r.sede !== sede || r.fecha !== fecha || !r.pendienteAsignacion) return false;
+    if (getMensajero(r.mensajeroId).aliado !== aliado) return false;
+    if (r.solicitud && r.solicitud.tipo === 'cancelacion' && r.solicitud.estado === 'aceptada' && r.solicitud.origen === 'aliado') return false;
+    if (r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada') return false;
+    return true;
+  }).length;
+}
 /* Ver requerimiento "Corrección de Conteo de Pendientes en Avance de Cuotas" (reporte real: "+5 Adicionales
    (2 pendientes de aprobación)" cuando en realidad los 5 eran del mismo aliado y seguían pendientes):
    equivalente GLOBAL de turnosPendientesAprobacionCount, mismo criterio exacto que turnosProgramadosGlobalCount
@@ -8072,14 +8101,25 @@ function cuotasEstadoMananaMatchFiltro(estado, qEstado) {
   if (!qEstado) return true;
   return qEstado === 'cubierto' ? estado === 'ok' : estado !== 'ok';
 }
+/* Ver requerimiento "Avance de Cuotas no debe mostrarse 'Completo' con un Pendiente/Por Confirmar sin
+   resolver" (ver comentario completo en turnosPendienteAsignacionGlobalCount): el estado/etiqueta/ratio
+   mostrados se calculan sobre CONFIRMADOS (p.actuales menos las plazas "Pendiente/Por Confirmar" sin
+   mensajero real), nunca sobre el total reservado -- una plaza reservada sin nombre real no debe contar como
+   si la cuota ya estuviera resuelta. El conteo que SÍ bloquea Adicionales (evaluarAprobacionCuota) no se toca
+   -- esto es exclusivamente la capa de presentación. */
 function consolManChipHtml(p) {
-  var estado = cuotasEstadoManana(p.actuales, p.cuota);
+  var pendAsig = p.pendienteAsignacionCount || 0;
+  var confirmados = p.actuales - pendAsig;
+  var estado = cuotasEstadoManana(confirmados, p.cuota);
   /* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria": cuota global ya "Completo"
      pero con recursos fuera de franja base -- mismo tono ámbar que usa Programar Flota (ALIADO), para que
      Planner vea la misma señal sin tener que entrar al detalle de cada turno. */
   var descalce = estado === 'ok' && p.descalce;
   var etiqueta = descalce ? 'Descalce de Franja' : estado === 'ok' ? 'Completo' : estado === 'pendiente' ? 'A medias' : 'Sin iniciar';
   var tipDescalce = descalce ? ' data-tip="Cuota global cubierta, pero existen recursos programados fuera de las franjas base asignadas."' : '';
+  var notaPendAsig = pendAsig > 0
+    ? (' <span class="courier-sub">(' + pendAsig + ' pendiente' + (pendAsig === 1 ? '' : 's') + ' por confirmar, sin mensajero asignado)</span>')
+    : '';
   /* Ver requerimiento "Persistencia del Desglose por Franja": disponible también aquí (Planner), con clave
      propia 'planner:sede|aliado' para no chocar con la de Programar Flota (ALIADO) ni entre bodegas/aliados
      distintos de esta misma pestaña. Solo se arma cuando p.franjas viene poblado (ver
@@ -8088,7 +8128,7 @@ function consolManChipHtml(p) {
     ? cuotasDesgloseHtml('planner:' + (p.sede || '') + '|' + p.aliado, p.sede, p.franjas)
     : '';
   return '<div class="cuotas-resumen-chip ' + (descalce ? 'descalce' : estado) + '"' + tipDescalce + '>' +
-    '<span>' + escapeHtml(p.aliado) + ': ' + p.actuales + '/' + p.cuota + ' recursos (' + etiqueta + ')' + cuotasSobrecupoBadgeHtml(p.actuales, p.cuota) + '</span>' +
+    '<span>' + escapeHtml(p.aliado) + ': ' + confirmados + '/' + p.cuota + ' recursos (' + etiqueta + ')' + cuotasSobrecupoBadgeHtml(confirmados, p.cuota) + notaPendAsig + '</span>' +
     desglose +
     '</div>';
 }
@@ -19473,8 +19513,9 @@ function cuotasAgregarFranjasFueraDeMatriz(franjas, sede, aliado, fecha) {
     var franjaReal = franjaForHora(r.hora, country) || r.hora;
     var key = franjaReal + '|' + r.vehiculo;
     if (yaListadas[key]) return;
-    if (!fueraDeMatriz[key]) fueraDeMatriz[key] = { franja: franjaReal, vehiculo: r.vehiculo, cuota: 0, actuales: 0, fueraDeFranja: true };
+    if (!fueraDeMatriz[key]) fueraDeMatriz[key] = { franja: franjaReal, vehiculo: r.vehiculo, cuota: 0, actuales: 0, pendienteAsignacionCount: 0, fueraDeFranja: true };
     fueraDeMatriz[key].actuales++;
+    if (r.pendienteAsignacion) fueraDeMatriz[key].pendienteAsignacionCount++;
   });
   Object.keys(fueraDeMatriz).forEach(function (k) { franjas.push(fueraDeMatriz[k]); });
 }
@@ -19486,12 +19527,13 @@ function cuotasProgresoPorSede(aliado, fecha) {
   matriz.forEach(function (c) {
     if (c.aliado !== aliado || c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
-    if (!porSede[c.sede]) porSede[c.sede] = { sede: c.sede, cuota: 0, actuales: 0, pendientes: 0, franjas: [] };
+    if (!porSede[c.sede]) porSede[c.sede] = { sede: c.sede, cuota: 0, actuales: 0, pendientes: 0, pendienteAsignacionCount: 0, franjas: [] };
     var actualesFranja = turnosProgramadosCount(c.sede, aliado, fecha, c.franja, c.vehiculo);
     porSede[c.sede].cuota += c.cantidad;
     porSede[c.sede].actuales += actualesFranja;
     porSede[c.sede].pendientes += turnosPendientesAprobacionCount(c.sede, aliado, fecha, c.franja, c.vehiculo);
-    porSede[c.sede].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranja });
+    var pendAsigFranja = turnosPendienteAsignacionCount(c.sede, aliado, fecha, c.franja, c.vehiculo);
+    porSede[c.sede].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranja, pendienteAsignacionCount: pendAsigFranja });
   });
   /* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria" (DRN/Bogotá): 'descalce' marca
      que, dentro de esta sede+aliado+fecha, existe al menos un recurso realmente programado fuera de su
@@ -19527,6 +19569,7 @@ function cuotasProgresoPorSede(aliado, fecha) {
        aprobación por Planner)", dando la impresión de que varios ya habían sido resueltos cuando en realidad
        todos seguían pendientes. */
     porSede[s].pendientes = turnosPendientesAprobacionGlobalCount(s, aliado, fecha);
+    porSede[s].pendienteAsignacionCount = turnosPendienteAsignacionGlobalCount(s, aliado, fecha);
   });
   return Object.keys(porSede).sort().map(function (s) { return porSede[s]; });
 }
@@ -19545,13 +19588,16 @@ function cuotasProgresoPorAliadoManana(sedeFiltro) {
     if (c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (sedeFiltro && c.sede !== sedeFiltro) return;
-    if (!porAliado[c.aliado]) { porAliado[c.aliado] = { aliado: c.aliado, sede: sedeFiltro || null, cuota: 0, actuales: 0, franjas: [] }; sedesPorAliado[c.aliado] = {}; }
+    if (!porAliado[c.aliado]) { porAliado[c.aliado] = { aliado: c.aliado, sede: sedeFiltro || null, cuota: 0, actuales: 0, pendienteAsignacionCount: 0, franjas: [] }; sedesPorAliado[c.aliado] = {}; }
     var actualesFranjaMan = turnosProgramadosCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo);
     porAliado[c.aliado].cuota += c.cantidad;
     porAliado[c.aliado].actuales += actualesFranjaMan;
     /* Solo se arma el desglose por franja cuando hay UNA sede puntual filtrada -- con "Todas las bodegas"
        se usa cuotasProgresoPorBodegaYAliadoManana (agrupado), que ya trae su propio desglose por sede. */
-    if (sedeFiltro) porAliado[c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaMan });
+    if (sedeFiltro) {
+      var pendAsigFranjaMan = turnosPendienteAsignacionCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo);
+      porAliado[c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaMan, pendienteAsignacionCount: pendAsigFranjaMan });
+    }
     sedesPorAliado[c.aliado][c.sede] = true;
   });
   /* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria": mismo criterio de descalce de
@@ -19570,6 +19616,7 @@ function cuotasProgresoPorAliadoManana(sedeFiltro) {
        TODAS las sedes de este aliado, en vez de quedarse solo con la suma de franjas que existen en la
        matriz. Un turno real en una franja sin fila en la matriz quedaba invisible para este total también. */
     porAliado[a].actuales = sedesDeEsteAliado.reduce(function (sum, s) { return sum + turnosProgramadosGlobalCount(s, a, TOMORROW_STR); }, 0);
+    porAliado[a].pendienteAsignacionCount = sedesDeEsteAliado.reduce(function (sum, s) { return sum + turnosPendienteAsignacionGlobalCount(s, a, TOMORROW_STR); }, 0);
   });
   return Object.keys(porAliado).sort().map(function (a) { return porAliado[a]; });
 }
@@ -19588,9 +19635,10 @@ function cuotasProgresoPorBodegaYAliadoManana() {
     if (!porSede[c.sede]) porSede[c.sede] = {};
     if (!porSede[c.sede][c.aliado]) porSede[c.sede][c.aliado] = { aliado: c.aliado, sede: c.sede, cuota: 0, actuales: 0, franjas: [] };
     var actualesFranjaBA = turnosProgramadosCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo);
+    var pendAsigFranjaBA = turnosPendienteAsignacionCount(c.sede, c.aliado, TOMORROW_STR, c.franja, c.vehiculo);
     porSede[c.sede][c.aliado].cuota += c.cantidad;
     porSede[c.sede][c.aliado].actuales += actualesFranjaBA;
-    porSede[c.sede][c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaBA });
+    porSede[c.sede][c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaBA, pendienteAsignacionCount: pendAsigFranjaBA });
   });
   return Object.keys(porSede).sort().map(function (sede) {
     var aliados = Object.keys(porSede[sede]).sort().map(function (a) {
@@ -19605,6 +19653,7 @@ function cuotasProgresoPorBodegaYAliadoManana() {
       /* FIX "Desfase de conteo en Avance de Cuotas" (ver mismo fix en cuotasProgresoPorSede/
          cuotasProgresoPorAliadoManana): actuales se sobreescribe con el conteo GLOBAL real de esta sede. */
       rec.actuales = turnosProgramadosGlobalCount(sede, a, TOMORROW_STR);
+      rec.pendienteAsignacionCount = turnosPendienteAsignacionGlobalCount(sede, a, TOMORROW_STR);
       return rec;
     });
     return { sede: sede, aliados: aliados };
@@ -19628,7 +19677,10 @@ function cuotasProgresoPorAliadoHoy(sedeFiltro) {
     var actualesFranjaHoy = turnosProgramadosCount(c.sede, c.aliado, TODAY_STR, c.franja, c.vehiculo);
     porAliado[c.aliado].cuota += c.cantidad;
     porAliado[c.aliado].actuales += actualesFranjaHoy;
-    if (sedeFiltro) porAliado[c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaHoy });
+    if (sedeFiltro) {
+      var pendAsigFranjaHoy = turnosPendienteAsignacionCount(c.sede, c.aliado, TODAY_STR, c.franja, c.vehiculo);
+      porAliado[c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaHoy, pendienteAsignacionCount: pendAsigFranjaHoy });
+    }
     sedesPorAliado[c.aliado][c.sede] = true;
   });
   Object.keys(porAliado).forEach(function (a) {
@@ -19640,6 +19692,7 @@ function cuotasProgresoPorAliadoHoy(sedeFiltro) {
         !horaPerteneceAFranjaContratada(r.sede, a, r.vehiculo, r.hora, r.fecha);
     });
     porAliado[a].actuales = sedesDeEsteAliado.reduce(function (sum, s) { return sum + turnosProgramadosGlobalCount(s, a, TODAY_STR); }, 0);
+    porAliado[a].pendienteAsignacionCount = sedesDeEsteAliado.reduce(function (sum, s) { return sum + turnosPendienteAsignacionGlobalCount(s, a, TODAY_STR); }, 0);
   });
   return Object.keys(porAliado).sort().map(function (a) { return porAliado[a]; });
 }
@@ -19653,9 +19706,10 @@ function cuotasProgresoPorBodegaYAliadoHoy() {
     if (!porSede[c.sede]) porSede[c.sede] = {};
     if (!porSede[c.sede][c.aliado]) porSede[c.sede][c.aliado] = { aliado: c.aliado, sede: c.sede, cuota: 0, actuales: 0, franjas: [] };
     var actualesFranjaBAH = turnosProgramadosCount(c.sede, c.aliado, TODAY_STR, c.franja, c.vehiculo);
+    var pendAsigFranjaBAH = turnosPendienteAsignacionCount(c.sede, c.aliado, TODAY_STR, c.franja, c.vehiculo);
     porSede[c.sede][c.aliado].cuota += c.cantidad;
     porSede[c.sede][c.aliado].actuales += actualesFranjaBAH;
-    porSede[c.sede][c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaBAH });
+    porSede[c.sede][c.aliado].franjas.push({ franja: c.franja, vehiculo: c.vehiculo, cuota: c.cantidad, actuales: actualesFranjaBAH, pendienteAsignacionCount: pendAsigFranjaBAH });
   });
   return Object.keys(porSede).sort().map(function (sede) {
     var aliados = Object.keys(porSede[sede]).sort().map(function (a) {
@@ -19667,6 +19721,7 @@ function cuotasProgresoPorBodegaYAliadoHoy() {
           !horaPerteneceAFranjaContratada(r.sede, a, r.vehiculo, r.hora, r.fecha);
       });
       rec.actuales = turnosProgramadosGlobalCount(sede, a, TODAY_STR);
+      rec.pendienteAsignacionCount = turnosPendienteAsignacionGlobalCount(sede, a, TODAY_STR);
       return rec;
     });
     return { sede: sede, aliados: aliados };
@@ -19706,6 +19761,13 @@ function cuotasDesgloseHtml(key, sede, franjas) {
   if (!abierto) return '<div class="cuotas-resumen-desglose-wrap">' + boton + '</div>';
   var panel = '<div class="cuotas-resumen-desglose">' +
     '<ul>' + franjas.map(function (f) {
+      /* Ver requerimiento "Avance de Cuotas no debe mostrarse 'Completo' con un Pendiente/Por Confirmar sin
+         resolver": mismo criterio que consolManChipHtml/renderProgCuotasResumen -- confirmados (f.actuales
+         menos las plazas "Pendiente/Por Confirmar" de esta franja puntual) es lo que de verdad se muestra y
+         compara contra la cuota; el total reservado (f.actuales) queda solo como nota aparte. */
+      var pendAsigFranjaLi = f.pendienteAsignacionCount || 0;
+      var confirmadosFranja = f.actuales - pendAsigFranjaLi;
+      var notaPendAsigLi = pendAsigFranjaLi > 0 ? ' <em>(' + pendAsigFranjaLi + ' por confirmar)</em>' : '';
       /* Franja real sin ninguna fila en la matriz de cuotas de ese día (ver cuotasAgregarFranjasFueraDeMatriz)
          -- cuota:0 no es "sin iniciar" (rojo) ni "completo" (verde), es capacidad desplegada FUERA de lo
          pactado; se marca en ámbar con su propia etiqueta y el badge de Adicionales directo sobre el total
@@ -19713,14 +19775,14 @@ function cuotasDesgloseHtml(key, sede, franjas) {
          que la suma nunca cuadrara contra el total agregado de arriba. */
       if (f.fueraDeFranja) {
         return '<li class="descalce-franja-item">' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(sede))) +
-          ' <em>(sin cupo contratado en esta franja)</em>: ' + f.actuales + cuotasSobrecupoBadgeHtml(f.actuales, 0) + '</li>';
+          ' <em>(sin cupo contratado en esta franja)</em>: ' + confirmadosFranja + cuotasSobrecupoBadgeHtml(confirmadosFranja, 0) + notaPendAsigLi + '</li>';
       }
       /* Ver requerimiento "Semaforización Visual por Estado": mismo criterio de 3 colores que el resto del
          widget (cuotasEstadoManana) -- Completo (verde, sin clase extra, color por defecto del <li>),
          Incompleto/A medias (ámbar, descalce-franja-item) o Sin iniciar/cero recursos (rojo, vacio-franja-item). */
-      var estadoFranja = cuotasEstadoManana(f.actuales, f.cuota);
+      var estadoFranja = cuotasEstadoManana(confirmadosFranja, f.cuota);
       var claseFranja = estadoFranja === 'vacio' ? ' class="vacio-franja-item"' : (estadoFranja === 'pendiente' ? ' class="descalce-franja-item"' : '');
-      return '<li' + claseFranja + '>' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(sede))) + ': ' + f.actuales + '/' + f.cuota + cuotasSobrecupoBadgeHtml(f.actuales, f.cuota) + '</li>';
+      return '<li' + claseFranja + '>' + fmtTime12(f.franja) + ' · ' + escapeHtml(cuotasVehiculoLabel(f.vehiculo, countryForSede(sede))) + ': ' + confirmadosFranja + '/' + f.cuota + cuotasSobrecupoBadgeHtml(confirmadosFranja, f.cuota) + notaPendAsigLi + '</li>';
     }).join('') + '</ul></div>';
   return '<div class="cuotas-resumen-desglose-wrap">' + boton + panel + '</div>';
 }
@@ -19732,14 +19794,23 @@ function renderProgCuotasResumen() {
   el.hidden = false;
   el.innerHTML = '<p class="panel-title">Avance de Cuotas — ' + (state.progDay === 'tomorrow' ? 'Mañana' : 'Hoy') + '</p>' +
     '<div class="cuotas-resumen-chips">' + progreso.map(function (p) {
-      var cubierto = p.actuales >= p.cuota;
-      var faltan = p.cuota - p.actuales;
+      /* Ver requerimiento "Avance de Cuotas no debe mostrarse 'Completo' con un Pendiente/Por Confirmar sin
+         resolver": confirmados (p.actuales menos las plazas "Pendiente/Por Confirmar" sin mensajero real)
+         es lo que de verdad se compara contra la cuota y se muestra como ratio principal -- el conteo que
+         SÍ bloquea Adicionales (evaluarAprobacionCuota) no se toca, esto es solo la capa de presentación. */
+      var pendAsig = p.pendienteAsignacionCount || 0;
+      var confirmados = p.actuales - pendAsig;
+      var cubierto = confirmados >= p.cuota;
+      var faltan = p.cuota - confirmados;
       /* Ver requerimiento "Descalce de Cuotas / Avance": el total "actuales" ya incluía turnos todavía
          "Pendiente de Aprobación por Planner" (cupo excedido/festivo/domingo) mezclados sin distinción con
          los confirmados -- se desglosan aquí para que el Aliado sepa cuántos de esos recursos ya cuentan en
          firme y cuántos todavía podrían ser rechazados. */
       var notaPendientes = p.pendientes > 0
         ? (' <span class="courier-sub">(' + p.pendientes + ' pendiente' + (p.pendientes === 1 ? '' : 's') + ' de aprobación por Planner)</span>')
+        : '';
+      var notaPendAsig = pendAsig > 0
+        ? (' <span class="courier-sub">(' + pendAsig + ' pendiente' + (pendAsig === 1 ? '' : 's') + ' por confirmar, sin mensajero asignado)</span>')
         : '';
       /* Ver requerimiento "Refinamiento de Cuotas y Desglose por Franja Horaria": cuota global cubierta pero
          con al menos un recurso fuera de su franja base -- badge ámbar en vez de verde, con el mismo total
@@ -19749,12 +19820,12 @@ function renderProgCuotasResumen() {
          (binario) -- ahora reutiliza el mismo criterio de 3 colores ya usado en Consolidado/Planner
          (cuotasEstadoManana: Completo/A medias/Sin iniciar) para que 0/3 (rojo) se distinga visualmente de
          1/3 o 2/3 (ámbar), y no se vean como el mismo estado "pendiente". */
-      var claseChip = descalce ? 'descalce' : cuotasEstadoManana(p.actuales, p.cuota);
+      var claseChip = descalce ? 'descalce' : cuotasEstadoManana(confirmados, p.cuota);
       var tipDescalce = descalce ? ' data-tip="Cuota global cubierta, pero existen recursos programados fuera de las franjas base asignadas."' : '';
-      var etiqueta = p.actuales + '/' + p.cuota + ' recursos' + (descalce ? ' (Descalce de Franja)' : '');
+      var etiqueta = confirmados + '/' + p.cuota + ' recursos' + (descalce ? ' (Descalce de Franja)' : '');
       var desglose = cuotasDesgloseHtml('aliado:' + p.sede, p.sede, p.franjas);
       return '<div class="cuotas-resumen-chip ' + claseChip + '"' + tipDescalce + '>' +
-        '<span>' + p.sede + ': ' + etiqueta + cuotasSobrecupoBadgeHtml(p.actuales, p.cuota) + notaPendientes + '</span>' +
+        '<span>' + p.sede + ': ' + etiqueta + cuotasSobrecupoBadgeHtml(confirmados, p.cuota) + notaPendientes + notaPendAsig + '</span>' +
         desglose +
         /* FIX "Remover botón obsoleto" (reporte en vivo): el atajo manual "Faltan X — Completar con
            Pendiente/Por Confirmar" se retira de la UI -- el cierre de cupos pendientes ya es 100%
