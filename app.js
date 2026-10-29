@@ -3253,8 +3253,19 @@ function computeEstado(route) {
     var codeAcc = SOLICITUD_TIPO_CODES.cancelacion.aceptada;
     /* CANCELADO_POR_MELONN (Sección 3A): cuando el origen de la cancelación es Melonn (Planner/Admin, nunca
        el Aliado — ver formSolicitudAccion/consol-cancelar), el label distingue el estado final sin fragmentar
-       el código FSM ('cancelled' sigue siendo el mismo para Auditoría/ALERT_CODES — ver classifyAuditRecord). */
-    var labelAcc = route.solicitud.origen !== 'aliado' ? 'Cancelado por Melonn' : estadoLabel(codeAcc);
+       el código FSM ('cancelled' sigue siendo el mismo para Auditoría/ALERT_CODES — ver classifyAuditRecord).
+       FIX "Cancelado por Melonn mal interpretado para rechazo de Cuota/Festivo/Tipología" (reporte Planner):
+       rechazarCuotaPlanner TAMBIÉN deja route.solicitud con origen:'planner' (mismo valor que una cancelación
+       real iniciada por Planner) -- sin distinguirlo, un rechazo de una EXCEPCIÓN que el propio Aliado pidió
+       (p. ej. un vehículo de tipología no habilitada) se veía idéntico a "Melonn decidió cancelar tu ruta",
+       dando a entender visualmente que la responsabilidad es de Melonn cuando en realidad el origen de la
+       novedad fue del Aliado (y así lo atribuye correctamente classifyAuditRecord/causal, que nunca se tocó
+       -- este fix es puramente de etiqueta visual). route.cuotaAprobacion con estado:'rechazada' es la señal
+       inequívoca de que este 'cancelacion' nació de un rechazo de cuota, nunca de una cancelación directa. */
+    var cuotaRechazada = route.cuotaAprobacion && route.cuotaAprobacion.estado === 'rechazada';
+    var labelAcc = cuotaRechazada
+      ? 'Rechazado por Planner (' + cuotaCausalLabel(route.cuotaAprobacion.causal) + ')'
+      : (route.solicitud.origen !== 'aliado' ? 'Cancelado por Melonn' : estadoLabel(codeAcc));
     return { code: codeAcc, label: labelAcc };
   }
   /* Módulo Cuotas de Flota (ver evaluarAprobacionCuota/submitTurno): el turno ya existe (trazabilidad
@@ -4125,14 +4136,32 @@ function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
     var actuales = turnosProgramadosGlobalCount(c.sede, c.aliado, fechaObjetivo);
     var faltan = cuotaTotal - actuales;
     if (faltan <= 0) return;
-    /* Hora/vehículo de los pendientes generados por el Sistema: se reutiliza la primera franja/tipología
-       configurada de este sede+aliado+día (sin ninguna preferencia real del Aliado que leer) -- el Aliado
-       puede luego usar "Confirmar recurso" para corregir vehículo/hora al asignar su mensajero real. */
-    var primeraFranja = state.cuotasMatriz.filter(function (x) { return x.sede === c.sede && x.aliado === c.aliado && x.dia === dia && x.cantidad > 0; })
-      .sort(function (a, b) { return a.franja < b.franja ? -1 : 1; })[0];
-    if (!primeraFranja) return;
+    /* FIX "Pendiente fantasma en una franja ya cubierta" (reporte real: Cordiandina/Barranquilla, jueves --
+       08:30 AM Moto Estándar ya 2/2 con mensajeros reales, pero el Sistema igual le agregó una 3ra plaza
+       "Pendiente/Por Confirmar" encima, mientras la franja de 3:30 PM, genuinamente corta 1/2, no mostraba
+       ninguna señal). El déficit GLOBAL (cuotaTotal/actuales de arriba) es correcto -- la cuota de un aliado
+       es fungible entre franjas por diseño (ver cuotaGlobalAsignada) -- pero antes, el/los `faltan` puestos
+       SIEMPRE caían en la primera franja configurada del día cronológicamente, sin verificar si esa franja
+       puntual ya estaba cubierta por turnos reales. Ahora se reparten primero entre las franjas que
+       individualmente SÍ están cortas (mismo turnosProgramadosCount exacto que ya usa el desglose de Avance
+       de Cuotas, así ambos coinciden siempre) -- cada franja absorbe como máximo su propio déficit local,
+       en orden cronológico. Si el reparto por franja no alcanza a cubrir todo el déficit global (franjas
+       retiradas de la matriz vigente con turnos reales que ya no calzan en ninguna fila actual, caso límite),
+       el remanente cae en la primera franja configurada, igual que antes -- nunca se generan menos plazas
+       que el déficit global real. */
+    var franjasDelDia = state.cuotasMatriz.filter(function (x) { return x.sede === c.sede && x.aliado === c.aliado && x.dia === dia && x.cantidad > 0; })
+      .sort(function (a, b) { return a.franja < b.franja ? -1 : 1; });
+    if (!franjasDelDia.length) return;
+    var objetivosPorFranja = [];
+    franjasDelDia.forEach(function (f) {
+      var cubiertos = turnosProgramadosCount(c.sede, c.aliado, fechaObjetivo, f.franja, f.vehiculo);
+      var deficitLocal = f.cantidad - cubiertos;
+      for (var j = 0; j < deficitLocal && objetivosPorFranja.length < faltan; j++) objetivosPorFranja.push(f);
+    });
+    while (objetivosPorFranja.length < faltan) objetivosPorFranja.push(franjasDelDia[0]);
     for (var i = 0; i < faltan; i++) {
-      var mensajeroPendienteId = crearMensajeroPendiente({ sede: c.sede, vehiculo: primeraFranja.vehiculo }, c.aliado);
+      var franjaObjetivo = objetivosPorFranja[i];
+      var mensajeroPendienteId = crearMensajeroPendiente({ sede: c.sede, vehiculo: franjaObjetivo.vehiculo }, c.aliado);
       /* FIX "Mensajero Placeholder Fantasma" (detectado en verificación en vivo): crearMensajeroPendiente solo
          mutaba state.mensajeros EN MEMORIA -- nunca se empujaba a Supabase. El turno sí se guardaba (referencia
          a este mensajeroId), pero en cualquier OTRA sesión/dispositivo (o la misma, tras recargar), getMensajero
@@ -4143,8 +4172,8 @@ function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
       var mensajeroPendienteObj = state.mensajeros[state.mensajeros.length - 1];
       mensajerosCreados.push(mensajeroPendienteObj);
       var nuevoTurnoSistema = {
-        id: nextTurnoId(), sede: c.sede, fecha: fechaObjetivo, mensajeroId: mensajeroPendienteId, vehiculo: primeraFranja.vehiculo,
-        hora: primeraFranja.franja, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: true
+        id: nextTurnoId(), sede: c.sede, fecha: fechaObjetivo, mensajeroId: mensajeroPendienteId, vehiculo: franjaObjetivo.vehiculo,
+        hora: franjaObjetivo.franja, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: true
       };
       state.turnos.push(nuevoTurnoSistema);
       registrarCreacionTurno(nuevoTurnoSistema, 'Sistema Gravity');
