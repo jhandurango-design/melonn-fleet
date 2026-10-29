@@ -13070,10 +13070,6 @@ function toggleCuotasDesglose(key) {
   state.cuotasDesgloseExpandidos[key] = !state.cuotasDesgloseExpandidos[key];
   refreshCuotasDesgloseViews();
 }
-function cerrarCuotasDesglose(key) {
-  state.cuotasDesgloseExpandidos[key] = false;
-  refreshCuotasDesgloseViews();
-}
 /* Micro-filtro Todos/Solo A Tiempo/Solo Tardíos de la "Tabla General de Despachos" -- ver
    renderCumplimientoBodegaTab. */
 function setAtiempoMicroFiltro(valor) {
@@ -19556,13 +19552,16 @@ function cuotasSobrecupoBadgeHtml(actuales, cuota) {
     ' adicional' + (adicionales === 1 ? '' : 'es') + ' aprobado' + (adicionales === 1 ? '' : 's') + ' por Planner.">+' +
     adicionales + ' Adicional' + (adicionales === 1 ? '' : 'es') + '</span>';
 }
+/* Ver requerimiento "Limpieza del desglose de Cuotas: cierre redundante": antes el panel abierto tenía 2
+   formas de cerrarse -- el propio botón toggle ("Ocultar desglose por franja") Y una "✕" aparte arriba del
+   panel, ambas ejecutando exactamente la misma acción (state.cuotasDesgloseExpandidos[key] = false). Mismo
+   criterio ya aplicado al "Aviso de Plataforma" del login: un solo mecanismo de cierre, nunca dos. */
 function cuotasDesgloseHtml(key, sede, franjas) {
   var abierto = !!state.cuotasDesgloseExpandidos[key];
   var boton = '<button type="button" class="btn-link" data-act="toggle-cuotas-desglose" data-key="' + key + '">' +
     (abierto ? 'Ocultar desglose por franja' : 'Ver desglose por franja') + '</button>';
   if (!abierto) return '<div class="cuotas-resumen-desglose-wrap">' + boton + '</div>';
   var panel = '<div class="cuotas-resumen-desglose">' +
-    '<div class="cuotas-resumen-desglose-header"><button type="button" class="cuotas-desglose-cerrar" data-act="cerrar-cuotas-desglose" data-key="' + key + '" data-tip="Cerrar desglose">✕</button></div>' +
     '<ul>' + franjas.map(function (f) {
       /* Franja real sin ninguna fila en la matriz de cuotas de ese día (ver cuotasAgregarFranjasFueraDeMatriz)
          -- cuota:0 no es "sin iniciar" (rojo) ni "completo" (verde), es capacidad desplegada FUERA de lo
@@ -23044,7 +23043,6 @@ document.addEventListener('DOMContentLoaded', function () {
     if (act === 'ver-detalle-bodega') toggleBodegaDetalle(id);
     else if (act === 'toggle-posicionamiento-grupo') togglePosicionamientoGrupo(id);
     else if (act === 'toggle-cuotas-desglose') toggleCuotasDesglose(btn.dataset.key);
-    else if (act === 'cerrar-cuotas-desglose') cerrarCuotasDesglose(btn.dataset.key);
     else if (act === 'toggle-acordeon-grupo') toggleAcordeonGrupo(id, btn.dataset.expandido === '1');
     else if (act === 'toggle-detalle-cumplimiento-grupo') toggleCumplimientoAliadoRankingDetalle(id);
     else if (act === 'toggle-detalle-cumplimiento-mensajero') toggleCumplimientoAliadoFlatDetalle(id);
