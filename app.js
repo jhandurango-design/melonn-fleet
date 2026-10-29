@@ -11682,8 +11682,15 @@ function renderAuditoria() {
   if (state.auditKpiFilter && kpisTab.indexOf(state.auditKpiFilter) === -1) state.auditKpiFilter = null;
   var sedes = scopeSedes();
   var rutasScope = state.turnos.filter(function (r) { return sedes.indexOf(r.sede) !== -1; });
+  /* FIX "Auditoría muestra 0 registros aunque sí hay datos" (reporte Auditor): un turno cuyo mensajeroId ya
+     no resuelve en state.mensajeros (mensajero borrado/aún no sincronizado -- getMensajero() devuelve un
+     placeholder con aliado:null, ver ese comentario) colaba un null en aliadosOpciones; el siguiente .sort()
+     con a.localeCompare(...) reventaba con una excepción no capturada apenas 1 turno así existiera en el
+     alcance -- renderAuditoria() se cortaba A LA MITAD, antes de construir rutasRango/recordsPestana, así que
+     la tabla se quedaba en su estado vacío por defecto aunque SÍ hubiera eventos reales clasificables en el
+     período (confirmado contra datos reales de Cali #2 - Cámbulos). */
   var aliadosOpciones = [];
-  rutasScope.forEach(function (r) { var a = getMensajero(r.mensajeroId).aliado; if (aliadosOpciones.indexOf(a) === -1) aliadosOpciones.push(a); });
+  rutasScope.forEach(function (r) { var a = getMensajero(r.mensajeroId).aliado; if (a && aliadosOpciones.indexOf(a) === -1) aliadosOpciones.push(a); });
   aliadosOpciones.sort(function (a, b) { return a.localeCompare(b, 'es', { sensitivity: 'base' }); });
   if (aliadosOpciones.indexOf(state.auditFiltroAliado) === -1) state.auditFiltroAliado = '';
   if (sedes.indexOf(state.auditFiltroBodega) === -1) state.auditFiltroBodega = '';
