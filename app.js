@@ -3093,25 +3093,6 @@ function rutaAsignadaTagHtml(route, est) {
   if (!route.rutaAsignada || est.code !== 'dock_overdue') return '';
   return ' <span class="badge badge-justified" data-tag="ruta-asignada-en-demora" data-tip="Bodega ya confirmó la asignación de ruta para este mensajero — se está despachando, aunque superó el tiempo de SLA de Bodega.">Ruta Asignada</span>';
 }
-/* Ver requerimiento "Visibilidad de Descalce de Franja por fila" (reporte real: Cordiandina/Bogotá --
-   "si el aliado no tiene cuotas en esa franja no se da visual, solo se toma lo primero") y su ampliación
-   "No puede haber adicionales... que se pasen automáticamente sin previa aprobación" (reporte Rapiboy/
-   Medellín): evaluarAprobacionCuota YA NO deja pasar un turno fuera de su franja base sin aprobación de
-   Planner (ver su propio comentario) -- 'descalce_franja' ahora es un motivo de pendienteAprobacionPlanner
-   más, igual que cupo/domingo/festivo/tipología, nunca un requiere:false silencioso. route.descalceFranjaAlerta
-   (campo viejo, poblado solo por turnos creados ANTES de este fix -- nunca migrados retroactivamente) y
-   route.cuotaAprobacion.causal==='descalce_franja' (el camino nuevo, una vez Planner aprueba) comparten el
-   mismo badge persistente -- mismo patrón que tipologiaExcepcionTagHtml (badge secundario junto al Estado,
-   nunca lo reemplaza). */
-function descalceFranjaTagHtml(route) {
-  if (route.descalceFranjaAlerta) {
-    return ' <span class="badge badge-warn" data-tag="descalce-franja" data-tip="' + escapeHtml(route.descalceFranjaAlerta.detalle) + '">Descalce de Franja</span>';
-  }
-  if (route.cuotaAprobacion && route.cuotaAprobacion.causal === 'descalce_franja' && route.cuotaAprobacion.estado === 'aprobada') {
-    return ' <span class="badge badge-warn" data-tag="descalce-franja" data-tip="' + escapeHtml(route.cuotaAprobacion.motivo) + '">Descalce de Franja</span>';
-  }
-  return '';
-}
 /* Ver requerimiento "Indicador de Excepción de Tipología ya aprobada" (reporte real: Cordiandina/Dedicado
    Rappi Van -- "no me muestra si es adicional alguno", el chip de Avance de Cuotas SÍ cuenta estos turnos
    como "+1 Adicional" porque caen fuera de la matriz de cuotas, pero esTurnoAdicional()/turnoAdicionalRowBadgeHtml
@@ -3122,7 +3103,7 @@ function descalceFranjaTagHtml(route) {
    "Pendiente Autorización de Tipología" solo existía MIENTRAS seguía pendiente (es el propio badge de
    Estado, no uno secundario), así que al resolverse desaparecía sin dejar ninguna marca persistente, a
    diferencia de "+1 Adicional" (cupo/domingo), que sí queda para siempre. Mismo patrón que
-   turnoAdicionalRowBadgeHtml/descalceFranjaTagHtml -- badge secundario junto al Estado, nunca lo reemplaza. */
+   turnoAdicionalRowBadgeHtml -- badge secundario junto al Estado, nunca lo reemplaza. */
 function tipologiaExcepcionTagHtml(route) {
   if (!route.cuotaAprobacion || route.cuotaAprobacion.causal !== 'tipologia' || route.cuotaAprobacion.estado !== 'aprobada') return '';
   return ' <span class="badge-sobrecupo" data-tag="excepcion-tipologia" data-tip="' + escapeHtml(route.cuotaAprobacion.motivo) + '">Excepción de Tipología</span>';
@@ -3654,8 +3635,8 @@ function horaPerteneceAFranjaContratada(sede, aliado, vehiculo, hora, fecha) {
    "Pendiente de Aprobación" (ver evaluarAprobacionCuota/submitTurno). Centraliza el label/frase de cada
    causal para que las 3 rutas de aprobar/rechazar/mostrar (aprobarCuotaPlanner, rechazarCuotaPlanner,
    unifiedFromCuota, submitTurno/cargarFlotaHabitual) nunca queden desincronizadas entre sí. */
-function cuotaCausalLabel(motivo) { return motivo === 'festivo' ? 'Día Festivo' : motivo === 'domingo' ? 'Recurso Adicional (Domingo)' : motivo === 'tipologia' ? 'Excepción de Tipología' : motivo === 'descalce_franja' ? 'Descalce de Franja' : 'Cupo Excedido'; }
-function cuotaCausalFrase(motivo) { return motivo === 'festivo' ? 'día festivo' : motivo === 'domingo' ? 'domingo, sin cuota operativa asignada' : motivo === 'tipologia' ? 'tipología no habilitada' : motivo === 'descalce_franja' ? 'franja sin cupo propio disponible' : 'cupo excedido'; }
+function cuotaCausalLabel(motivo) { return motivo === 'festivo' ? 'Día Festivo' : motivo === 'domingo' ? 'Recurso Adicional (Domingo)' : motivo === 'tipologia' ? 'Excepción de Tipología' : 'Cupo Excedido'; }
+function cuotaCausalFrase(motivo) { return motivo === 'festivo' ? 'día festivo' : motivo === 'domingo' ? 'domingo, sin cuota operativa asignada' : motivo === 'tipologia' ? 'tipología no habilitada' : 'cupo excedido'; }
 function evaluarAprobacionCuota(sede, aliado, vehiculo, hora, fecha) {
   var country = countryForSede(sede);
   if (!cuotasActivoPais(country) || esFlotaPropia(aliado)) return { requiere: false };
@@ -3686,22 +3667,25 @@ function evaluarAprobacionCuota(sede, aliado, vehiculo, hora, fecha) {
       cantidad: global.cantidad, actuales: global.actuales
     };
   }
-  /* FIX "No puede haber adicionales o recursos que no estén por cuotas que se pasen automáticamente sin
-     previa aprobación" (reporte real: Rapiboy/Medellín): ANTES, con el cupo GLOBAL del día todavía cubierto,
-     un turno que caía en una franja/vehículo puntual ya llena (o sin ninguna fila en la matriz) se dejaba
-     pasar igual como turno confirmado -- requiere:false, solo marcado con 'descalceFranja' para
-     trazabilidad, SIN pasar nunca por aprobación de Planner. Confirmado con el usuario que esto va en contra
-     de la regla de negocio real: cualquier recurso fuera de lo contratado (sea por cupo global, festivo,
-     domingo, tipología no habilitada, O por caer en una franja sin cupo propio) debe requerir aprobación de
-     Planner, sin excepción. Mismo flujo genérico 'requiere:true' que ya usan festivo/domingo/cupo/tipología
-     -- aprobarCuotaPlanner/rechazarCuotaPlanner ya lo manejan sin cambios (ver cuotaCausalLabel/Frase). */
+  /* FIX "No deben existir 3 categorías -- Descalce de Franja no es una categoría propia" (confirmado con el
+     usuario, corrigiendo una sobre-interpretación mía): el concepto real del negocio es solo 2 cosas --
+     (1) "Descalce de Franja" = programar fuera de la franja pactada CON cupo todavía abierto en otra franja
+     -- eso debe estar bloqueado de raíz, nunca pasar por aprobación (ver horaPerteneceAFranjaContratada, que
+     ya corta esto ANTES de llegar aquí). (2) "Cupo Excedido/Adicional" = el Aliado YA cumplió el 100% de
+     sus franjas pactadas para este vehículo y pide uno más -- eso SIEMPRE ha sido (y debe seguir siendo)
+     Cupo Excedido normal, con aprobación de Planner, sin ningún nombre ni categoría aparte. Por construcción,
+     este punto del código SOLO se alcanza cuando horaPerteneceAFranjaContratada ya confirmó que TODAS las
+     franjas de este vehículo/día están al 100% -- es decir, es exactamente el caso (2), nunca el (1).
+     Anteriormente esto se etiquetaba como un motivo propio ('descalce_franja') -- se revierte a 'cupo' (el
+     mismo motivo/flujo de siempre) para no introducir una tercera categoría que no existe en el negocio
+     real. */
   var cuota = checkCuotaExceso(sede, aliado, vehiculo, hora, fecha);
   if (cuota.excedida || cuota.cantidad <= 0) {
     return {
-      requiere: true, motivo: 'descalce_franja',
-      detalle: 'Cuota global cubierta, pero este turno cae fuera de las franjas base asignadas (' +
-        (cuota.cantidad > 0 ? 'cupo de ' + fmtTime12(hora) + ' (' + cuota.franja + ') ya cubierto' : fmtTime12(hora) + ' no tiene cupo base asignado') +
-        ' para ' + vehiculo + '); requiere aprobación de Planner/Admin.'
+      requiere: true, motivo: 'cupo',
+      detalle: 'Ya completaste el 100% de las franjas contratadas para ' + vehiculo + ' en ' + sede +
+        ' (' + (cuota.cantidad > 0 ? 'cupo de ' + fmtTime12(hora) + ' (' + cuota.franja + ') ya cubierto' : fmtTime12(hora) + ' no tiene cupo base asignado') +
+        '); este turno excede esa cuota y requiere aprobación de Planner/Admin.'
     };
   }
   return { requiere: false };
@@ -8040,11 +8024,10 @@ function routesForConsolidadoManana(sedeFiltro, aliadoFiltro) {
   }).sort(function (a, b) { return a.sede.localeCompare(b.sede) || a.hora.localeCompare(b.hora); });
 }
 /* FIX "No muestra si es Adicional alguno" (reporte real, tabla de detalle de 'Avance y Carga T+1'): esta
-   fila nunca llamaba a turnoAdicionalRowBadgeHtml/descalceFranjaTagHtml -- a diferencia de las otras 3
-   tablas de turnos de la plataforma (rowHtmlConsolidado/rowHtmlDespacho/rowHtmlSeguimiento, que sí las
-   incluyen), así que un turno marcado como Adicional (o con Descalce de Franja) por dentro no tenía ningún
-   indicio visual en ESTA tabla puntual -- el chip agregado de "Avance de Cuotas" arriba sí lo contaba, pero
-   nada en la fila real del mensajero afectado lo mostraba. */
+   fila nunca llamaba a turnoAdicionalRowBadgeHtml -- a diferencia de las otras 3 tablas de turnos de la
+   plataforma (rowHtmlConsolidado/rowHtmlDespacho/rowHtmlSeguimiento, que sí la incluyen), así que un turno
+   marcado como Adicional por dentro no tenía ningún indicio visual en ESTA tabla puntual -- el chip agregado
+   de "Avance de Cuotas" arriba sí lo contaba, pero nada en la fila real del mensajero afectado lo mostraba. */
 function consolManDetalleRowHtml(route) {
   var m = getMensajero(route.mensajeroId), est = computeEstado(route);
   return '<tr data-route="' + route.id + '">' +
@@ -8052,7 +8035,7 @@ function consolManDetalleRowHtml(route) {
     '<td><div class="courier"><div><div class="courier-name">' + escapeHtml(m.nombre) + '</div><div class="courier-sub">Placa ' + escapeHtml(m.placa) + '</div></div></div></td>' +
     '<td>' + escapeHtml(route.vehiculo) + '</td>' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
-    '<td><span class="badge ' + badgeClassFor(est.code) + '"><i></i>' + est.label + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + tipologiaExcepcionTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClassFor(est.code) + '"><i></i>' + est.label + '</span>' + turnoAdicionalRowBadgeHtml(route) + tipologiaExcepcionTagHtml(route) + '</td>' +
     '<td>' + escapeHtml(route.sede) + '</td>' +
     '</tr>';
 }
@@ -8261,7 +8244,7 @@ function rowHtmlConsolidado(route) {
       '</div></td>' +
     '<td>' + route.vehiculo + '</td>' +
     '<td>' + fmtTime12(route.hora) + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + tipologiaExcepcionTagHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + tipologiaExcepcionTagHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td><div class="row-actions">' + actions + '</div></td>' +
     '</tr>';
 }
@@ -8839,7 +8822,7 @@ function rowHtmlDespacho(route) {
     '<td>' + fmtTime12(route.salida) + '</td>' +
     '<td>' + maletaCell + '</td>' +
     '<td>' + celularCell + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + tipologiaExcepcionTagHtml(route) + demoraPreviaTagHtml + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + tipologiaExcepcionTagHtml(route) + demoraPreviaTagHtml + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td class="courier-sub">' + observacionesDespachoCellHtml(route, puedeGestionar && !route.salida) + '</td>' +
     '<td><div class="row-actions">' + actions + '</div></td>' +
     '</tr>';
@@ -9685,7 +9668,7 @@ function rowHtmlSeguimiento(route) {
       '</div></td>' +
     '<td>' + route.vehiculo + '</td>' +
     '<td>' + route.sede + '</td>' +
-    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + descalceFranjaTagHtml(route) + tipologiaExcepcionTagHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
+    '<td><span class="badge ' + badgeClass + '"><i></i>' + est.label + estadoInfoTipHtml(est.code) + '</span>' + turnoAdicionalRowBadgeHtml(route) + tipologiaExcepcionTagHtml(route) + rutaAsignadaTagHtml(route, est) + dockOverduePagoTagHtml(route, est) + sustitucionPenaltyTagHtml(route, est) + solicitudPlannerImpactoTagHtml(route) + '</td>' +
     '<td><div class="row-actions">' + accion + '</div></td>' +
     '</tr>';
 }
@@ -15258,7 +15241,7 @@ function submitTurno(e) {
       registrarCreacionTurno(turnoPendienteAprobacion, state.user.nombre);
       registrarHistorialCambio(turnoPendienteAprobacion, {
         tipo: 'aprobacion_cuota', accion: 'solicitado',
-        motivo: (aprobacion.motivo === 'festivo' ? 'Programación en día festivo' : aprobacion.motivo === 'domingo' ? 'Programación como Recurso Adicional (domingo)' : aprobacion.motivo === 'tipologia' ? 'Excepción de Tipología' : aprobacion.motivo === 'descalce_franja' ? 'Descalce de Franja' : 'Cupo excedido') + ': ' + aprobacion.detalle,
+        motivo: (aprobacion.motivo === 'festivo' ? 'Programación en día festivo' : aprobacion.motivo === 'domingo' ? 'Programación como Recurso Adicional (domingo)' : aprobacion.motivo === 'tipologia' ? 'Excepción de Tipología' : 'Cupo excedido') + ': ' + aprobacion.detalle,
         horaAnterior: null, horaPropuesta: null, por: state.user.nombre
       });
       /* FIX "Ajustes de UX para RappiBoy": el toast antes solo decía "quedó Pendiente de Aprobación", sin
@@ -16113,9 +16096,10 @@ function clasificarFilasCargaMasiva(filas) {
       ? { requiere: true, motivo: 'tipologia', detalle: state.user.aliado + ' requiere usar ' + cuotasVehiculoLabel(f.vehiculo, country) + ' en ' + f.sede + '.' }
       : evaluarAprobacionCuota(f.sede, state.user.aliado, f.vehiculo, f.hora, TOMORROW_STR);
     if (aprobacion.requiere) {
-      /* Ver FIX "No puede haber adicionales... sin previa aprobación": 'descalce_franja' ahora llega aquí
-         también (antes era requiere:false, invisible y auto-aceptado) -- mismo tratamiento 'adicional' que
-         cupo/domingo/festivo/tipología, con el motivo correcto vía cuotaCausalLabel. */
+      /* Ver FIX "No puede haber adicionales... sin previa aprobación": una fila que ya completó el 100% de
+         sus franjas pactadas y pide un recurso más ahora cae aquí como Cupo Excedido normal (antes era
+         requiere:false, invisible y auto-aceptado) -- mismo tratamiento 'adicional' que cupo/domingo/
+         festivo/tipología, con el motivo correcto vía cuotaCausalLabel. */
       f.clasificacion = 'adicional';
       f.motivo = cuotaCausalLabel(aprobacion.motivo) + ': ' + aprobacion.detalle;
     } else {
