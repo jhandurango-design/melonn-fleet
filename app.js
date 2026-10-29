@@ -3618,7 +3618,19 @@ function tipologiaHabilitada(sede, aliado, vehiculo) {
    se permite como Adicional genuino cuando TODAS las franjas contratadas de ese mismo vehículo para ese
    día ya están 100% completas -- en ese caso no se está "saltando" ningún hueco (el problema real de
    Cordiandina), es capacidad extra agregada después de cubrir el 100% de lo pactado. Si queda aunque sea
-   una franja contratada incompleta, se sigue rechazando igual que antes. */
+   una franja contratada incompleta, se sigue rechazando igual que antes.
+   FIX "Descalce de Franja no debe ser posible si quedan cuotas sin cumplir" (confirmado con el usuario:
+   "Primero debe cumplir con las cuotas y después ahí sí se aceptan los turnos adicionales... pero con
+   previa autorización" -- reporte real Rapiboy/Cordiandina): el chequeo de "coincide con una franja
+   contratada" (línea de abajo) devolvía true de inmediato con solo que EXISTIERA una fila de matriz para
+   esa hora exacta -- sin importar si esa franja puntual YA estaba llena. Eso saltaba por completo el
+   chequeo de "¿quedan otras franjas de este vehículo sin cubrir?" para el caso más común de Descalce de
+   Franja (el Aliado elige una hora que SÍ es una franja pactada, pero ya está completa, mientras OTRA
+   franja del mismo vehículo/día sigue con cupo abierto) -- dejaba pasar directo a evaluarAprobacionCuota
+   (ahora pendiente de aprobación, antes se auto-aceptaba) sin redirigir primero al hueco real disponible.
+   Ahora una franja exacta pero YA LLENA cae al mismo chequeo de "todas las franjas completas" que ya
+   aplicaba a una hora sin ninguna franja -- Descalce de Franja (pendiente de aprobación) solo es alcanzable
+   una vez el 100% de las franjas contratadas de ese vehículo/día ya está cubierto, nunca antes. */
 function horaPerteneceAFranjaContratada(sede, aliado, vehiculo, hora, fecha) {
   var country = countryForSede(sede);
   if (!cuotasActivoPais(country) || esFlotaPropia(aliado)) return true;
@@ -3627,7 +3639,8 @@ function horaPerteneceAFranjaContratada(sede, aliado, vehiculo, hora, fecha) {
   var matriz = fecha === TODAY_STR ? state.cuotasMatrizVigenteHoy : state.cuotasMatriz;
   var filasVehiculo = matriz.filter(function (c) { return c.sede === sede && c.aliado === aliado && c.vehiculo === vehiculo; });
   if (!filasVehiculo.length) return true;
-  if (filasVehiculo.some(function (c) { return c.dia === dia && c.franja === hora && c.cantidad > 0; })) return true;
+  var franjaExacta = filasVehiculo.find(function (c) { return c.dia === dia && c.franja === hora && c.cantidad > 0; });
+  if (franjaExacta && turnosProgramadosCount(sede, aliado, fecha, franjaExacta.franja, vehiculo) < franjaExacta.cantidad) return true;
   var franjasDelDia = filasVehiculo.filter(function (c) { return c.dia === dia && c.cantidad > 0; });
   if (!franjasDelDia.length) return true;
   return franjasDelDia.every(function (c) { return turnosProgramadosCount(sede, aliado, fecha, c.franja, c.vehiculo) >= c.cantidad; });
