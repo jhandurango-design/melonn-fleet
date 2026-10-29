@@ -20885,8 +20885,19 @@ function aplicarRolActivo() {
    Auth.getUserScopes().bodegaId, así que basta reasignarla y re-emitir el claim para que TODOS los módulos
    de Bodega (Despacho, Mi Flota, Alertas, Solicitudes y Cambios...) recalculen su alcance con el próximo
    render -- ninguno de ellos necesita saber que este usuario tiene más de una bodega. Se persiste de
-   inmediato (localStorage + Supabase) para que la próxima vez que inicie sesión recuerde en cuál se quedó. */
-function cambiarBodegaActivaUsuario(sedeId) {
+   inmediato (localStorage + Supabase) para que la próxima vez que inicie sesión recuerde en cuál se quedó.
+   FIX "Cambio de bodega activa no trae datos de la nueva bodega sin recargar" (reporte real, usuario con
+   varias bodegas): Auth.setCurrentUser(...) de abajo SOLO actualiza el objeto de claims local que consulta
+   canDo()/Auth.getUserScopes() -- nunca el JWT real que Supabase usa para decidir RLS (las políticas
+   authenticated_select_app_turnos/app_mensajeros filtran literalmente por auth.jwt()->>'bodegaId', el valor
+   congelado en el token desde el último mint_with_role, ver fijarSessionTokenConRol). Cambiar la bodega aquí
+   nunca volvía a emitir ese token -- a diferencia del cambio de ROL (ver confirmarSeleccionPerfil, que sí
+   hace await fijarSessionTokenConRol antes de continuar), así que cualquier pull posterior (incluido
+   syncAndRender, que de por sí NUNCA llama a scPullAll -- es solo un re-render local) seguía gateado por la
+   bodega VIEJA. Los datos de la bodega nueva nunca habían llegado a state.turnos/state.mensajeros --
+   solo un refresh completo (login de cero, que sí remintea) los traía. Ahora se espera el push del nuevo
+   state.user.sede, LUEGO el remint real, y solo entonces se dispara un scPullAll() de verdad. */
+async function cambiarBodegaActivaUsuario(sedeId) {
   if (!state.user || state.user.role !== 'BODEGA' || state.user.sede === sedeId) return;
   if (!Array.isArray(state.user.sedes) || state.user.sedes.indexOf(sedeId) === -1) return;
   state.user.sede = sedeId;
@@ -20897,15 +20908,19 @@ function cambiarBodegaActivaUsuario(sedeId) {
     aliadoId: null,
   });
   persistUsers();
-  /* Ver requerimiento "Auditoría de Desconexiones Intermitentes con Supabase": guardar en cuál bodega quedó
-     esta cuenta es puramente una conveniencia de la PRÓXIMA sesión (ver completarInicioSesion, que lee
-     user.sede) -- un fallo de red aquí no debe generar el aviso intrusivo "Sin conexión con Supabase" (que sí
-     tiene sentido para un guardado que el usuario espera ver confirmado, como crear un turno) ni, mucho
-     menos, bloquear o retrasar el cambio de bodega en curso, que ya aplicó 100% en memoria/localStorage un
-     momento antes. silencioso=true + try/catch defensivo (aunque scPushRows ya nunca rechaza su promesa, ver
-     su propio contrato) para blindar explícitamente este flujo contra cualquier fallo inesperado. */
-  try { scPushRows('app_users', [state.user], undefined, true); } catch (e) {}
   renderContextPill();
+  toast('warn', 'Cambiando de bodega…', 'Actualizando a ' + sedeId + '.');
+  /* mint_with_role (dentro de fijarSessionTokenConRol) relee el usuario FRESCO desde la base de datos con la
+     Service Role Key -- necesita que este push ya haya comprometido su transacción, o remintearía todavía con
+     la bodega vieja. Mismo criterio de "Auditoría de Desconexiones Intermitentes con Supabase" que antes: un
+     fallo de red aquí no debe disparar el aviso intrusivo de reconexión, silencioso=true. */
+  var pushUsuarioBodega = { ok: true };
+  try { pushUsuarioBodega = await scPushRows('app_users', [state.user], undefined, true); } catch (e) {}
+  var mintResultadoBodega = await fijarSessionTokenConRol(state.user);
+  if (!mintResultadoBodega.ok || (pushUsuarioBodega && pushUsuarioBodega.ok === false)) {
+    toast('warn', 'Cambio de bodega sin confirmar con el servidor', 'No se pudo validar el cambio a ' + sedeId + ' -- si los datos no se actualizan, recarga la página.');
+  }
+  await scPullAll();
   toast('ok', 'Bodega activa cambiada', 'Ahora estás operando en ' + sedeId + '.');
   syncAndRender(true);
 }
