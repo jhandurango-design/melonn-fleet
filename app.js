@@ -19021,7 +19021,7 @@ var AYUDA_ASISTENTE_SINONIMOS = {
   jefe: 'planner', jefa: 'planner', supervisor: 'planner', coordinador: 'planner', coordinadora: 'planner',
   proveedor: 'aliado', proveedores: 'aliado', empresa: 'aliado', transportadora: 'aliado', operador: 'aliado',
   almacen: 'bodega', deposito: 'bodega', bodeguero: 'bodega',
-  anular: 'cancelar', anulacion: 'cancelar', cancelo: 'cancelar', cancele: 'cancelar', cancelada: 'cancelar',
+  anular: 'cancelacion', anulacion: 'cancelacion', cancelo: 'cancelacion', cancele: 'cancelacion', cancelada: 'cancelacion', cancelar: 'cancelacion',
   borrar: 'eliminar', borro: 'eliminar', elimino: 'eliminar', quitar: 'eliminar', remover: 'eliminar',
   cambiar: 'editar', cambio: 'editar', modificar: 'editar', corregir: 'editar', ajustar: 'editar', actualizar: 'editar',
   reemplazar: 'reemplazo', sustituir: 'reemplazo', sustitucion: 'reemplazo', reemplazando: 'reemplazo',
@@ -19048,9 +19048,19 @@ var AYUDA_ASISTENTE_STOPWORDS = ['el', 'la', 'los', 'las', 'de', 'del', 'al', 'a
 function ayudaAsistenteNormalizarTexto(s) {
   return (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
+/* Stemmer de plural MUY simple (es->e/"" , s->"") -- aplicado ANTES del diccionario de sinónimos, así
+   "mensajeros"/"turnos"/"solicitudes" caen al mismo token que su singular sin tener que listar cada plural a
+   mano en AYUDA_ASISTENTE_SINONIMOS. Heurística, no un stemmer lingüístico real -- umbral de longitud mínima
+   para no deformar palabras cortas donde "s" es parte de la raíz (ej. "mas", "dos"). */
+function ayudaAsistenteDesplural(w) {
+  if (w.length > 6 && /es$/.test(w)) return w.slice(0, -2);
+  if (w.length > 4 && /s$/.test(w)) return w.slice(0, -1);
+  return w;
+}
 function ayudaAsistenteTokenizar(s) {
   var limpio = ayudaAsistenteNormalizarTexto(s).replace(/[^a-z0-9\s]/g, ' ');
   return limpio.split(/\s+/).filter(function (w) { return w && AYUDA_ASISTENTE_STOPWORDS.indexOf(w) === -1; })
+    .map(function (w) { return ayudaAsistenteDesplural(w); })
     .map(function (w) { return AYUDA_ASISTENTE_SINONIMOS[w] || w; });
 }
 /* Índice reconstruido en cada búsqueda (no en cada render -- es barato, nunca pasa de unas pocas decenas de
