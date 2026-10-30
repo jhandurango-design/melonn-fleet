@@ -20784,7 +20784,7 @@ function cancelConfigTab(tab) {
    reabierto en caliente desde el Header ("Cambiar de Perfil / Rol", ver btnCambiarPerfil) -- ver
    confirmarSeleccionPerfil. */
 var pendingRoleSelectionUser = null;
-function startSession(user) {
+async function startSession(user) {
   if (user.mustChangePassword) {
     pendingFirstLoginUser = user;
     document.getElementById('formCambioObligatorio').reset();
@@ -20799,9 +20799,19 @@ function startSession(user) {
     return;
   }
   user.role = (user.roles && user.roles[0]) || user.role;
-  /* Login de un solo rol (sin selección de perfil): sigue sin bloquear -- el usuario entra directo a su
-     único rol, sin la ventana de "cambio en caliente" que motivó el FIX de arriba (ver fijarSessionTokenConRol). */
-  fijarSessionTokenConRol(user);
+  /* FIX "Pendiente fantasma de Cuota generado justo al primer login" (reporte real: Cordiandina/Barranquilla,
+     viernes -- el Sistema generó una plaza "Pendiente/Por Confirmar" de más aunque los 5 turnos reales del día
+     ya cuadraban exacto con la cuota contratada). Causa raíz: MISMO hallazgo que cambiarBodegaActivaUsuario/
+     confirmarSeleccionPerfil (ver sus propios comentarios) pero en un TERCER punto de entrada -- este login de
+     un solo rol disparaba fijarSessionTokenConRol() SIN esperarlo antes de completarInicioSesion(), cuyo
+     scPullAll() podía arrancar (y, en una carrera desafortunada, hasta resolver) mientras supabaseAuthClient
+     todavía llevaba el token "de paso" sin el claim app_role (ver fijarSessionTokenNoBloqueante) -- RLS no
+     reconoce ninguna rama de política sin ese claim, así que una lectura de app_turnos en esa ventana corta
+     filas reales. cierreCuotasNocturnoCatchUp(), encadenado justo después de ese mismo scPullAll(), heredaba
+     ese state.turnos incompleto y podía creer que faltaba cuota que en realidad ya estaba cubierta. La rama de
+     primer-login multirol (pendingRoleSelectionUser, ver confirmarSeleccionPerfil) ya esperaba el remint
+     correctamente -- este era el único de los 3 puntos de entrada de sesión que no lo hacía. */
+  await fijarSessionTokenConRol(user);
   completarInicioSesion(user);
 }
 function completarInicioSesion(user) {
