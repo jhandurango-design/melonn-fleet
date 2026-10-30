@@ -4166,16 +4166,36 @@ function cierreJornadaSweep() {
    terminó simplemente nunca ocurría (reporte real: una Solicitud de "Prolongación de Flota" de Easyway, y 20
    turnos "Pendiente/Por Confirmar" de varios días y aliados distintos, todos debieron cerrarse solos y
    quedaron congelados indefinidamente). Respaldo de alcance, igual que cierreCuotasNocturnoCatchUp: se
-   dispara una vez por sesión, justo después del pull fresco de completarInicioSesion() -- cierra TODO lo que
-   siga 'pendiente' de CUALQUIER día estrictamente anterior a hoy (< TODAY_STR, no solo "ayer" -- cubre
-   también una racha de varios días sin que nadie abriera la plataforma a tiempo). Empuja sus propios cambios
-   de inmediato (a diferencia de cierreJornadaSweep) porque no puede confiar en que la sesión que haga este
-   catch-up vaya a generar más actividad de autoguardado después -- y porque, a diferencia de scPushAll
-   (gateado por rol, ver ese comentario), este cierre debe persistir sin importar qué rol sea el primero en
-   iniciar sesión tras el hueco. */
+   dispara una vez por sesión, justo después del pull fresco de completarInicioSesion().
+   FIX "Backlog histórico completo bloqueando a Bodega de una sola vez" (reporte real: el primer catch-up tras
+   desplegar este fix sacó a la luz 55 turnos de Demora en Despacho/Flota Propia sin regularizar, acumulados
+   entre el 20 y el 27 de octubre -- el barrido original procesaba CUALQUIER fecha < TODAY_STR sin límite,
+   así que de golpe abrió el modal bloqueante de Regularización con semanas de deuda histórica en vez de
+   "la jornada anterior" que el propio texto del modal promete. pendienteAsignacion/notificadoPorAliado/
+   solicitud pendiente se auto-resuelven solos sin intervención de Bodega, pero dock_overdue/Flota Propia SÍ
+   exigen que un humano elija una opción por cada turno uno por uno -- represar semanas de esos de un tirón es
+   mala experiencia operativa, aunque sea matemáticamente correcto). Ahora se acota a UN SOLO día por
+   ejecución -- el más reciente que todavía tenga algo sin resolver (fechaPendienteDeCierreMasReciente) -- y,
+   como se repite en cada login, una racha larga sin nadie conectado se va destrabando un día a la vez en
+   logins sucesivos, en vez de represarse entera para el primer login que la detecte. */
+function fechaPendienteDeCierreMasReciente() {
+  var max = null;
+  function considerar(fecha) { if (fecha < TODAY_STR && (!max || fecha > max)) max = fecha; }
+  state.turnos.forEach(function (route) {
+    if (route.fecha >= TODAY_STR) return;
+    var m = getMensajero(route.mensajeroId);
+    var necesitaAtencion = (esFlotaPropia(m.aliado) ? (!route.salida && !route.flotaPropiaNoDespachado) : computeEstado(route).code === 'dock_overdue') ||
+      route.pendienteAsignacion || (route.notificadoPorAliado && !route.arriboResolucion) || (route.solicitud && route.solicitud.estado === 'pendiente');
+    if (necesitaAtencion) considerar(route.fecha);
+  });
+  state.solicitudesGenerales.forEach(function (sol) { if (sol.estado === 'pendiente') considerar(sol.fecha); });
+  return max;
+}
 function cierreJornadaCatchUp() {
   if (!state.user) return;
-  var resultado = cierreJornadaCompletar(function (fecha) { return fecha < TODAY_STR; },
+  var fechaObjetivo = fechaPendienteDeCierreMasReciente();
+  if (!fechaObjetivo) return;
+  var resultado = cierreJornadaCompletar(function (fecha) { return fecha === fechaObjetivo; },
     'Cierre de Jornada (Chequeo de Alcance al Iniciar Sesión) — sin gestión manual antes de la medianoche de su día.');
   if (resultado.turnosModificados.length) scPushRows('app_turnos', resultado.turnosModificados, undefined, true);
   if (resultado.solicitudesModificadas.length) scPushRows('app_solicitudes_generales', resultado.solicitudesModificadas, undefined, true);
