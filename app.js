@@ -19000,6 +19000,161 @@ function ayudaContentByRole(role) {
 
   return { sub: sub, panels: panels, faqs: faqs };
 }
+/* ---------------- Asistente de Ayuda (buscador inteligente local, sin IA externa) ----------------
+   Responde preguntas libres de uso de la plataforma buscando SOLO dentro del contenido de
+   ayudaContentByRole(role) ya segregado por rol (mismos panels/faqs que las pestañas de abajo) -- nunca tiene
+   acceso en memoria al contenido de otro rol, así que estructuralmente no puede filtrar información fuera de
+   alcance. No es una IA generativa: nunca inventa una respuesta nueva, solo encuentra y muestra el artículo o
+   la FAQ ya existente más relevante -- el diccionario de sinónimos (AYUDA_ASISTENTE_SINONIMOS) es lo que le
+   da tolerancia a que la pregunta no use exactamente las mismas palabras del texto original. */
+function ayudaAsistenteStripHtml(html) {
+  var div = document.createElement('div');
+  div.innerHTML = html;
+  return div.textContent || div.innerText || '';
+}
+/* Claves y valores siempre en minúscula y SIN tildes/ñ -- ayudaAsistenteNormalizarTexto (NFD + strip de
+   diacríticos) convierte "ñ" en "n" antes de tokenizar, así que el diccionario nunca necesita esa letra. */
+var AYUDA_ASISTENTE_SINONIMOS = {
+  chofer: 'mensajero', choferes: 'mensajero', conductor: 'mensajero', conductores: 'mensajero',
+  repartidor: 'mensajero', repartidores: 'mensajero', domiciliario: 'mensajero', domiciliarios: 'mensajero',
+  motorizado: 'mensajero', motorizados: 'mensajero',
+  jefe: 'planner', jefa: 'planner', supervisor: 'planner', coordinador: 'planner', coordinadora: 'planner',
+  proveedor: 'aliado', proveedores: 'aliado', empresa: 'aliado', transportadora: 'aliado', operador: 'aliado',
+  almacen: 'bodega', deposito: 'bodega', bodeguero: 'bodega',
+  anular: 'cancelar', anulacion: 'cancelar', cancelo: 'cancelar', cancele: 'cancelar', cancelada: 'cancelar',
+  borrar: 'eliminar', borro: 'eliminar', elimino: 'eliminar', quitar: 'eliminar', remover: 'eliminar',
+  cambiar: 'editar', cambio: 'editar', modificar: 'editar', corregir: 'editar', ajustar: 'editar', actualizar: 'editar',
+  reemplazar: 'reemplazo', sustituir: 'reemplazo', sustitucion: 'reemplazo', reemplazando: 'reemplazo',
+  reprogramar: 'reprogramacion', reagendar: 'reprogramacion', aplazar: 'reprogramacion', posponer: 'reprogramacion',
+  aprobar: 'aceptar', autorizar: 'aceptar', aprobacion: 'aceptar',
+  rechazar: 'negar', niego: 'negar', niega: 'negar',
+  retraso: 'tarde', demora: 'tarde', tardanza: 'tarde', atraso: 'tarde', tarda: 'tarde',
+  falta: 'ausencia', ausente: 'ausencia', inasistencia: 'ausencia',
+  penalizacion: 'afectacion', sancion: 'afectacion', multa: 'afectacion', castigo: 'afectacion', cobro: 'afectacion',
+  clave: 'contrasena', password: 'contrasena', pasword: 'contrasena',
+  camioneta: 'van', furgon: 'van', furgoneta: 'van',
+  horario: 'hora', citacion: 'hora',
+  pedido: 'solicitud', peticion: 'solicitud', requerimiento: 'solicitud',
+  bloqueada: 'bloqueo', bloqueado: 'bloqueo', candado: 'bloqueo',
+  cuenta: 'usuario', acceso: 'usuario',
+  reporte: 'historial', registro: 'historial', bitacora: 'historial',
+  ruta: 'turno', cupo: 'turno', viaje: 'turno'
+};
+var AYUDA_ASISTENTE_STOPWORDS = ['el', 'la', 'los', 'las', 'de', 'del', 'al', 'a', 'en', 'por', 'para', 'con', 'sin',
+  'un', 'una', 'unos', 'unas', 'que', 'como', 'cuando', 'donde', 'cual', 'cuales', 'quien', 'quienes', 'es', 'son',
+  'esta', 'estan', 'estoy', 'puedo', 'puede', 'pueden', 'debo', 'debe', 'hay', 'mi', 'tu', 'su', 'me', 'se', 'lo',
+  'le', 'les', 'y', 'o', 'u', 'no', 'si', 'ya', 'muy', 'mas', 'pero', 'entonces', 'esto', 'eso', 'aquello', 'soy',
+  'eres', 'somos', 'voy', 'vas', 'va', 'este', 'ese', 'esa', 'habia', 'hace', 'hizo', 'tengo', 'tiene', 'tienen'];
+function ayudaAsistenteNormalizarTexto(s) {
+  return (s || '').toString().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+function ayudaAsistenteTokenizar(s) {
+  var limpio = ayudaAsistenteNormalizarTexto(s).replace(/[^a-z0-9\s]/g, ' ');
+  return limpio.split(/\s+/).filter(function (w) { return w && AYUDA_ASISTENTE_STOPWORDS.indexOf(w) === -1; })
+    .map(function (w) { return AYUDA_ASISTENTE_SINONIMOS[w] || w; });
+}
+/* Índice reconstruido en cada búsqueda (no en cada render -- es barato, nunca pasa de unas pocas decenas de
+   ítems) a partir de EXACTAMENTE las pestañas visibles para este rol (ayudaTabsVisibles) y su contenido
+   (ayudaContentByRole) -- nunca incluye nada de un rol ni de un módulo que este usuario no tenga habilitado. */
+function ayudaAsistenteConstruirIndice(content, tabs) {
+  var idx = [];
+  tabs.forEach(function (t) {
+    (content.faqs[t.id] || []).forEach(function (item) {
+      idx.push({
+        tipo: 'faq', tabLabel: t.label, titulo: item[0], cuerpoHtml: '<p>' + item[1] + '</p>',
+        tokensTitulo: ayudaAsistenteTokenizar(ayudaAsistenteStripHtml(item[0])),
+        tokensCuerpo: ayudaAsistenteTokenizar(ayudaAsistenteStripHtml(item[1]))
+      });
+    });
+    (content.panels[t.id] || []).forEach(function (html) {
+      var tituloMatch = /panel-title">([^<]*)</.exec(html);
+      var titulo = tituloMatch ? tituloMatch[1] : t.label;
+      /* Se quita el <section class="panel"> envolvente y el <p class="panel-title"> (ya se muestra aparte,
+         ver ayuda-asistente-respuesta-titulo) -- si no, quedaría un .panel anidado dentro de la propia
+         tarjeta de respuesta del asistente, con el título duplicado. */
+      var cuerpoInterno = html.replace(/^<section[^>]*>/, '').replace(/<\/section>\s*$/, '').replace(/<p class="panel-title">[^<]*<\/p>/, '');
+      idx.push({
+        tipo: 'panel', tabLabel: t.label, titulo: titulo, cuerpoHtml: cuerpoInterno,
+        tokensTitulo: ayudaAsistenteTokenizar(titulo), tokensCuerpo: ayudaAsistenteTokenizar(ayudaAsistenteStripHtml(html))
+      });
+    });
+  });
+  return idx;
+}
+/* Puntaje por solapamiento de tokens (título pesa 3x más que cuerpo, ya que un match en el título es mucho
+   más específico) + bono si la frase completa aparece literal dentro del título. 'fuerte' marca si hubo al
+   menos 1 coincidencia de título -- usado para decidir si se puede mostrar una respuesta directa o si hay que
+   caer en el modo "¿te refieres a...?". */
+function ayudaAsistenteBuscar(pregunta, indice) {
+  var qTokens = ayudaAsistenteTokenizar(pregunta);
+  if (!qTokens.length) return [];
+  var qSet = {};
+  qTokens.forEach(function (t) { qSet[t] = (qSet[t] || 0) + 1; });
+  var qUnicos = Object.keys(qSet);
+  var fraseNorm = ayudaAsistenteNormalizarTexto(pregunta).replace(/[^a-z0-9\s]/g, ' ').trim();
+  var resultados = indice.map(function (item) {
+    var scoreTitulo = 0, scoreCuerpo = 0;
+    qUnicos.forEach(function (t) {
+      if (item.tokensTitulo.indexOf(t) !== -1) scoreTitulo += qSet[t];
+      if (item.tokensCuerpo.indexOf(t) !== -1) scoreCuerpo += qSet[t];
+    });
+    var score = scoreTitulo * 3 + scoreCuerpo;
+    if (fraseNorm.length > 3 && ayudaAsistenteNormalizarTexto(item.titulo).indexOf(fraseNorm) !== -1) score += 10;
+    return { item: item, score: score, fuerte: scoreTitulo > 0 };
+  }).filter(function (r) { return r.score > 0; });
+  resultados.sort(function (a, b) { return b.score - a.score; });
+  return resultados;
+}
+/* Shell estático (no depende de la pregunta/resultados en curso) -- se renderiza vía renderMetricsIfChanged,
+   así que después del primer render de cada rol queda intacto en cada tick de Gravity (cada ~1s), sin perder
+   el foco/valor del input ni el resultado ya mostrado. Las 3 primeras FAQ de "General/Inicio" del rol activo
+   sirven de preguntas sugeridas iniciales -- mismo contenido, ninguna redacción nueva. */
+function ayudaAsistenteShellHtml(content) {
+  var sugeridas = (content.faqs.general || []).slice(0, 3);
+  var chipsHtml = sugeridas.length ? '<div class="ayuda-asistente-sugeridas">' + sugeridas.map(function (item) {
+    return '<button type="button" class="help-pill" data-asistente-pregunta="' + escapeHtml(item[0]) + '">' + item[0] + '</button>';
+  }).join('') + '</div>' : '';
+  return '<section class="panel ayuda-asistente-panel">' +
+    '<p class="panel-title">Asistente de Ayuda</p>' +
+    '<p class="ayuda-asistente-sub">Escribe tu pregunta sobre el uso de la plataforma — busca únicamente dentro de los artículos y preguntas frecuentes disponibles para tu rol, sin acceso a la información de otros roles.</p>' +
+    '<div class="ayuda-asistente-bar">' +
+      '<input type="text" id="ayudaAsistentePregunta" placeholder="Ej. ¿Cómo cambio el mensajero de un turno?" maxlength="200" autocomplete="off">' +
+      '<button type="button" class="btn btn-primary" id="ayudaAsistenteBtn">Preguntar</button>' +
+    '</div>' +
+    chipsHtml +
+    '<div id="ayudaAsistenteResultados"></div>' +
+  '</section>';
+}
+/* Escribe directamente en #ayudaAsistenteResultados (fuera del ciclo de renderMetricsIfChanged de arriba) --
+   así una búsqueda nunca se pierde en el siguiente tick de Gravity, y escribir en el input no dispara ningún
+   re-render que le haga perder el foco. */
+function ayudaAsistenteRenderResultados(pregunta, role) {
+  var cont = document.getElementById('ayudaAsistenteResultados');
+  if (!cont) return;
+  var preguntaLimpia = (pregunta || '').trim();
+  if (!preguntaLimpia) { cont.innerHTML = ''; return; }
+  var content = ayudaContentByRole(role);
+  var tabs = ayudaTabsVisibles();
+  var indice = ayudaAsistenteConstruirIndice(content, tabs);
+  var resultados = ayudaAsistenteBuscar(preguntaLimpia, indice);
+  var fuertes = resultados.filter(function (r) { return r.fuerte; });
+  var mejor = fuertes[0] || resultados[0];
+  var html = '';
+  if (mejor && mejor.score >= 3) {
+    var resto = resultados.filter(function (r) { return r.item !== mejor.item; }).slice(0, 3);
+    html = '<div class="ayuda-asistente-respuesta"><p class="ayuda-asistente-respuesta-fuente">' + escapeHtml(mejor.item.tabLabel) + '</p>' +
+      '<p class="ayuda-asistente-respuesta-titulo">' + mejor.item.titulo + '</p>' +
+      '<div class="ayuda-asistente-respuesta-cuerpo">' + mejor.item.cuerpoHtml + '</div></div>' +
+      (resto.length ? ('<p class="ayuda-asistente-relacionados-title">También podría interesarte:</p><div class="ayuda-asistente-relacionados">' +
+        resto.map(function (r) { return '<button type="button" class="help-pill" data-asistente-pregunta="' + escapeHtml(r.item.titulo) + '">' + r.item.titulo + '</button>'; }).join('') + '</div>') : '');
+  } else if (resultados.length) {
+    html = '<div class="ayuda-asistente-sin-coincidencia"><p>No encontré una respuesta exacta para "<strong>' + escapeHtml(preguntaLimpia) + '</strong>". ¿Te refieres a alguna de estas?</p>' +
+      '<div class="ayuda-asistente-relacionados">' + resultados.slice(0, 4).map(function (r) { return '<button type="button" class="help-pill" data-asistente-pregunta="' + escapeHtml(r.item.titulo) + '">' + r.item.titulo + '</button>'; }).join('') + '</div></div>';
+  } else {
+    html = '<div class="ayuda-asistente-sin-coincidencia"><p>No encontré nada relacionado con tu pregunta dentro de tu Centro de Ayuda. Prueba con otras palabras, o revisa las pestañas de arriba.</p></div>';
+  }
+  cont.innerHTML = html;
+}
 function renderAyuda() {
   var role = state.user.role;
   var sub = document.getElementById('ayudaSub');
@@ -19009,6 +19164,8 @@ function renderAyuda() {
 
   var content = ayudaContentByRole(role);
   sub.textContent = content.sub;
+
+  renderMetricsIfChanged('ayudaAsistente', ayudaAsistenteShellHtml(content));
 
   var tabsHtml = '<div class="segmented" id="ayudaTabSegment">' + tabs.map(function (t) {
     return '<button type="button" data-tab="' + t.id + '" class="' + (t.id === activeTab ? 'active' : '') + '">' + t.label + '</button>';
@@ -22360,6 +22517,27 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!target) return;
     target.open = true;
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  /* Asistente de Ayuda: igual que #ayudaTabBar/#ayudaContent arriba, el input/botón/resultados son dinámicos
+     (inyectados por ayudaAsistenteShellHtml vía renderMetricsIfChanged) -- se delega sobre el contenedor fijo
+     #ayudaAsistente (ya existe en index.html) en vez de enlazar cada uno directamente. */
+  document.getElementById('ayudaAsistente').addEventListener('click', function (e) {
+    var pill = e.target.closest('[data-asistente-pregunta]');
+    if (pill) {
+      var texto = pill.dataset.asistentePregunta;
+      document.getElementById('ayudaAsistentePregunta').value = texto;
+      ayudaAsistenteRenderResultados(texto, state.user.role);
+      return;
+    }
+    if (e.target.closest('#ayudaAsistenteBtn')) {
+      ayudaAsistenteRenderResultados(document.getElementById('ayudaAsistentePregunta').value, state.user.role);
+    }
+  });
+  document.getElementById('ayudaAsistente').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && e.target && e.target.id === 'ayudaAsistentePregunta') {
+      e.preventDefault();
+      ayudaAsistenteRenderResultados(e.target.value, state.user.role);
+    }
   });
   document.querySelectorAll('#alertasHistRangoSegment button').forEach(function (btn) {
     btn.addEventListener('click', function () {

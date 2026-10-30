@@ -1438,6 +1438,28 @@ button.icon-btn-clear:hover{background-color:#E3DDFB !important;}
 .help-pill{background:#EFEEFC;color:#635BFF;border:none;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:600;white-space:nowrap;cursor:pointer;}
 .help-pill:hover{background:#E3E1FB;}
 
+/* Asistente de Ayuda (buscador local por rol, ver ayudaAsistenteShellHtml/renderAyuda) */
+#ayudaAsistente:empty{margin:0;}
+.ayuda-asistente-panel{margin-bottom:20px;}
+.ayuda-asistente-sub{margin:-6px 0 14px;font-size:12.5px;color:var(--text-secondary);line-height:1.5;}
+.ayuda-asistente-bar{display:flex;gap:10px;align-items:stretch;}
+.ayuda-asistente-bar input{flex:1 1 auto;min-width:0;border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;background:var(--bg-card-soft);color:var(--text-primary);outline:none;transition:border-color .12s ease;}
+.ayuda-asistente-bar input:focus{border-color:var(--lilac-deep);box-shadow:0 0 0 3px var(--lilac-soft);}
+.ayuda-asistente-bar .btn{flex:0 0 auto;}
+.ayuda-asistente-sugeridas{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+.ayuda-asistente-respuesta{margin-top:16px;padding:14px 16px;border:1px solid var(--lilac-deep);border-radius:10px;background:var(--lilac-soft);}
+.ayuda-asistente-respuesta-fuente{margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:.02em;text-transform:uppercase;color:#635BFF;}
+.ayuda-asistente-respuesta-titulo{margin:0 0 8px;font-size:13.5px;font-weight:700;color:var(--text-primary);}
+.ayuda-asistente-respuesta-cuerpo{font-size:12.5px;color:var(--text-secondary);line-height:1.55;}
+.ayuda-asistente-respuesta-cuerpo .panel-title{display:none;}
+.ayuda-asistente-respuesta-cuerpo p{margin:0 0 8px;}
+.ayuda-asistente-respuesta-cuerpo p:last-child{margin-bottom:0;}
+.ayuda-asistente-relacionados-title{margin:14px 0 8px;font-size:11.5px;font-weight:700;color:var(--text-secondary);}
+.ayuda-asistente-relacionados{display:flex;flex-wrap:wrap;gap:8px;}
+.ayuda-asistente-sin-coincidencia{margin-top:16px;padding:14px 16px;border:1px solid var(--border);border-radius:10px;background:var(--bg-card-soft);}
+.ayuda-asistente-sin-coincidencia p{margin:0 0 10px;font-size:12.5px;color:var(--text-secondary);line-height:1.5;}
+:root[data-theme="dark"] .ayuda-asistente-respuesta{background:#2B2050;border-color:#4C3A80;}
+
 /* ---------------- Cumplimiento y Calidad: Sticky Footer Bar de "Exportar Informe" ---------------- */
 /* Ver requerimiento "Refactorización de UI/UX: Simetría de KPIs, Fechas Duales, Agrupación por Bodega y
    Sticky Footer Bar de Exportación", punto 2 (evoluciona el botón flotante simple del requerimiento anterior
