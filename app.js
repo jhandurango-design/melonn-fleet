@@ -4363,8 +4363,19 @@ function cierreCuotasNocturnoCatchUp() {
 function rutasPendientesRegularizacion() {
   return state.turnos.filter(function (r) { return r.pendienteRegularizacion && r.sede === state.user.sede; });
 }
+/* FIX "Formulario de hora se cierra solo casi al instante" (reporte real Bodega: clic en "Despachado" abre el
+   campo de hora y se cierra enseguida, sin tiempo de escribir nada -- el click SÍ llegaba a confirmar, pero
+   con el campo vacío/sin tocar). Causa: renderDespacho() llama a esta función en CADA render (cada ~1s
+   mientras Bodega esté en Despacho, ver gravityTick/syncAndRender) -- antes reiniciaba
+   regularizacionFilaActiva/regularizacionAccionActiva a null SIEMPRE, sin importar si el modal ya estaba
+   abierto con un formulario en curso, cerrando de un portazo cualquier fila que el usuario acabara de abrir
+   un instante antes. Ahora solo inicializa (reset + abrir) la PRIMERA vez que detecta pendientes con el modal
+   todavía cerrado -- mientras siga bloqueante, los renders siguientes no tocan el estado de edición en curso;
+   confirmarRegularizacionDespachado/confirmarRegularizacionCierre (y sus variantes de Flota Propia) ya se
+   encargan de su propio renderModalRegularizacion() tras cada acción resuelta. */
 function abrirModalRegularizacionSiAplica() {
   if (!rutasPendientesRegularizacion().length) { state.modalBloqueante = false; return; }
+  if (state.modalBloqueante) return;
   state.regularizacionFilaActiva = null;
   state.regularizacionAccionActiva = null;
   renderModalRegularizacion();
