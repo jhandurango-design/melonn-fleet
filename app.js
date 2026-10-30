@@ -4048,12 +4048,20 @@ function progMidnightDT() { return parseDT(TOMORROW_STR, '00:00'); }
    gravityTick, ANTES de avanzar TODAY_STR/TOMORROW_STR (ver ese comentario) -- el de más abajo en scanRoutes
    queda como respaldo defensivo, inofensivo en el flujo normal (progMidnightDT() ya apunta a un medianoche
    futuro para cuando scanRoutes llega a correr, así que su propio guard lo vuelve no-op). */
-function cierreJornadaSweep() {
-  if (state.jornadaCerradaFecha === TODAY_STR || state.now < progMidnightDT()) return;
-  state.jornadaCerradaFecha = TODAY_STR;
-  var motivoBase = 'Cierre de Jornada (00:00) — sin gestión manual antes de la medianoche.';
+/* Núcleo reutilizable de cierreJornadaSweep (ver su comentario) — extraído para poder reutilizarlo también
+   desde cierreJornadaCatchUp() (ver más abajo), mismo patrón que cierreCuotasCompletarDeficit/
+   cierreCuotasNocturnoCatchUp. esFechaObjetivo decide qué turnos/solicitudes caen dentro del barrido
+   (=== TODAY_STR para el barrido en vivo -- "el día que ACABA de terminar"; < TODAY_STR para el respaldo de
+   login -- "cualquier día ya pasado", cubre también una racha de varios días sin que nadie abriera la
+   plataforma a tiempo). Devuelve { turnosModificados, solicitudesModificadas } para que el llamador decida
+   si necesita empujarlos él mismo a Supabase (ver cierreJornadaCatchUp) o si le basta con el autoguardado
+   periódico normal de la sesión (cierreJornadaSweep, sin cambios de comportamiento). */
+function cierreJornadaCompletar(esFechaObjetivo, motivoBase) {
+  var turnosModificados = [];
+  var solicitudesModificadas = [];
   state.turnos.forEach(function (route) {
-    if (route.fecha !== TODAY_STR) return;
+    if (!esFechaObjetivo(route.fecha)) return;
+    var tocado = false;
     /* Ver requerimiento "Reconfirmación y Ajustes Finales: Flota Propia México (con Bloqueo Condicional)",
        punto 2: un turno de Flota Propia que llega a la medianoche sin marcar (ni "Se Despacha" ni "No Se
        Despacha") entra al MISMO modal obligatorio de regularización que ya existe para "Demora en Despacho"
@@ -4061,17 +4069,19 @@ function cierreJornadaSweep() {
        2 opciones en vez de 3 (ver regularizacionFilaHtml). Si ya quedó resuelto (route.salida o
        route.flotaPropiaNoDespachado), no requiere nada -- se trata como cualquier otro turno ya cerrado. */
     if (esFlotaPropia(getMensajero(route.mensajeroId).aliado)) {
-      if (!route.salida && !route.flotaPropiaNoDespachado) route.pendienteRegularizacion = true;
+      if (!route.salida && !route.flotaPropiaNoDespachado) { route.pendienteRegularizacion = true; turnosModificados.push(route); }
       return;
     }
     if (computeEstado(route).code === 'dock_overdue') {
       /* Excepción de Demora en Despacho: se preserva tal cual, solo se marca para el modal obligatorio de
          regularización de Bodega (ver requerimiento "Auditoría Integral... Regularización Obligatoria"). */
       route.pendienteRegularizacion = true;
+      turnosModificados.push(route);
       return;
     }
     if (route.pendienteAsignacion) {
       route.pendienteAsignacion = false;
+      tocado = true;
       registrarHistorialCambio(route, {
         tipo: 'cierre_jornada', accion: 'no_gestionada',
         motivo: 'Turno sin mensajero asignado al ' + motivoBase + ' Queda registrado como Incumplimiento Confirmado.',
@@ -4093,6 +4103,7 @@ function cierreJornadaSweep() {
          que nunca llegó a escalar así. La foto y la hora propuesta quedan igual permanentemente en el
          Historial (campo `foto`). */
       route.arriboVeredicto = 'expirado_cierre_jornada';
+      tocado = true;
       registrarHistorialCambio(route, {
         tipo: 'arribo_aliado', accion: 'sin_llegar',
         motivo: 'Falso Arribo del Aliado (resuelto por el sistema) — ' + route.arriboObservacion,
@@ -4105,6 +4116,7 @@ function cierreJornadaSweep() {
       route.solicitud.resueltoPorRol = 'SYSTEM';
       route.solicitud.resueltoEn = fmtClock(state.now);
       route.solicitud.resueltoFecha = TODAY_STR;
+      tocado = true;
       registrarHistorialCambio(route, {
         tipo: route.solicitud.tipo, accion: 'no_gestionada',
         motivo: 'Solicitud sin resolver al ' + motivoBase,
@@ -4112,14 +4124,16 @@ function cierreJornadaSweep() {
         por: 'Sistema Gravity', rol: 'SYSTEM'
       });
     }
+    if (tocado) turnosModificados.push(route);
   });
   state.solicitudesGenerales.forEach(function (sol) {
-    if (sol.estado !== 'pendiente') return;
+    if (sol.estado !== 'pendiente' || !esFechaObjetivo(sol.fecha)) return;
     sol.estado = 'no_gestionada';
     sol.resueltoPor = 'Sistema Gravity';
     sol.resueltoPorRol = 'SYSTEM';
     sol.resueltoEn = fmtClock(state.now);
     sol.resueltoFecha = TODAY_STR;
+    solicitudesModificadas.push(sol);
     /* reemplazo_alerta/reemplazo_cancelacion sí referencian una ruta puntual (sol.detalle.routeId) -- se deja
        también la traza en su Historial del Turno, igual que cualquier otro desenlace de esa ruta. */
     if (sol.detalle && sol.detalle.routeId) {
@@ -4130,9 +4144,41 @@ function cierreJornadaSweep() {
           motivo: 'Solicitud sin resolver al ' + motivoBase,
           horaAnterior: null, horaPropuesta: null, por: 'Sistema Gravity', rol: 'SYSTEM'
         });
+        if (turnosModificados.indexOf(routeRef) === -1) turnosModificados.push(routeRef);
       }
     }
   });
+  return { turnosModificados: turnosModificados, solicitudesModificadas: solicitudesModificadas };
+}
+/* Barrido en vivo (ver comentario grande más arriba, antes de cierreJornadaCompletar) -- disparado desde
+   gravityTick con los valores VIEJOS de TODAY_STR/TOMORROW_STR, el único instante en que progMidnightDT()
+   coincide con la medianoche que ACABA de pasar. Sin cambios de comportamiento: sigue sin empujar nada por su
+   cuenta, confía en el autoguardado periódico normal de la sesión (scPushAll, cada 30 ticks). */
+function cierreJornadaSweep() {
+  if (state.jornadaCerradaFecha === TODAY_STR || state.now < progMidnightDT()) return;
+  state.jornadaCerradaFecha = TODAY_STR;
+  cierreJornadaCompletar(function (fecha) { return fecha === TODAY_STR; }, 'Cierre de Jornada (00:00) — sin gestión manual antes de la medianoche.');
+}
+/* Ver requerimiento "Garantía Real de Cierre de Jornada sin Depender de Medianoche Exacta" (mismo hallazgo que
+   cierreCuotasNocturnoCatchUp, ver su comentario junto a cierreCuotasNocturnoCatchUp): cierreJornadaSweep()
+   SOLO corre desde gravityTick, en el instante exacto en que una pestaña abierta detecta el cruce real de
+   medianoche -- si nadie tenía la plataforma abierta justo en ese segundo, el cierre de jornada del día que
+   terminó simplemente nunca ocurría (reporte real: una Solicitud de "Prolongación de Flota" de Easyway, y 20
+   turnos "Pendiente/Por Confirmar" de varios días y aliados distintos, todos debieron cerrarse solos y
+   quedaron congelados indefinidamente). Respaldo de alcance, igual que cierreCuotasNocturnoCatchUp: se
+   dispara una vez por sesión, justo después del pull fresco de completarInicioSesion() -- cierra TODO lo que
+   siga 'pendiente' de CUALQUIER día estrictamente anterior a hoy (< TODAY_STR, no solo "ayer" -- cubre
+   también una racha de varios días sin que nadie abriera la plataforma a tiempo). Empuja sus propios cambios
+   de inmediato (a diferencia de cierreJornadaSweep) porque no puede confiar en que la sesión que haga este
+   catch-up vaya a generar más actividad de autoguardado después -- y porque, a diferencia de scPushAll
+   (gateado por rol, ver ese comentario), este cierre debe persistir sin importar qué rol sea el primero en
+   iniciar sesión tras el hueco. */
+function cierreJornadaCatchUp() {
+  if (!state.user) return;
+  var resultado = cierreJornadaCompletar(function (fecha) { return fecha < TODAY_STR; },
+    'Cierre de Jornada (Chequeo de Alcance al Iniciar Sesión) — sin gestión manual antes de la medianoche de su día.');
+  if (resultado.turnosModificados.length) scPushRows('app_turnos', resultado.turnosModificados, undefined, true);
+  if (resultado.solicitudesModificadas.length) scPushRows('app_solicitudes_generales', resultado.solicitudesModificadas, undefined, true);
 }
 /* ---------------- Cierre Automático Nocturno de Cuotas (Pendientes del Sistema) ----------------
    Ver requerimiento "Lógica Condicional de 'Pendientes' según Estado de Cuotas (Prendidas/Apagadas)": al
@@ -20840,7 +20886,7 @@ function completarInicioSesion(user) {
      DESPUÉS de que este pull resuelva (nunca antes) -- necesita cuotasMatriz/turnos/
      cierreCuotasNocturnoHechaFecha ya frescos de Supabase para no evaluar un déficit con datos viejos y
      terminar creando un pendiente duplicado que otra sesión ya había cubierto. */
-  scPullAll().then(function () { cierreCuotasNocturnoCatchUp(); });
+  scPullAll().then(function () { cierreCuotasNocturnoCatchUp(); cierreJornadaCatchUp(); });
   showLoadingOverlay();
   resetViewState(); /* ver RESET_VIEW_STATE -- red de seguridad adicional a la de logout() para la restauración
      de sesión al recargar la página (savedId en melonn_session), que llega aquí sin pasar por logout(). */
