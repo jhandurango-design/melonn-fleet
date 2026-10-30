@@ -623,14 +623,31 @@ function scPullTable(table) {
      INSERT manual contra la tabla desde el SQL Editor, cada uno con su propio id), cuál de las 2 es la más
      reciente y debe prevalecer. Se devuelve como { value, updatedAt } en vez de la fila "data" pelada -- scPullTable
      es de uso interno exclusivo de scPullAll, así que este cambio de forma no afecta a nadie más. */
-  function intentoUnico() {
+  /* FIX "Tope silencioso de 1000 filas por tabla" (reporte real: Cordiandina/Bogotá, turnos reales invisibles
+     en state.turnos pese a existir en Supabase -- confirmado con .range(0,1999) devolviendo igual 1000 filas,
+     el límite db-max-rows de PostgREST, NUNCA un error que SC_PULL_RETRY_DELAYS_MS pudiera reintentar). Un
+     .select() sin .range() se corta en silencio en ese tope -- app_turnos ya superó las 1000 filas (1130 al
+     detectar esto) y sigue creciendo cada día, así que CUALQUIER sesión (sin importar timing/rol/caché) queda
+     con un recorte permanente y creciente de turnos reales invisibles -- entre otros síntomas, el chequeo de
+     déficit de cuotas (cierreCuotasCompletarDeficit) podía "no ver" turnos reales ya programados y generar
+     plazas "Pendiente/Por Confirmar" de más. Pagina en bloques de PAGE_SIZE (igual al tope real del servidor,
+     confirmado empíricamente) hasta que una página devuelva menos de PAGE_SIZE filas -- ese es el único criterio
+     fiable de "última página" sin depender de un conteo previo aparte. Mismas 7 tablas de TABLAS_RLS_AUTHENTICATED
+     + app_security_events se benefician por igual (todas pasan por esta misma función); hoy solo app_turnos
+     supera las 1000 filas, pero ninguna queda expuesta al mismo tope silencioso el día que crezca. */
+  var SC_PULL_PAGE_SIZE = 1000;
+  function traerPagina(offset, acumulado) {
     try {
-      return client.from(table).select('data, updated_at').then(function (res) {
+      return client.from(table).select('data, updated_at').range(offset, offset + SC_PULL_PAGE_SIZE - 1).then(function (res) {
         if (res.error || !res.data) return null;
-        return res.data.map(function (row) { return { value: row.data, updatedAt: row.updated_at }; });
+        var pagina = res.data.map(function (row) { return { value: row.data, updatedAt: row.updated_at }; });
+        var combinado = acumulado.concat(pagina);
+        if (pagina.length < SC_PULL_PAGE_SIZE) return combinado;
+        return traerPagina(offset + SC_PULL_PAGE_SIZE, combinado);
       }, function () { return null; });
     } catch (e) { return Promise.resolve(null); }
   }
+  function intentoUnico() { return traerPagina(0, []); }
   /* null distingue un fallo real (reintentable) de una tabla genuinamente vacía (res.data === [], .map ya
      devuelve [] -- nunca null) -- solo se reintenta el primer caso. */
   function conReintentos(numeroIntento) {
