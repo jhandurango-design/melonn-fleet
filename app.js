@@ -10122,6 +10122,17 @@ function rowHtmlProg(route) {
     if (state.progDay === 'tomorrow') {
       actions += '<button data-act="eliminar-turno-pendiente" data-id="' + route.id + '" class="danger">Eliminar mensajero</button>';
     }
+  } else if (est.code === 'critical') {
+    /* FIX "Editar en Programador de Flota saltaba el bloqueo de Cambio de Mensajero en turnos críticos": el
+       modal de "Editar" (submitTurno) deja cambiar nombre/cédula/teléfono/placa del mensajero asignado --
+       vía forkMensajeroParaEdicion, esto es un reemplazo real de identidad, exactamente lo mismo que "Cambio
+       de Mensajero" en Nueva Solicitud (ver nsCambioMensajeroNoSanoBanner, mismo bloqueo en refreshNsFieldsForTipo).
+       Ese otro camino ya bloquea el reemplazo cuando el turno está en 'critical' (Incumplimiento / Requiere
+       Reemplazo) y redirige a Alertas Activas; "Editar" aquí lo dejaba pasar igual, sin pasar por el ciclo de
+       llegada ni registrar el ausentismo del mensajero saliente. Se bloquea con el mismo criterio. */
+    actions = '<span class="badge badge-critical"><i></i>Gestionar desde Alertas' +
+      badgeInfoTipHtml(route.id + ' ya está en "Incumplimiento / Requiere Reemplazo". Este cambio ya no se gestiona por aquí — ve a Alertas Activas y usa el botón "Confirmar Reemplazo" sobre esta fila: ese flujo sí reabre el ciclo de llegada/despacho y registra el ausentismo del mensajero saliente correctamente.') +
+      '</span>';
   } else if (!yaEnCiclo) {
     /* Editar ya no depende de state.progDay === 'tomorrow': Hoy y Mañana admiten edición por igual, solo
        que el resultado (directo vs. Solicitud de Cambio) lo decide progEditWindowState() dentro del modal
@@ -14355,6 +14366,13 @@ function routesEligiblesSolicitud(filterFn) {
     if (r.fecha < TODAY_STR) return false;
     if (r.retirado || r.salida) return false;
     if (r.solicitud && (r.solicitud.estado === 'pendiente' || (r.solicitud.estado === 'aceptada' && r.solicitud.tipo === 'cancelacion'))) return false;
+    /* FIX "Doble Solicitud en Paralelo sobre el Mismo Turno": esta función solo excluía r.solicitud (la
+       Reprogramación/Cancelación/Cambio de Mensajero/Enroque de este mismo módulo) -- un turno con una
+       'edicion_turno' ya pendiente de Planner (enviada desde Programador de Flota vía "Editar", ver
+       submitTurno) seguía apareciendo aquí, dejando al Aliado enviar una SEGUNDA solicitud en paralelo
+       (potencialmente contradictoria) sobre el mismo turno mientras la primera seguía sin resolver. Mismo
+       criterio exacto que ya usa openTurnoModal (ver línea ~14979) para bloquear reabrir "Editar" en ese caso. */
+    if (r.solicitudEdicionPendiente) return false;
     var code = computeEstado(r).code;
     if (code === 'afectacion_confirmada' || code === 'sin_reemplazo') return false;
     return true;
@@ -14978,6 +14996,14 @@ function openTurnoModal(mode, routeId) {
        que ya estaba cerrado -- en vez de usar "Confirmar recurso" sobre el cupo realmente pendiente. */
     if (route.fecha < TODAY_STR || route.salida || route.retirado || route.solicitudEdicionPendiente || (route.solicitud && route.solicitud.estado === 'pendiente') || codeTm === 'afectacion_confirmada' || codeTm === 'sin_reemplazo' || codeTm === 'cancelled') {
       toast('warn', 'No disponible', 'Este turno no admite edición en este momento.');
+      return;
+    }
+    /* FIX "Editar en Programador de Flota saltaba el bloqueo de Cambio de Mensajero en turnos críticos" (ver
+       mismo comentario completo en rowHtmlProg): segunda barrera -- el botón ya se oculta en la tabla, pero
+       esto cubre una reinvocación directa (p.ej. el turno escaló a 'critical' después de haber quedado
+       renderizado, sin que el Aliado haya refrescado la fila todavía). */
+    if (codeTm === 'critical') {
+      toast('warn', 'No disponible', route.id + ' ya está en "Incumplimiento / Requiere Reemplazo" — gestiona el reemplazo desde Alertas Activas ("Confirmar Reemplazo"), no desde aquí.');
       return;
     }
   }
