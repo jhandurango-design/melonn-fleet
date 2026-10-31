@@ -4222,6 +4222,26 @@ function cierreJornadaCatchUp() {
    inicia sesión, sin depender de que una pestaña estuviera abierta justo a medianoche. fechaObjetivo es el
    día a completar (TOMORROW_STR en el barrido en vivo, TODAY_STR en el chequeo de alcance); motivoEtiqueta
    distingue el origen en el Historial de Cambios de cada turno generado. */
+/* FIX "403 al iniciar sesión como ALIADO/BODEGA/PLANNER/ADMIN/AUDITOR (tabla app_mensajeros)": este barrido
+   corre para TODOS los aliados/sedes con déficit, sin importar qué sesión lo disparó (ver comentario grande
+   más abajo, "cualquiera que inicie sesión") -- pero el push resultante (scPushRows('app_mensajeros', ...))
+   SIEMPRE usa el cliente de ESA sesión, sujeto a su propia política RLS: ALIADO solo puede insertar mensajeros
+   de su PROPIO aliado, BODEGA solo de su PROPIA sede, y PLANNER/ADMIN/AUDITOR no tienen ningún grant de
+   escritura en esa tabla (ver supabase/migrations/20261017040000_app_mensajeros_authenticated_rls.sql). Como
+   una sola fila que viola el WITH CHECK revierte el upsert COMPLETO (no solo esa fila), una sesión ALIADO que
+   encontrara déficit de OTRO aliado hacía fallar el lote entero -- incluido su propio déficit real -- y una
+   sesión PLANNER/ADMIN/AUDITOR fallaba siempre, al 100%, sin excepción. Se filtra aquí, ANTES de crear nada
+   (no solo antes de empujar), para que cada sesión solo genere las plazas que de verdad puede escribir --
+   el resto queda para cuando una sesión con el alcance correcto (el Aliado dueño del déficit, o cualquier
+   Bodega de esa sede) inicie sesión; el cálculo ya es idempotente por diseño (ver comentario de abajo), así
+   que ninguna plaza real se pierde, solo se cubre por la sesión correcta en vez de por la primera que pase. */
+function cierreCuotasPuedeEscribirMensajeroDe(sede, aliado) {
+  var u = state.user;
+  if (!u) return false;
+  if (u.role === 'ALIADO') return aliado === u.aliado;
+  if (u.role === 'BODEGA') return sede === u.sede;
+  return false;
+}
 function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
   var dia = diaSemanaKey(fechaObjetivo);
   if (!dia) return [];
@@ -4232,6 +4252,7 @@ function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
     if (c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (esFlotaPropia(c.aliado)) return;
+    if (!cierreCuotasPuedeEscribirMensajeroDe(c.sede, c.aliado)) return;
     /* Ver requerimiento "Ajuste y Validación Integral de Días Festivos", Corrección Crítica: fechaObjetivo
        festivo (por país de la sede, nunca un único país global -- una misma noche puede ser festivo en
        Colombia y no en México) no debe generar turnos "Pendiente/Por Confirmar" fantasma -- el Aliado no
