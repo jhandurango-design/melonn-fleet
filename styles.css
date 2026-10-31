@@ -1662,4 +1662,4 @@ button,.btn{font-size:12px !important;font-weight:600;padding:6px 12px;}
 .malla-row-staged .malla-hora-input,.malla-row-staged input[type="time"]{display:none;}
 #ajusteMallaResumenLista{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;}
 #ajusteMallaResumenLista li{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--muted-soft);border-radius:8px;padding:7px 12px;font-size:12px;}
-.malla-hora-input{width:84px;}
+.malla-hora-input{width:104px;}
