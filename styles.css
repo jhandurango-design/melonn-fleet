@@ -1443,14 +1443,25 @@ button.icon-btn-clear:hover{background-color:#E3DDFB !important;}
    #view-ayuda (solo existe mientras ese módulo está activo) pero sus hijos son position:fixed, así que
    anclan al viewport real, no al scroll de la página. */
 #ayudaAsistente{position:static;}
-.ayuda-asistente-fab{position:fixed;right:24px;bottom:24px;z-index:950;width:56px;height:56px;border-radius:50%;border:none;background:var(--btn-primary-bg);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 8px 20px rgba(17,15,55,.25);transition:background .12s ease,transform .12s ease;}
-.ayuda-asistente-fab:hover{background:var(--btn-primary-hover);transform:scale(1.05);}
+/* Pastilla ícono + texto (no un círculo puro) -- ver requerimiento "ícono de cabeza de robot + 'Chatea con el
+   agente'". padding explícito: la regla global "button,.btn{padding:6px 12px}" (Ajuste fino tipográfico) ya
+   le aplicaría ese valor por defecto, pero aquí se quiere más generoso por los 2 elementos (ícono + texto). */
+.ayuda-asistente-fab{position:fixed;right:24px;bottom:24px;z-index:950;display:flex;align-items:center;gap:9px;border:none;border-radius:999px;padding:13px 20px 13px 16px !important;background:var(--btn-primary-bg);color:#fff;cursor:pointer;box-shadow:0 8px 20px rgba(17,15,55,.25);transition:background .12s ease,transform .12s ease;}
+.ayuda-asistente-fab:hover{background:var(--btn-primary-hover);transform:scale(1.03);}
+.ayuda-asistente-fab svg{flex:0 0 auto;}
+.ayuda-asistente-fab-texto{font-size:12.5px !important;font-weight:700;white-space:nowrap;}
 .ayuda-asistente-ventana{position:fixed;right:24px;bottom:24px;z-index:950;width:360px;max-width:calc(100vw - 32px);height:min(520px,calc(100vh - 110px));background:var(--bg-card);border:1px solid var(--border);border-radius:16px;box-shadow:0 16px 40px rgba(17,15,55,.3);display:flex;flex-direction:column;overflow:hidden;}
 .ayuda-asistente-header{flex:0 0 auto;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:14px 16px;background:var(--btn-primary-bg);color:#fff;}
 .ayuda-asistente-header-title{margin:0;font-size:13.5px;font-weight:700;}
 .ayuda-asistente-header-sub{margin:2px 0 0;font-size:11px;opacity:.85;}
-.ayuda-asistente-cerrar{flex:0 0 auto;border:none;background:rgba(255,255,255,.18);color:#fff;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;}
+/* FIX "X de cerrar invisible": la regla global "button,.btn{padding:6px 12px}" (Ajuste fino tipográfico) no
+   tiene !important en padding -- sin una declaración propia de padding aquí, ese 6px/12px ganaba igual (no
+   hay 2 declaraciones de padding compitiendo, solo la global), comprimiendo el SVG de 16px dentro de un botón
+   de 26px casi a nada. padding:0 !important explícito, mismo patrón ya usado en el resto del archivo para
+   este mismo tipo de botón-ícono circular (ver línea ~393/952). */
+.ayuda-asistente-cerrar{flex:0 0 auto;border:none;background:rgba(255,255,255,.18);color:#fff !important;width:30px;height:30px;padding:0 !important;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;}
 .ayuda-asistente-cerrar:hover{background:rgba(255,255,255,.3);}
+.ayuda-asistente-cerrar svg{flex:0 0 auto;}
 .ayuda-asistente-mensajes{flex:1 1 auto;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px;background:var(--bg-app);}
 .ayuda-asistente-bienvenida{font-size:12.5px;color:var(--text-secondary);line-height:1.5;}
 .ayuda-asistente-bienvenida p{margin:0 0 10px;}

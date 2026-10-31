@@ -19165,7 +19165,7 @@ function ayudaAsistenteConstruirRespuestaHtml(preguntaLimpia, role) {
   }
   return '<div class="ayuda-asistente-sin-coincidencia"><p>No encontré nada relacionado con tu pregunta dentro de tu Centro de Ayuda. Prueba con otras palabras, o revisa las pestañas de arriba.</p></div>';
 }
-var AYUDA_ASISTENTE_ICONO_CHAT = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+var AYUDA_ASISTENTE_ICONO_ROBOT = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4"/><circle cx="12" cy="3" r="1" fill="currentColor" stroke="none"/><rect x="4" y="8" width="16" height="12" rx="3"/><circle cx="9" cy="14" r="1.2" fill="currentColor" stroke="none"/><circle cx="15" cy="14" r="1.2" fill="currentColor" stroke="none"/><path d="M4 13H2"/><path d="M22 13h-2"/></svg>';
 var AYUDA_ASISTENTE_ICONO_CERRAR = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 var AYUDA_ASISTENTE_ICONO_ENVIAR = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
 function ayudaAsistenteMensajeHtml(msg) {
@@ -19193,7 +19193,9 @@ function ayudaAsistenteWidgetHtml() {
       }).join('') + '</div>' : '') +
     '</div>';
   }
-  return '<button type="button" id="ayudaAsistenteFab" class="ayuda-asistente-fab" aria-label="Abrir Asistente de Ayuda"' + (abierto ? ' hidden' : '') + '>' + AYUDA_ASISTENTE_ICONO_CHAT + '</button>' +
+  return '<button type="button" id="ayudaAsistenteFab" class="ayuda-asistente-fab" aria-label="Abrir Asistente de Ayuda"' + (abierto ? ' hidden' : '') + '>' +
+      AYUDA_ASISTENTE_ICONO_ROBOT + '<span class="ayuda-asistente-fab-texto">Chatea con el agente</span>' +
+    '</button>' +
     '<div id="ayudaAsistenteVentana" class="ayuda-asistente-ventana"' + (abierto ? '' : ' hidden') + '>' +
       '<div class="ayuda-asistente-header">' +
         '<div><p class="ayuda-asistente-header-title">Asistente de Ayuda</p><p class="ayuda-asistente-header-sub">Solo ve lo disponible para tu rol</p></div>' +
