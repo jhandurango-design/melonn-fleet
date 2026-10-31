@@ -4239,10 +4239,19 @@ function cierreJornadaCatchUp() {
    (no solo antes de empujar), para que cada sesión solo genere las plazas que de verdad puede escribir --
    el resto queda para cuando una sesión con el alcance correcto (el Aliado dueño del déficit, o cualquier
    Bodega de esa sede) inicie sesión; el cálculo ya es idempotente por diseño (ver comentario de abajo), así
-   que ninguna plaza real se pierde, solo se cubre por la sesión correcta en vez de por la primera que pase. */
+   que ninguna plaza real se pierde, solo se cubre por la sesión correcta en vez de por la primera que pase.
+   PLANNER (ver FIX "Déficit sin cubrir hasta que la Bodega/Aliado dueño inicie sesión", reporte real DRN/
+   Bogotá #2 - Montevideo): a diferencia de ALIADO/BODEGA, PLANNER YA tiene alcance global sin restricción en
+   app_turnos (ver políticas INSERT/UPDATE de esa tabla, 'PLANNER' sin condición de sede/aliado) -- es el único
+   rol que ve y gestiona el Consolidado de TODAS las bodegas/aliados a la vez, así que tiene sentido de negocio
+   que su login cubra cualquier déficit de inmediato, sin esperar a que la Bodega/Aliado puntual se conecte.
+   Se extiende el mismo alcance global a app_mensajeros (ver migración
+   supabase/migrations/..._app_mensajeros_planner_global.sql) -- sin esa migración, el botón/barrido se vería
+   habilitado pero el push fallaría siempre por RLS, igual que el caso de ADMIN ya corregido y revertido. */
 function cierreCuotasPuedeEscribirMensajeroDe(sede, aliado) {
   var u = state.user;
   if (!u) return false;
+  if (u.role === 'PLANNER') return true;
   if (u.role === 'ALIADO') return aliado === u.aliado;
   if (u.role === 'BODEGA') return sede === u.sede;
   return false;
