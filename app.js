@@ -3030,11 +3030,11 @@ const ESTADOS = {
      arriba, "nunca los produce computeEstado") -- recolorearlos a rojo nunca toca el módulo Programación
      (Despacho/Consolidado/Seguimiento), que sigue leyendo exactamente los mismos estados operativos de
      siempre, sin cambios. */
-  reprog_rechazada: { label: 'Reprogramación Rechazada', badge: 'badge-critical', def: 'Planner/Admin rechazó la reprogramación; el turno conserva su hora original.' },
-  cancelacion_rechazada: { label: 'Cancelación Rechazada', badge: 'badge-critical', def: 'Planner/Admin rechazó la solicitud de cancelación; el turno sigue activo.' },
-  cambio_mensajero_rechazado: { label: 'Cambio de Mensajero Rechazado', badge: 'badge-critical', def: 'Planner/Admin rechazó el cambio de mensajero propuesto.' },
-  enroque_rechazado: { label: 'Intercambio de Turno Rechazado', badge: 'badge-critical', def: 'Planner/Admin rechazó el intercambio de mensajero entre turnos.' },
-  ajuste_rechazado: { label: 'Ajuste Extraordinario Rechazado', badge: 'badge-critical', def: 'Planner/Admin rechazó el Ajuste Extraordinario propuesto.' },
+  reprog_rechazada: { label: 'Reprogramación Rechazada', badge: 'badge-critical', def: 'Planner rechazó la reprogramación; el turno conserva su hora original.' },
+  cancelacion_rechazada: { label: 'Cancelación Rechazada', badge: 'badge-critical', def: 'Planner rechazó la solicitud de cancelación; el turno sigue activo.' },
+  cambio_mensajero_rechazado: { label: 'Cambio de Mensajero Rechazado', badge: 'badge-critical', def: 'Planner rechazó el cambio de mensajero propuesto.' },
+  enroque_rechazado: { label: 'Intercambio de Turno Rechazado', badge: 'badge-critical', def: 'Planner rechazó el intercambio de mensajero entre turnos.' },
+  ajuste_rechazado: { label: 'Ajuste Extraordinario Rechazado', badge: 'badge-critical', def: 'Planner rechazó el Ajuste Extraordinario propuesto.' },
   reasignacion_confirmada: { label: 'Reasignación de Mensajero Confirmada', badge: 'badge-justified', def: 'El Aliado confirmó un mensajero de reemplazo tras una alerta de incumplimiento.' },
   /* Despacho exitoso tras espera prolongada en bodega (>= 2 horas desde la llegada, ver classifyAuditRecord y
      registrarSalida) — SIN alerta activa ni afectación de cuota, solo trazabilidad de Auditoría (ver
@@ -3723,7 +3723,7 @@ function evaluarAprobacionCuota(sede, aliado, vehiculo, hora, fecha) {
   if (esFestivo(fecha, country)) {
     return {
       requiere: true, motivo: 'festivo',
-      detalle: 'La fecha ' + fmtDateLong(fecha) + ' es festivo en ' + (country === 'MX' ? 'México' : 'Colombia') + '; toda programación en día festivo requiere aprobación de Planner/Admin.'
+      detalle: 'La fecha ' + fmtDateLong(fecha) + ' es festivo en ' + (country === 'MX' ? 'México' : 'Colombia') + '; toda programación en día festivo requiere aprobación de Planner.'
     };
   }
   /* Domingo: CUOTAS_DIAS (lunes a sábado) no incluye Domingo -- sin fila de cuota configurada en la matriz,
@@ -3743,7 +3743,7 @@ function evaluarAprobacionCuota(sede, aliado, vehiculo, hora, fecha) {
   if (global.excedida) {
     return {
       requiere: true, motivo: 'cupo',
-      detalle: 'Cupo GLOBAL contratado (' + global.cantidad + ') de ' + aliado + ' en ' + sede + ' ya está cubierto; este turno supera la cuota total y requiere aprobación de Planner/Admin.',
+      detalle: 'Cupo GLOBAL contratado (' + global.cantidad + ') de ' + aliado + ' en ' + sede + ' ya está cubierto; este turno supera la cuota total y requiere aprobación de Planner.',
       cantidad: global.cantidad, actuales: global.actuales
     };
   }
@@ -3765,7 +3765,7 @@ function evaluarAprobacionCuota(sede, aliado, vehiculo, hora, fecha) {
       requiere: true, motivo: 'cupo',
       detalle: 'Ya completaste el 100% de las franjas contratadas para ' + vehiculo + ' en ' + sede +
         ' (' + (cuota.cantidad > 0 ? 'cupo de ' + fmtTime12(hora) + ' (' + cuota.franja + ') ya cubierto' : fmtTime12(hora) + ' no tiene cupo base asignado') +
-        '); este turno excede esa cuota y requiere aprobación de Planner/Admin.'
+        '); este turno excede esa cuota y requiere aprobación de Planner.'
     };
   }
   return { requiere: false };
@@ -4758,7 +4758,7 @@ function solicitarProlongacion() {
     motivo: 'Solicitud de prolongación de tiempo para completar la programación de mañana (hasta las 12:00 AM).', detalle: {}
   };
   state.solicitudesGenerales.push(solProlongacion);
-  toast('warn', 'Prolongación solicitada', 'Tu solicitud fue enviada al Planner/Admin para aprobación.');
+  toast('warn', 'Prolongación solicitada', 'Tu solicitud fue enviada al Planner para aprobación.');
   scPushRows('app_solicitudes_generales', [solProlongacion]);
   syncAndRender(true);
 }
@@ -9747,14 +9747,14 @@ function renderProgBanner() {
     if (sol && sol.estado === 'pendiente') {
       banner.innerHTML = ICONS.alert + '<span><strong>Tiempo límite de programación cumplido.</strong> Tu solicitud de prolongación está pendiente de aprobación.</span>';
     } else if (sol && sol.estado === 'rechazada') {
-      banner.innerHTML = ICONS.alert + '<span><strong>Tiempo límite de programación cumplido.</strong> Tu solicitud de prolongación fue rechazada. Cualquier cambio se enviará como solicitud a Planner/Admin.</span>';
+      banner.innerHTML = ICONS.alert + '<span><strong>Tiempo límite de programación cumplido.</strong> Tu solicitud de prolongación fue rechazada. Cualquier cambio se enviará como solicitud a Planner.</span>';
     } else {
-      banner.innerHTML = ICONS.alert + '<span><strong>Tiempo límite de programación cumplido.</strong> Cualquier cambio se enviará como solicitud a Planner/Admin.</span>' +
+      banner.innerHTML = ICONS.alert + '<span><strong>Tiempo límite de programación cumplido.</strong> Cualquier cambio se enviará como solicitud a Planner.</span>' +
         '<button type="button" class="btn btn-primary" id="btnSolicitarProlongacion" style="margin-left:auto;">Solicitar Prolongación de Tiempo</button>';
     }
   } else {
     banner.className = 'cutoff-banner danger';
-    banner.innerHTML = ICONS.alert + '<span><strong>Tiempo límite definitivo cumplido (12:00 AM).</strong> Cualquier cambio se enviará como solicitud a Planner/Admin.</span>';
+    banner.innerHTML = ICONS.alert + '<span><strong>Tiempo límite definitivo cumplido (12:00 AM).</strong> Cualquier cambio se enviará como solicitud a Planner.</span>';
   }
   var btn = document.getElementById('btnSolicitarProlongacion');
   if (btn) btn.addEventListener('click', solicitarProlongacion);
@@ -13880,8 +13880,8 @@ function unifiedFromGeneral(sol) {
   } else {
     rec.motivoHtml = escapeHtml(sol.motivo);
     rec.resultadoHtml = sol.estado === 'aceptada'
-      ? '<span class="badge badge-dispatched"><i></i>Aceptada' + badgeInfoTipHtml('Solicitud de programación aprobada por Planner/Admin; se aplicó sobre la Malla.') + '</span>'
-      : '<span class="badge badge-critical"><i></i>Rechazada' + badgeInfoTipHtml('Solicitud de programación rechazada por Planner/Admin; no se aplicó ningún cambio.') + '</span>';
+      ? '<span class="badge badge-dispatched"><i></i>Aceptada' + badgeInfoTipHtml('Solicitud de programación aprobada por Planner; se aplicó sobre la Malla.') + '</span>'
+      : '<span class="badge badge-critical"><i></i>Rechazada' + badgeInfoTipHtml('Solicitud de programación rechazada por Planner; no se aplicó ningún cambio.') + '</span>';
     rec.resueltoPorTxt = sol.resueltoPor ? (escapeHtml(sol.resueltoPor) + (sol.resueltoPorRol ? ' (' + sol.resueltoPorRol + ')' : '')) : '—';
     rec.resueltaTxt = sol.resueltoEn ? ((sol.resueltoFecha ? fmtDateLong(sol.resueltoFecha) + ' · ' : '') + sol.resueltoEn) : '—';
     rec.resueltoFecha = sol.resueltoFecha || '';
@@ -15040,7 +15040,7 @@ function openTurnoModal(mode, routeId) {
   if (ws === 'today_solicitud') {
     bloqueado.hidden = false;
     bloqueado.className = 'cutoff-banner danger';
-    bloqueado.innerHTML = ICONS.alert + '<span><strong>Turno de HOY.</strong> Este cambio se registrará como Solicitud de Cambio (Pendiente de Aprobación por Planner) — no se aplicará en vivo hasta que Planner/Admin la apruebe.</span>';
+    bloqueado.innerHTML = ICONS.alert + '<span><strong>Turno de HOY.</strong> Este cambio se registrará como Solicitud de Cambio (Pendiente de Aprobación por Planner) — no se aplicará en vivo hasta que Planner la apruebe.</span>';
   } else if (ws === 'closed_extendable' || ws === 'closed_final') {
     bloqueado.hidden = false;
     bloqueado.className = 'cutoff-banner danger';
@@ -21067,7 +21067,7 @@ function renderConfiguracionBuild() {
       '<input type="time" class="config-input" id="cfgAlertaCierre" value="' + cfg.gravity.alertaCierre + '">') +
     configRowInputHtml('Cierre de Programación de Flota', 'Hora límite del día anterior para que el Aliado cargue o edite mensajeros/vehículos de la Programación de Flota de mañana.',
       '<input type="time" class="config-input" id="cfgCierreProgramacion" value="' + cfg.gravity.cierreProgramacion + '">') +
-    configRowInputHtml('Límite con prolongación aprobada', 'Cierre definitivo tras una prolongación de tiempo aprobada por Planner/Admin.',
+    configRowInputHtml('Límite con prolongación aprobada', 'Cierre definitivo tras una prolongación de tiempo aprobada por Planner.',
       '<input type="time" class="config-input" id="cfgLimiteProlongacion" value="' + cfg.gravity.limiteProlongacion + '">');
 
   document.getElementById('configNotificacionesBody').innerHTML =
