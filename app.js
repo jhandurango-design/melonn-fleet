@@ -2298,6 +2298,8 @@ const state = {
   seguimientoKpiFilter: null,
   solicitudesTab: 'pendientes',
   ayudaTab: 'general',
+  ayudaAsistenteAbierto: false,
+  ayudaAsistenteMensajes: [],
   /* Pestaña activa de "Gestión de Usuarios" (antes "Roles y Permisos") — ver requerimiento "Consolidar
      módulo". 'usuarios' por defecto, ya que es el uso más frecuente del módulo. */
   permisosTab: 'usuarios',
@@ -19141,55 +19143,96 @@ function ayudaAsistenteBuscar(pregunta, indice) {
   resultados.sort(function (a, b) { return b.score - a.score; });
   return resultados;
 }
-/* Shell estático (no depende de la pregunta/resultados en curso) -- se renderiza vía renderMetricsIfChanged,
-   así que después del primer render de cada rol queda intacto en cada tick de Gravity (cada ~1s), sin perder
-   el foco/valor del input ni el resultado ya mostrado. Las 3 primeras FAQ de "General/Inicio" del rol activo
-   sirven de preguntas sugeridas iniciales -- mismo contenido, ninguna redacción nueva. */
-function ayudaAsistenteShellHtml(content) {
-  var sugeridas = (content.faqs.general || []).slice(0, 3);
-  var chipsHtml = sugeridas.length ? '<div class="ayuda-asistente-sugeridas">' + sugeridas.map(function (item) {
-    return '<button type="button" class="help-pill" data-asistente-pregunta="' + escapeHtml(item[0]) + '">' + item[0] + '</button>';
-  }).join('') + '</div>' : '';
-  return '<section class="panel ayuda-asistente-panel">' +
-    '<p class="panel-title">Asistente de Ayuda</p>' +
-    '<p class="ayuda-asistente-sub">Escribe tu pregunta sobre el uso de la plataforma — busca únicamente dentro de los artículos y preguntas frecuentes disponibles para tu rol, sin acceso a la información de otros roles.</p>' +
-    '<div class="ayuda-asistente-bar">' +
-      '<input type="text" id="ayudaAsistentePregunta" placeholder="Ej. ¿Cómo cambio el mensajero de un turno?" maxlength="200" autocomplete="off">' +
-      '<button type="button" class="btn btn-primary" id="ayudaAsistenteBtn">Preguntar</button>' +
-    '</div>' +
-    chipsHtml +
-    '<div id="ayudaAsistenteResultados"></div>' +
-  '</section>';
-}
-/* Escribe directamente en #ayudaAsistenteResultados (fuera del ciclo de renderMetricsIfChanged de arriba) --
-   así una búsqueda nunca se pierde en el siguiente tick de Gravity, y escribir en el input no dispara ningún
-   re-render que le haga perder el foco. */
-function ayudaAsistenteRenderResultados(pregunta, role) {
-  var cont = document.getElementById('ayudaAsistenteResultados');
-  if (!cont) return;
-  var preguntaLimpia = (pregunta || '').trim();
-  if (!preguntaLimpia) { cont.innerHTML = ''; return; }
+/* Construye el HTML de UNA respuesta del asistente (sin escribirlo en ningún lado) -- usado por
+   ayudaAsistenteEnviarPregunta para empujarlo como un mensaje más del hilo de chat. */
+function ayudaAsistenteConstruirRespuestaHtml(preguntaLimpia, role) {
   var content = ayudaContentByRole(role);
   var tabs = ayudaTabsVisibles();
   var indice = ayudaAsistenteConstruirIndice(content, tabs);
   var resultados = ayudaAsistenteBuscar(preguntaLimpia, indice);
   var fuertes = resultados.filter(function (r) { return r.fuerte; });
   var mejor = fuertes[0] || resultados[0];
-  var html = '';
   if (mejor && mejor.score >= 3) {
     var resto = resultados.filter(function (r) { return r.item !== mejor.item; }).slice(0, 3);
-    html = '<div class="ayuda-asistente-respuesta"><p class="ayuda-asistente-respuesta-fuente">' + escapeHtml(mejor.item.tabLabel) + '</p>' +
+    return '<div class="ayuda-asistente-respuesta"><p class="ayuda-asistente-respuesta-fuente">' + escapeHtml(mejor.item.tabLabel) + '</p>' +
       '<p class="ayuda-asistente-respuesta-titulo">' + mejor.item.titulo + '</p>' +
       '<div class="ayuda-asistente-respuesta-cuerpo">' + mejor.item.cuerpoHtml + '</div></div>' +
       (resto.length ? ('<p class="ayuda-asistente-relacionados-title">También podría interesarte:</p><div class="ayuda-asistente-relacionados">' +
         resto.map(function (r) { return '<button type="button" class="help-pill" data-asistente-pregunta="' + escapeHtml(r.item.titulo) + '">' + r.item.titulo + '</button>'; }).join('') + '</div>') : '');
   } else if (resultados.length) {
-    html = '<div class="ayuda-asistente-sin-coincidencia"><p>No encontré una respuesta exacta para "<strong>' + escapeHtml(preguntaLimpia) + '</strong>". ¿Te refieres a alguna de estas?</p>' +
+    return '<div class="ayuda-asistente-sin-coincidencia"><p>No encontré una respuesta exacta para "<strong>' + escapeHtml(preguntaLimpia) + '</strong>". ¿Te refieres a alguna de estas?</p>' +
       '<div class="ayuda-asistente-relacionados">' + resultados.slice(0, 4).map(function (r) { return '<button type="button" class="help-pill" data-asistente-pregunta="' + escapeHtml(r.item.titulo) + '">' + r.item.titulo + '</button>'; }).join('') + '</div></div>';
-  } else {
-    html = '<div class="ayuda-asistente-sin-coincidencia"><p>No encontré nada relacionado con tu pregunta dentro de tu Centro de Ayuda. Prueba con otras palabras, o revisa las pestañas de arriba.</p></div>';
   }
-  cont.innerHTML = html;
+  return '<div class="ayuda-asistente-sin-coincidencia"><p>No encontré nada relacionado con tu pregunta dentro de tu Centro de Ayuda. Prueba con otras palabras, o revisa las pestañas de arriba.</p></div>';
+}
+var AYUDA_ASISTENTE_ICONO_CHAT = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>';
+var AYUDA_ASISTENTE_ICONO_CERRAR = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+var AYUDA_ASISTENTE_ICONO_ENVIAR = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+function ayudaAsistenteMensajeHtml(msg) {
+  return '<div class="ayuda-asistente-msg ayuda-asistente-msg-' + (msg.rol === 'user' ? 'user' : 'bot') + '"><div class="ayuda-asistente-burbuja">' + msg.html + '</div></div>';
+}
+/* Widget flotante (ícono + ventana de chat, esquina inferior derecha) -- se regenera por completo cada vez
+   que cambia algo real (abrir/cerrar, nuevo mensaje), nunca en cada tick de Gravity (ver sincronizarAyuda
+   AsistenteWidget) -- así el campo de texto nunca pierde el foco/valor mientras el usuario escribe. El
+   historial del hilo vive en state.ayudaAsistenteMensajes (se limpia en cada login, ver completarInicioSesion),
+   nunca en el DOM, así que sobrevive intacto a cualquier re-render intermedio. */
+function ayudaAsistenteWidgetHtml() {
+  var role = state.user.role;
+  var content = ayudaContentByRole(role);
+  var abierto = !!state.ayudaAsistenteAbierto;
+  var mensajes = state.ayudaAsistenteMensajes || [];
+  var cuerpoMensajes;
+  if (mensajes.length) {
+    cuerpoMensajes = mensajes.map(ayudaAsistenteMensajeHtml).join('');
+  } else {
+    var sugeridas = (content.faqs.general || []).slice(0, 4);
+    cuerpoMensajes = '<div class="ayuda-asistente-bienvenida">' +
+      '<p>Pregúntame cómo usar la plataforma — solo respondo con lo disponible para tu rol.</p>' +
+      (sugeridas.length ? '<div class="ayuda-asistente-sugeridas">' + sugeridas.map(function (item) {
+        return '<button type="button" class="help-pill" data-asistente-pregunta="' + escapeHtml(item[0]) + '">' + item[0] + '</button>';
+      }).join('') + '</div>' : '') +
+    '</div>';
+  }
+  return '<button type="button" id="ayudaAsistenteFab" class="ayuda-asistente-fab" aria-label="Abrir Asistente de Ayuda"' + (abierto ? ' hidden' : '') + '>' + AYUDA_ASISTENTE_ICONO_CHAT + '</button>' +
+    '<div id="ayudaAsistenteVentana" class="ayuda-asistente-ventana"' + (abierto ? '' : ' hidden') + '>' +
+      '<div class="ayuda-asistente-header">' +
+        '<div><p class="ayuda-asistente-header-title">Asistente de Ayuda</p><p class="ayuda-asistente-header-sub">Solo ve lo disponible para tu rol</p></div>' +
+        '<button type="button" id="ayudaAsistenteCerrar" class="ayuda-asistente-cerrar" aria-label="Cerrar">' + AYUDA_ASISTENTE_ICONO_CERRAR + '</button>' +
+      '</div>' +
+      '<div class="ayuda-asistente-mensajes" id="ayudaAsistenteMensajes">' + cuerpoMensajes + '</div>' +
+      '<div class="ayuda-asistente-input-row">' +
+        '<input type="text" id="ayudaAsistentePregunta" placeholder="Escribe tu pregunta..." autocomplete="off" maxlength="200">' +
+        '<button type="button" id="ayudaAsistenteBtn" class="btn btn-primary" aria-label="Preguntar">' + AYUDA_ASISTENTE_ICONO_ENVIAR + '</button>' +
+      '</div>' +
+    '</div>';
+}
+/* enfocar=true SOLO desde una acción directa del usuario (abrir/cerrar/enviar): reescribe sin pasar por el
+   diff-guard de renderMetricsIfChanged (el estado SÍ cambió, siempre hay algo nuevo que pintar) y hace scroll
+   al último mensaje + foco en el input. enfocar=false es el tick periódico de renderAyuda() -- ahí SÍ pasa por
+   el diff-guard (misma lógica que renderMetricsIfChanged) para no tocar el DOM ni robar el foco mientras el
+   usuario escribe, en los ticks donde nada cambió realmente. */
+function sincronizarAyudaAsistenteWidget(enfocar) {
+  var el = document.getElementById('ayudaAsistente');
+  if (!el) return;
+  var html = ayudaAsistenteWidgetHtml();
+  if (!enfocar) {
+    if (lastMetricsHtml.ayudaAsistente === html) return;
+  }
+  lastMetricsHtml.ayudaAsistente = html;
+  el.innerHTML = html;
+  if (enfocar && state.ayudaAsistenteAbierto) {
+    var msgsEl = document.getElementById('ayudaAsistenteMensajes');
+    if (msgsEl) msgsEl.scrollTop = msgsEl.scrollHeight;
+    var input = document.getElementById('ayudaAsistentePregunta');
+    if (input) input.focus();
+  }
+}
+function ayudaAsistenteEnviarPregunta(preguntaCruda) {
+  var preguntaLimpia = (preguntaCruda || '').trim();
+  if (!preguntaLimpia || !state.user) return;
+  state.ayudaAsistenteMensajes.push({ rol: 'user', html: escapeHtml(preguntaLimpia) });
+  state.ayudaAsistenteMensajes.push({ rol: 'bot', html: ayudaAsistenteConstruirRespuestaHtml(preguntaLimpia, state.user.role) });
+  sincronizarAyudaAsistenteWidget(true);
 }
 function renderAyuda() {
   var role = state.user.role;
@@ -19201,7 +19244,7 @@ function renderAyuda() {
   var content = ayudaContentByRole(role);
   sub.textContent = content.sub;
 
-  renderMetricsIfChanged('ayudaAsistente', ayudaAsistenteShellHtml(content));
+  sincronizarAyudaAsistenteWidget(false);
 
   var tabsHtml = '<div class="segmented" id="ayudaTabSegment">' + tabs.map(function (t) {
     return '<button type="button" data-tab="' + t.id + '" class="' + (t.id === activeTab ? 'active' : '') + '">' + t.label + '</button>';
@@ -21400,6 +21443,8 @@ function logout() {
   state.alertasResueltas = {};
   state.solicitudesTab = 'pendientes';
   state.ayudaTab = 'general';
+  state.ayudaAsistenteAbierto = false;
+  state.ayudaAsistenteMensajes = [];
   state.solicitudesHistRango = 'dia';
   state.solicitudesHistDia = TODAY_STR;
   state.solicitudesHistFechaInicio = TODAY_STR;
@@ -22554,25 +22599,35 @@ document.addEventListener('DOMContentLoaded', function () {
     target.open = true;
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
-  /* Asistente de Ayuda: igual que #ayudaTabBar/#ayudaContent arriba, el input/botón/resultados son dinámicos
-     (inyectados por ayudaAsistenteShellHtml vía renderMetricsIfChanged) -- se delega sobre el contenedor fijo
-     #ayudaAsistente (ya existe en index.html) en vez de enlazar cada uno directamente. */
+  /* Asistente de Ayuda: igual que #ayudaTabBar/#ayudaContent arriba, el ícono/ventana/input son dinámicos
+     (inyectados por ayudaAsistenteWidgetHtml vía sincronizarAyudaAsistenteWidget) -- se delega sobre el
+     contenedor fijo #ayudaAsistente (ya existe en index.html, position:fixed, esquina inferior derecha) en
+     vez de enlazar cada uno directamente. */
   document.getElementById('ayudaAsistente').addEventListener('click', function (e) {
+    if (e.target.closest('#ayudaAsistenteFab')) {
+      state.ayudaAsistenteAbierto = true;
+      sincronizarAyudaAsistenteWidget(true);
+      return;
+    }
+    if (e.target.closest('#ayudaAsistenteCerrar')) {
+      state.ayudaAsistenteAbierto = false;
+      sincronizarAyudaAsistenteWidget(false);
+      return;
+    }
     var pill = e.target.closest('[data-asistente-pregunta]');
     if (pill) {
-      var texto = pill.dataset.asistentePregunta;
-      document.getElementById('ayudaAsistentePregunta').value = texto;
-      ayudaAsistenteRenderResultados(texto, state.user.role);
+      ayudaAsistenteEnviarPregunta(pill.dataset.asistentePregunta);
       return;
     }
     if (e.target.closest('#ayudaAsistenteBtn')) {
-      ayudaAsistenteRenderResultados(document.getElementById('ayudaAsistentePregunta').value, state.user.role);
+      var input = document.getElementById('ayudaAsistentePregunta');
+      ayudaAsistenteEnviarPregunta(input ? input.value : '');
     }
   });
   document.getElementById('ayudaAsistente').addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && e.target && e.target.id === 'ayudaAsistentePregunta') {
       e.preventDefault();
-      ayudaAsistenteRenderResultados(e.target.value, state.user.role);
+      ayudaAsistenteEnviarPregunta(e.target.value);
     }
   });
   document.querySelectorAll('#alertasHistRangoSegment button').forEach(function (btn) {
