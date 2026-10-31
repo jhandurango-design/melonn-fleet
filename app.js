@@ -1958,15 +1958,18 @@ const ROLE_VIEWS = {
      Bloque 2: ADMIN queda exclusivamente para configuración y gobernanza técnica -- ya no gestiona ni recibe
      comunicados operativos (antes sí tenía el módulo, ver historial de ROLE_VIEWS). PLANNER sigue siendo
      quien redacta/publica; BODEGA/ALIADO/AUDITOR conservan su acceso de solo lectura, sin cambios.
-     Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner",
-     punto 4: se agrega 'solicitudes' -- toda la capa de datos de ese módulo (solicitudesPendientesUnificadas,
-     solicitudesHistorialUnificado, el badge del sidebar, SOLICITUDES_TABS_POR_ROL.ADMIN) YA contemplaba
-     explícitamente a ADMIN de antemano, simplemente inalcanzable hasta ahora por no estar aquí. ADMIN entra
-     en modo mayormente de solo lectura dentro de ese módulo (sin "+ Nueva Solicitud", ver
-     solicitudesHeaderSync -- btnNueva.hidden=true para cualquier rol que no sea ALIADO/PLANNER) -- la única
-     acción real que puede ejercer es Aprobar/Rechazar Cuota/Festivo/Domingo/Tipología, vía el permiso
-     dedicado 'cuota.resolve' (ver auth.js). */
-  ADMIN: ['inicio', 'usuarios', 'vehiculos', 'bodegas-aliados', 'permisos', 'configuracion', 'ayuda', 'cuotas', 'solicitudes'],
+     REVERTIDO (ver requerimiento "Auditoría y Depuración del Concepto Heredado 'Admin/Planner'..."): un
+     requerimiento anterior ("Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol
+     Planner", punto 4) había agregado 'solicitudes' aquí como un "Permiso de Contingencia" (ADMIN podía
+     Aprobar/Rechazar Cuota/Festivo vía el permiso dedicado 'cuota.resolve', ver auth.js) -- se confirmó con
+     el usuario que NO debe existir: Solicitudes y Cambios es 100% operativo, y ADMIN no tiene ningún módulo
+     operativo, sin excepciones puntuales. Revertido también 'cuota.resolve' (vuelve a ser PLANNER-only) y la
+     política RLS de app_turnos que le daba a ADMIN el UPDATE real (ver migración de reversión en
+     supabase/migrations/). SOLICITUDES_TABS_POR_ROL.ADMIN y las ramas ADMIN de solicitudesPendientesUnificadas/
+     solicitudesHistorialUnificado quedan como código muerto, inalcanzable de nuevo (ADMIN nunca llega a
+     'solicitudes' ni por navigate() ni por el sidebar) -- se dejan intactas, documentadas aquí, por si se
+     retoma este mecanismo más adelante. */
+  ADMIN: ['inicio', 'usuarios', 'vehiculos', 'bodegas-aliados', 'permisos', 'configuracion', 'ayuda', 'cuotas'],
   PLANNER: ['inicio', 'consolidado', 'despacho', 'calculador', 'alertas', 'solicitudes', 'cumplimiento', 'ayuda', 'cuotas', 'comunicaciones'],
   /* 'flota-propia' (ver requerimiento "Reestructuración y Migración de Flota Propia México al Módulo
      Bodega"): registrado para TODOS los Bodega -- allowedViewsForUser la oculta igual que 'calculador' con

@@ -32,16 +32,15 @@
     'consolidado.manage': ['PLANNER'],
     'solicitud.resolve': ['PLANNER', 'ALIADO'],
     'solicitud.resolve.general': ['PLANNER'],
-    /* Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner",
-       punto 4 (Permisos de Contingencia en Excepciones de Cuota/Festivo): permiso DEDICADO, deliberadamente
-       separado de 'solicitud.resolve.general' -- ese sigue siendo PLANNER-only para Nuevo Turno/Cupo
-       Adicional/Edición/Reemplazos/Prolongación (Mecanismo B), donde ADMIN nunca debe gestionar ni decidir
-       operativamente (ver nota de ADMIN más abajo). Ampliar el permiso compartido en vez de crear este nuevo
-       habría abierto ADMIN a TODO el Mecanismo B sin que se haya pedido ni evaluado eso. Solo cubre
-       aprobarCuotaPlanner/rechazarCuotaPlanner (Mecanismo C) -- requiere además la migración SQL que concede
-       a ADMIN el UPDATE real sobre app_turnos para este caso (ver supabase/migrations/..._app_turnos_admin_cuota.sql);
-       sin ella, el botón se vería habilitado pero el guardado fallaría siempre por RLS. */
-    'cuota.resolve': ['PLANNER', 'ADMIN'],
+    /* REVERTIDO (confirmado con el usuario): un requerimiento anterior ("Reestructuración y Optimización
+       Integral de Solicitudes y Cambios -- Rol Planner", punto 4) había agregado ADMIN aquí como "Permiso de
+       Contingencia en Excepciones de Cuota/Festivo", con su propia migración de RLS
+       (supabase/migrations/20261028223000_app_turnos_admin_cuota_resolve.sql y su ajuste posterior). Se
+       confirmó que ADMIN no debe tener ninguna acción operativa, sin excepciones puntuales -- Solicitudes y
+       Cambios (incluida la aprobación de Cuota/Festivo) es 100% de PLANNER. Revertido también en ROLE_VIEWS
+       (app.js, ADMIN ya no tiene 'solicitudes') y en una migración de RLS nueva que restaura el UPDATE de
+       app_turnos a PLANNER-only. */
+    'cuota.resolve': ['PLANNER'],
     'solicitud.create.aliado': ['ALIADO'],
     'solicitud.create.planner': ['PLANNER'],
     'despacho.manage': ['BODEGA'],
