@@ -5018,6 +5018,40 @@ function aplicarSolicitudGeneral(sol) {
     sol.detalle.rutasAfectadas = rutasAfectadas.map(function (r) { return r.id; });
     sol.detalle.totalRutasAfectadas = rutasAfectadas.length;
     turnosAfectados = turnosAfectados.concat(rutasAfectadas);
+  } else if (sol.tipo === 'ajuste_malla') {
+    /* Ver plan "Ajuste de Malla": N sub-cambios (Intercambio/Reprogramación) sobre turnos de UNA bodega/fecha,
+       revalidados por revalidarCambiosAjusteMalla ANTES de llegar aquí (ver resolverSolicitudGeneral) -- esta
+       rama solo aplica, nunca vuelve a validar. Cada sub-cambio se registra en el historial de SU propia ruta
+       con el TIPO REAL ('enroque'/'reprogramacion', mismos EVENTO_CODES que ya usa el flujo individual) para
+       que el Historial de esa ruta quede coherente con el resto de la plataforma -- 'ajuste_malla' vive solo
+       a nivel de la solicitud general misma, nunca como tipo de evento por ruta. */
+    var rutasTocadasMalla = [];
+    function agregarRutaTocadaMalla(r) { if (r && rutasTocadasMalla.indexOf(r) === -1) rutasTocadasMalla.push(r); }
+    (sol.detalle.cambios || []).forEach(function (c) {
+      if (c.tipo === 'enroque') {
+        var rAM = state.turnos.find(function (r) { return r.id === c.routeIdA; });
+        var rBM = state.turnos.find(function (r) { return r.id === c.routeIdB; });
+        if (!rAM || !rBM) return;
+        var tmpMensajeroIdMalla = rAM.mensajeroId;
+        rAM.mensajeroId = rBM.mensajeroId;
+        rBM.mensajeroId = tmpMensajeroIdMalla;
+        registrarHistorialCambio(rAM, { tipo: 'enroque', accion: 'aprobada', motivo: 'Intercambio de turno aprobado — mensajero intercambiado con ' + rBM.id + '. Parte de Ajuste de Malla ' + sol.id + '.', horaAnterior: null, horaPropuesta: null, por: state.user.nombre });
+        registrarHistorialCambio(rBM, { tipo: 'enroque', accion: 'aprobada', motivo: 'Intercambio de turno aprobado — mensajero intercambiado con ' + rAM.id + '. Parte de Ajuste de Malla ' + sol.id + '.', horaAnterior: null, horaPropuesta: null, por: state.user.nombre });
+        agregarRutaTocadaMalla(rAM); agregarRutaTocadaMalla(rBM);
+      } else if (c.tipo === 'reprogramacion') {
+        var rRM = state.turnos.find(function (r) { return r.id === c.routeId; });
+        if (!rRM) return;
+        var horaAnteriorMalla = rRM.hora;
+        rRM.hora = c.nuevaHora;
+        registrarHistorialCambio(rRM, { tipo: 'reprogramacion', accion: 'aprobada', motivo: 'Reprogramación aprobada — parte de Ajuste de Malla ' + sol.id + '.', horaAnterior: horaAnteriorMalla, horaPropuesta: c.nuevaHora, por: state.user.nombre });
+        agregarRutaTocadaMalla(rRM);
+      }
+    });
+    /* Libera el lock (ver routesEligiblesSolicitud) de todas las rutas del lote, aprobado o no cada
+       sub-cambio individualmente -- el Ajuste de Malla completo se aplica o no se aplica, nunca a medias
+       (ver revalidarCambiosAjusteMalla, que bloquea TODO el lote si cualquier sub-cambio ya no es válido). */
+    rutasTocadasMalla.forEach(function (r) { r.ajusteMallaPendienteId = false; });
+    turnosAfectados = turnosAfectados.concat(rutasTocadasMalla);
   }
   if (sol.detalle && sol.detalle.routeId) {
     var routeMarcada = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
@@ -5032,6 +5066,38 @@ function aplicarSolicitudGeneral(sol) {
     if (mensajerosIdsAntesSolicitud.indexOf(m.id) === -1 && mensajerosNuevosSolicitud.indexOf(m) === -1) mensajerosNuevosSolicitud.push(m);
   });
   return { turnos: turnosAfectados, mensajerosNuevos: mensajerosNuevosSolicitud };
+}
+/* Ver plan "Ajuste de Malla": la solicitud pudo quedar pendiente horas/días -- entre su creación y esta
+   aprobación cualquiera de sus rutas pudo despacharse/cerrarse, o el lote pudo dejar a un mensajero en
+   conflicto de ventana de retorno contra OTRO turno suyo que el propio lote no toca. Se revalida TODO el lote
+   antes de aplicar nada (ver resolverSolicitudGeneral) -- si cualquier sub-cambio falla, se bloquea el lote
+   COMPLETO, nunca una aplicación parcial. */
+function revalidarCambiosAjusteMalla(sol) {
+  var motivos = [];
+  function rutaValida(route, id) {
+    if (!route) { motivos.push(id + ' ya no existe.'); return false; }
+    if (route.retirado || route.salida) { motivos.push(route.id + ' ya fue despachado/retirado.'); return false; }
+    var code = computeEstado(route).code;
+    if (code === 'afectacion_confirmada' || code === 'sin_reemplazo') { motivos.push(route.id + ' ya cerró en Incumplimiento Confirmado / Sin Reemplazo.'); return false; }
+    return true;
+  }
+  (sol.detalle.cambios || []).forEach(function (c) {
+    if (c.tipo === 'enroque') {
+      var rA = state.turnos.find(function (r) { return r.id === c.routeIdA; });
+      var rB = state.turnos.find(function (r) { return r.id === c.routeIdB; });
+      if (!rutaValida(rA, c.routeIdA) || !rutaValida(rB, c.routeIdB)) return;
+      var conflictoA = turnoEnVentanaRetorno(rA.mensajeroId, rB.fecha, rB.hora, rA.id);
+      if (conflictoA) motivos.push(getMensajero(rA.mensajeroId).nombre + ' quedaría en conflicto de horario con ' + conflictoA.id + ' tras el intercambio con ' + rB.id + '.');
+      var conflictoB = turnoEnVentanaRetorno(rB.mensajeroId, rA.fecha, rA.hora, rB.id);
+      if (conflictoB) motivos.push(getMensajero(rB.mensajeroId).nombre + ' quedaría en conflicto de horario con ' + conflictoB.id + ' tras el intercambio con ' + rA.id + '.');
+    } else if (c.tipo === 'reprogramacion') {
+      var r = state.turnos.find(function (rr) { return rr.id === c.routeId; });
+      if (!rutaValida(r, c.routeId)) return;
+      var conflicto = turnoEnVentanaRetorno(r.mensajeroId, r.fecha, c.nuevaHora, r.id);
+      if (conflicto) motivos.push(getMensajero(r.mensajeroId).nombre + ' quedaría en conflicto de horario con ' + conflicto.id + ' a la nueva hora de ' + r.id + '.');
+    }
+  });
+  return { ok: motivos.length === 0, motivo: motivos.join(' ') };
 }
 /* Ver requerimiento "Reestructuración y Optimización Integral de Solicitudes y Cambios -- Rol Planner", punto
    2 (Blindaje de Aprobaciones y Race Conditions): mismo patrón exacto que botonesCuotaAprobacion (Mecanismo
@@ -5080,6 +5146,19 @@ function resolverSolicitudGeneral(id, aceptar) {
       return;
     }
   }
+  /* Ver plan "Ajuste de Malla": revalidación del lote completo ANTES de mutar sol.estado — mismo patrón que
+     el bloque de arriba (conflictoPlanner), para que un lote que ya no es seguro de aplicar quede intacto como
+     'pendiente' en vez de aprobarse a medias. */
+  if (aceptar && sol.tipo === 'ajuste_malla') {
+    var revalidacionMalla = revalidarCambiosAjusteMalla(sol);
+    if (!revalidacionMalla.ok) {
+      toast('warn', 'No se puede aprobar el Ajuste de Malla', revalidacionMalla.motivo);
+      if (btnsSolGeneral.aceptar) btnsSolGeneral.aceptar.disabled = false;
+      if (btnsSolGeneral.rechazar) btnsSolGeneral.rechazar.disabled = false;
+      if (btnEnUsoSolGeneral) btnEnUsoSolGeneral.textContent = aceptar ? 'Aceptar' : 'Rechazar';
+      return;
+    }
+  }
   sol.estado = aceptar ? 'aceptada' : 'rechazada';
   sol.resueltoEn = fmtClock(state.now);
   sol.resueltoFecha = TODAY_STR;
@@ -5097,6 +5176,18 @@ function resolverSolicitudGeneral(id, aceptar) {
   else if (!aceptar && sol.detalle && sol.detalle.routeId) {
     var routeRechazada = state.turnos.find(function (r) { return r.id === sol.detalle.routeId; });
     if (routeRechazada) { routeRechazada.solicitudEdicionPendiente = false; turnosParaPush.push(routeRechazada); }
+  }
+  /* Ver plan "Ajuste de Malla": mismo criterio que arriba, pero iterando TODAS las rutas del lote (no un solo
+     sol.detalle.routeId) — el rechazo libera el lock de cada una, ninguna queda bloqueada a perpetuidad por
+     una solicitud que ya no va a resolverse. */
+  else if (!aceptar && sol.tipo === 'ajuste_malla' && sol.detalle && sol.detalle.cambios) {
+    sol.detalle.cambios.forEach(function (c) {
+      var idsMallaRechazo = c.tipo === 'enroque' ? [c.routeIdA, c.routeIdB] : [c.routeId];
+      idsMallaRechazo.forEach(function (idMallaRechazo) {
+        var rMallaRechazo = state.turnos.find(function (r) { return r.id === idMallaRechazo; });
+        if (rMallaRechazo) { rMallaRechazo.ajusteMallaPendienteId = false; if (turnosParaPush.indexOf(rMallaRechazo) === -1) turnosParaPush.push(rMallaRechazo); }
+      });
+    });
   }
   var tipoLabel = solicitudGeneralTipoLabel(sol.tipo);
   if (sol.tipo === 'reprogramacion_masiva' && aceptar) {
@@ -11038,7 +11129,16 @@ function alertRowHtml(a) {
     }
     fotoParaVer = route.notificacionFotoEvidencia || null;
   } else if (code === 'pendiente_asignacion' || code === 'cancelado_pendiente_reemplazo' || code === 'sustitucion_riesgo' || code === 'sin_reemplazo') {
-    if (canDo('schedule.aliado.manage') || canDo('consolidado.manage')) acciones.push('<button data-act="alerta-reasignar" data-id="' + route.id + '" data-code="' + code + '" class="raised">Reasignar</button>');
+    /* FIX "Reasignar visible para Planner sin acción real en Pendiente/Por Confirmar": pendiente_asignacion y
+       cancelado_pendiente_reemplazo son resorte exclusivo del Aliado (ver alertaEsAccionInmediata, que ya
+       excluye estos 2 códigos del set accionable de PLANNER/ADMIN) -- reasignarAlerta nunca abre para Planner
+       el modal de "Confirmar mensajero" (esa rama exige schedule.aliado.manage, exclusivo de ALIADO), así que
+       el botón caía siempre en "Solicitar reprogramación de hora", un modal que además asume un mensajero ya
+       asignado (usa m.nombre) y no aplica a un cupo todavía sin cubrir. Para estos 2 códigos el botón ahora es
+       exclusivo de schedule.aliado.manage; sustitucion_riesgo/sin_reemplazo (turno con mensajero real en
+       riesgo) siguen ofreciéndolo también a Planner vía consolidado.manage, que sí es una acción válida ahí. */
+    var reasignarEsAliadoOnly = code === 'pendiente_asignacion' || code === 'cancelado_pendiente_reemplazo';
+    if (canDo('schedule.aliado.manage') || (!reasignarEsAliadoOnly && canDo('consolidado.manage'))) acciones.push('<button data-act="alerta-reasignar" data-id="' + route.id + '" data-code="' + code + '" class="raised">Reasignar</button>');
   } else if (code === 'critical') {
     /* "Incumplimiento / Requiere Reemplazo": el mensajero aún no llegó pero sigue dentro de la ventana de
        gestión (2ª hora) antes del cierre automático — exclusivo del Aliado, para que pueda asignar un
@@ -13665,14 +13765,18 @@ var SOLICITUD_TIPO_LABEL_TABLA = {
   cuota_festivo: 'Cuota / Festivo', prolongacion: 'Prolongación de Flota', nuevo_turno: 'Nuevo Turno', cupo_adicional: 'Cupo Adicional', edicion_turno: 'Cambio de Programación',
   edicion_turno_confirmacion: 'Confirmación de Recurso Pendiente',
   reemplazo_alerta: 'Reemplazo Pendiente de Aprobación', reemplazo_cancelacion: 'Cancelación con Reemplazo Pendiente de Aprobación', ajuste_extraordinario: 'Ajuste Extraordinario',
-  reprogramacion_masiva: 'Reprogramación Masiva de Ventana'
+  reprogramacion_masiva: 'Reprogramación Masiva de Ventana',
+  /* Ver plan "Ajuste de Malla" (.claude/plans/rippling-imagining-dove.md): solicitud compuesta del Aliado con
+     N sub-cambios (Intercambio/Reprogramación) sobre los turnos de UNA bodega/fecha, aprobada o rechazada en
+     bloque por Planner — ver aplicarSolicitudGeneral/resolverSolicitudGeneral. */
+  ajuste_malla: 'Ajuste de Malla'
 };
 var SOLICITUD_TIPO_BADGE_CLASS = {
   reprogramacion: 'badge-warn', cancelacion: 'badge-critical', cambio_mensajero: 'badge-dispatched', enroque: 'badge-pending',
   cuota_festivo: 'badge-justified', prolongacion: 'badge-dock', nuevo_turno: 'badge-dock', cupo_adicional: 'badge-dock', edicion_turno: 'badge-warn',
   edicion_turno_confirmacion: 'badge-dock',
   reemplazo_alerta: 'badge-critical', reemplazo_cancelacion: 'badge-critical', ajuste_extraordinario: 'badge-dock',
-  reprogramacion_masiva: 'badge-warn'
+  reprogramacion_masiva: 'badge-warn', ajuste_malla: 'badge-pending'
 };
 /* Ver requerimiento "Estandarización Obligatoria y Cobertura 100% de Tooltips en Badges...", punto 2:
    diccionario de tooltips para la columna TIPO de Solicitudes y Cambios -- los 4 primeros usan el texto
@@ -13692,7 +13796,8 @@ var SOLICITUD_TIPO_INFO_TIP = {
   edicion_turno_confirmacion: 'El Aliado asignó su mensajero real a un cupo que había quedado "Pendiente / Por Confirmar"; pendiente de aprobación por Planner por enviarse fuera de la ventana horaria habitual.',
   reemplazo_alerta: 'Reemplazo de mensajero propuesto por el Aliado tras una alerta de incumplimiento, pendiente de aprobación.',
   reemplazo_cancelacion: 'Cancelación con reemplazo propuesto por el Aliado en el mismo envío, pendiente de aprobación.',
-  reprogramacion_masiva: 'Solicitud de Planner hacia el Aliado para desplazar en bloque la hora de varias franjas/turnos de un día, pendiente de aprobación del Aliado.'
+  reprogramacion_masiva: 'Solicitud de Planner hacia el Aliado para desplazar en bloque la hora de varias franjas/turnos de un día, pendiente de aprobación del Aliado.',
+  ajuste_malla: 'Lote de varios cambios (Intercambios/Reprogramaciones) sobre los turnos de una sola bodega, armado por el Aliado y aprobado o rechazado en bloque por Planner.'
 };
 function solicitudTipoBadgeHtml(tipo) {
   return '<span class="badge ' + (SOLICITUD_TIPO_BADGE_CLASS[tipo] || 'badge-disabled') + '"><i></i>' + (SOLICITUD_TIPO_LABEL_TABLA[tipo] || tipo) + badgeInfoTipHtml(SOLICITUD_TIPO_INFO_TIP[tipo]) + '</span>';
@@ -13798,10 +13903,34 @@ function solicitudGeneralTipoLabel(tipo) {
      origen:'planner' -- a diferencia de todos los demás (origen implícito 'aliado', siempre pendientes DE
      Planner), ésta queda pendiente DEL Aliado (ver aplicarSolicitudGeneral/resolverSolicitudGeneral). */
   if (tipo === 'reprogramacion_masiva') return 'Reprogramación Masiva de Ventana (Pendiente de Aprobación del Aliado)';
+  if (tipo === 'ajuste_malla') return 'Ajuste de Malla (Pendiente de Aprobación por Planner)';
   return 'Solicitud de Cambio (Pendiente de Aprobación por Planner)';
+}
+/* Ver plan "Ajuste de Malla": texto de resumen + detalle expandible de cada sub-cambio del lote, para la
+   columna Detalle de la Bandeja Unificada (Pendientes/Historial/Enviadas) — llamado desde
+   solicitudGeneralDetalleHtml, nunca directamente desde el render de la tabla. */
+function ajusteMallaDetalleHtml(sol) {
+  var cambios = (sol.detalle && sol.detalle.cambios) || [];
+  var nEnroques = cambios.filter(function (c) { return c.tipo === 'enroque'; }).length;
+  var nReprog = cambios.filter(function (c) { return c.tipo === 'reprogramacion'; }).length;
+  var partes = [];
+  if (nEnroques) partes.push(nEnroques + ' intercambio' + (nEnroques === 1 ? '' : 's'));
+  if (nReprog) partes.push(nReprog + ' reprogramación' + (nReprog === 1 ? '' : 'es'));
+  var resumen = cambios.length + ' cambio' + (cambios.length === 1 ? '' : 's') + ' (' + partes.join(', ') + ') — ' + (sol.detalle ? sol.detalle.sede : '');
+  var items = cambios.map(function (c) {
+    if (c.tipo === 'enroque') {
+      var rA = state.turnos.find(function (r) { return r.id === c.routeIdA; });
+      var rB = state.turnos.find(function (r) { return r.id === c.routeIdB; });
+      return '<li>Intercambio: ' + escapeHtml(c.routeIdA + (rA ? ' (' + getMensajero(rA.mensajeroId).nombre + ')' : '')) + ' ⇄ ' + escapeHtml(c.routeIdB + (rB ? ' (' + getMensajero(rB.mensajeroId).nombre + ')' : '')) + '</li>';
+    }
+    var r = state.turnos.find(function (rr) { return rr.id === c.routeId; });
+    return '<li>Reprogramación: ' + escapeHtml(c.routeId + (r ? ' (' + getMensajero(r.mensajeroId).nombre + ')' : '')) + ' — ' + fmtTime12(c.horaAnterior) + ' → ' + fmtTime12(c.nuevaHora) + '</li>';
+  }).join('');
+  return escapeHtml(resumen) + '<details><summary class="courier-sub">Ver cambios</summary><ul>' + items + '</ul></details>';
 }
 function solicitudGeneralDetalleHtml(sol) {
   if (sol.tipo === 'prolongacion') return 'Extensión del cierre de programación hasta las 12:00 AM.';
+  if (sol.tipo === 'ajuste_malla') return ajusteMallaDetalleHtml(sol);
   var d = sol.detalle;
   if (sol.tipo === 'reemplazo_alerta' || sol.tipo === 'reemplazo_cancelacion') return escapeHtml(d.routeId + ' — ' + d.nombre + ' · ' + d.placa + ' · ' + d.vehiculo + ' · ' + d.correo + ' · ' + d.sede);
   if (sol.tipo === 'reprogramacion_masiva') {
@@ -14408,6 +14537,12 @@ function routesEligiblesSolicitud(filterFn) {
        (potencialmente contradictoria) sobre el mismo turno mientras la primera seguía sin resolver. Mismo
        criterio exacto que ya usa openTurnoModal (ver línea ~14979) para bloquear reabrir "Editar" en ese caso. */
     if (r.solicitudEdicionPendiente) return false;
+    /* Ver plan "Ajuste de Malla": mientras un turno está referenciado por un Ajuste de Malla pendiente, queda
+       bloqueado para cualquier OTRA solicitud individual (Enroque/Reprogramación/Cambio de Mensajero/
+       Cancelación sueltos) — mismo criterio exacto que solicitudEdicionPendiente arriba, para no permitir 2
+       cambios contradictorios en paralelo sobre el mismo turno. Se limpia en ambas ramas de resolución (ver
+       aplicarSolicitudGeneral/resolverSolicitudGeneral). */
+    if (r.ajusteMallaPendienteId) return false;
     var code = computeEstado(r).code;
     if (code === 'afectacion_confirmada' || code === 'sin_reemplazo') return false;
     return true;
@@ -14415,6 +14550,11 @@ function routesEligiblesSolicitud(filterFn) {
 }
 function routesEligibleForAliadoSolicitud() {
   return routesEligiblesSolicitud(function (r) { return getMensajero(r.mensajeroId).aliado === state.user.aliado; });
+}
+/* Ver plan "Ajuste de Malla": fuente de la grilla del wizard — mismo pool de elegibilidad que ya usan
+   Enroque/Reprogramación/Cambio de Mensajero individuales, acotado a 1 sola bodega + 1 sola fecha. */
+function routesEligibleForAjusteMalla(sede, fecha) {
+  return routesEligibleForAliadoSolicitud().filter(function (r) { return r.sede === sede && r.fecha === fecha; });
 }
 /* Etiqueta limpia y destacada del selector "Mensajero / Turno" (ver requerimiento "Restructuración
    Integral...", Parte 4) -- Nombre del mensajero primero (lo que el usuario reconoce), seguido del ID de
@@ -14448,6 +14588,11 @@ function refreshNsRutaOptions() {
    mantenerse dentro de la misma bodega. */
 function refreshNsFieldsForTipo() {
   var tipo = document.getElementById('nsTipo').value;
+  /* Ver plan "Ajuste de Malla": tipo contextual que reemplaza por completo el modal genérico -- mismo patrón
+     que openReprogramarSeguimientoModal/openModalNovedadTransporte (otro modal dedicado sustituye a éste).
+     Se intercepta aquí (no en el listener del botón) porque el disparo real es el cambio de #nsTipo, no un
+     botón de fila. */
+  if (tipo === 'ajuste_malla') { closeModal(); abrirModalAjusteMalla(); return; }
   var esReprog = tipo === 'reprogramacion', esEnroque = tipo === 'enroque';
   var esNuevoTurno = tipo === 'nuevo_turno';
   var esCambioMensajero = tipo === 'cambio_mensajero';
@@ -14566,6 +14711,266 @@ function openNuevaSolicitudModal(presetRouteId, presetTipo) {
   document.getElementById('nsMotivo').value = '';
   refreshNsFieldsForTipo();
   openModal('modalNuevaSolicitud');
+}
+/* ---------------- Ajuste de Malla — ALIADO (ver plan .claude/plans/rippling-imagining-dove.md) ----------------
+   Wizard dedicado para armar, sobre los turnos de UNA bodega/fecha, un lote de varios sub-cambios (Intercambio
+   de mensajero entre 2 turnos, Reprogramación de hora de 1 turno) y enviarlos TODOS JUNTOS como una sola
+   solicitudGeneral tipo 'ajuste_malla', aprobada o rechazada en bloque por Planner. Estado efímero del wizard
+   vive FUERA de `state` a propósito (mismo criterio que cargaMasivaPreviewState) -- nunca se persiste ni se lee
+   desde ningún otro módulo, se descarta al cerrar el modal. v1: 1 sub-cambio por turno por lote (sin
+   combinaciones encadenadas), solo Intercambio/Reprogramación (Cambio de Mensajero externo y Cancelación
+   quedan fuera de v1). */
+var ajusteMallaWizardState = null;
+function ajusteMallaCambioInvolucraRuta(c, routeId) {
+  return c.tipo === 'enroque' ? (c.routeIdA === routeId || c.routeIdB === routeId) : c.routeId === routeId;
+}
+function abrirModalAjusteMalla() {
+  if (!canDo('solicitud.create.aliado')) return;
+  var sedes = Array.from(new Set(routesEligibleForAliadoSolicitud().map(function (r) { return r.sede; }))).sort();
+  if (!sedes.length) { toast('warn', 'Sin rutas disponibles', 'No tienes rutas elegibles para armar un Ajuste de Malla en este momento.'); return; }
+  ajusteMallaWizardState = { sede: sedes[0], fecha: TODAY_STR, cambios: [], origenSeleccionadoId: null, pendingConfirm: null };
+  var bodegaSel = document.getElementById('ajusteMallaBodega');
+  bodegaSel.innerHTML = sedes.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('');
+  bodegaSel.value = ajusteMallaWizardState.sede;
+  var fechaSel = document.getElementById('ajusteMallaFecha');
+  fechaSel.innerHTML = '<option value="' + TODAY_STR + '">Hoy · ' + fmtDateLong(TODAY_STR) + '</option><option value="' + TOMORROW_STR + '">Mañana · ' + fmtDateLong(TOMORROW_STR) + '</option>';
+  fechaSel.value = ajusteMallaWizardState.fecha;
+  renderAjusteMallaGrid();
+  renderAjusteMallaConfirmPanel();
+  renderAjusteMallaResumen();
+  openModal('modalAjusteMalla');
+}
+/* Cambiar Bodega/Fecha reinicia el lote -- un sub-cambio ya armado referencia rutas de la combinación
+   anterior, mantenerlo vivo tras el cambio dejaría el resumen apuntando a turnos fuera de la grilla visible. */
+function refreshAjusteMallaFechaYGrilla() {
+  var w = ajusteMallaWizardState;
+  if (!w) return;
+  w.sede = document.getElementById('ajusteMallaBodega').value;
+  w.fecha = document.getElementById('ajusteMallaFecha').value;
+  w.cambios = [];
+  w.origenSeleccionadoId = null;
+  w.pendingConfirm = null;
+  renderAjusteMallaGrid();
+  renderAjusteMallaConfirmPanel();
+  renderAjusteMallaResumen();
+}
+function renderAjusteMallaGrid() {
+  var w = ajusteMallaWizardState;
+  if (!w) return;
+  var routes = routesEligibleForAjusteMalla(w.sede, w.fecha).slice().sort(function (a, b) { return a.hora.localeCompare(b.hora); });
+  document.getElementById('ajusteMallaGridTbody').innerHTML = routes.length
+    ? routes.map(ajusteMallaGridRowHtml).join('')
+    : '<tr><td colspan="3" class="courier-sub">No hay turnos elegibles para esta bodega/fecha.</td></tr>';
+}
+function ajusteMallaGridRowHtml(route) {
+  var w = ajusteMallaWizardState;
+  var m = getMensajero(route.mensajeroId);
+  var staged = w.cambios.find(function (c) { return ajusteMallaCambioInvolucraRuta(c, route.id); });
+  var esOrigen = w.origenSeleccionadoId === route.id;
+  var cls = staged ? 'malla-row-staged' : (esOrigen ? 'malla-row-origen' : '');
+  var accionHtml;
+  if (staged) {
+    var detalleStaged = staged.tipo === 'enroque'
+      ? ('Intercambio con ' + (staged.routeIdA === route.id ? staged.routeIdB : staged.routeIdA))
+      : ('Nueva hora: ' + fmtTime12(staged.nuevaHora));
+    accionHtml = '<span class="badge badge-pending"><i></i>En el lote — ' + escapeHtml(detalleStaged) + '</span> <button type="button" class="btn-ghost" data-act="malla-quitar" data-id="' + route.id + '">Quitar</button>';
+  } else if (esOrigen) {
+    accionHtml = '<span class="courier-sub">Origen del intercambio — elige otro turno</span> <button type="button" class="btn-ghost" data-act="malla-fila-click" data-id="' + route.id + '">Cancelar</button>';
+  } else {
+    var hayOrigenActivo = !!w.origenSeleccionadoId;
+    accionHtml = '<button type="button" class="btn-ghost" data-act="malla-fila-click" data-id="' + route.id + '">' + (hayOrigenActivo ? 'Elegir como destino' : 'Intercambiar') + '</button> ' +
+      '<input type="time" class="malla-hora-input" data-id="' + route.id + '" value="' + route.hora + '"> ' +
+      '<button type="button" class="btn-ghost" data-act="malla-hora-confirmar" data-id="' + route.id + '">Reprogramar</button>';
+  }
+  return '<tr data-id="' + route.id + '" class="' + cls + '">' +
+    '<td>' + route.id + ' · ' + escapeHtml(m.nombre) + ' · ' + escapeHtml(m.placa || '—') + '</td>' +
+    '<td>' + fmtTime12(route.hora) + '</td>' +
+    '<td>' + accionHtml + '</td>' +
+    '</tr>';
+}
+/* Click en fila (botón "Intercambiar"/"Elegir como destino"/"Cancelar"): sin origen activo, la marca como
+   origen; sobre el origen ya activo, lo deselecciona; sobre otra fila elegible, arma el preview de
+   confirmación (ver renderAjusteMallaConfirmPanel) -- el intercambio NO se agrega al lote hasta que el Aliado
+   confirma explícitamente ese panel. */
+function ajusteMallaClickFila(routeId) {
+  var w = ajusteMallaWizardState;
+  if (!w) return;
+  if (!w.origenSeleccionadoId) {
+    w.origenSeleccionadoId = routeId;
+    w.pendingConfirm = null;
+  } else if (w.origenSeleccionadoId === routeId) {
+    w.origenSeleccionadoId = null;
+    w.pendingConfirm = null;
+  } else {
+    w.pendingConfirm = { routeIdA: w.origenSeleccionadoId, routeIdB: routeId };
+  }
+  renderAjusteMallaGrid();
+  renderAjusteMallaConfirmPanel();
+}
+function renderAjusteMallaConfirmPanel() {
+  var w = ajusteMallaWizardState;
+  var panel = document.getElementById('ajusteMallaConfirmEnroque');
+  if (!panel) return;
+  if (!w || !w.pendingConfirm) { panel.hidden = true; return; }
+  var rA = state.turnos.find(function (r) { return r.id === w.pendingConfirm.routeIdA; });
+  var rB = state.turnos.find(function (r) { return r.id === w.pendingConfirm.routeIdB; });
+  if (!rA || !rB) { panel.hidden = true; w.pendingConfirm = null; return; }
+  var mA = getMensajero(rA.mensajeroId), mB = getMensajero(rB.mensajeroId);
+  panel.hidden = false;
+  panel.innerHTML = ICONS.alert + '<span><strong>Confirmar intercambio:</strong> ' + escapeHtml(mA.nombre) + ' (' + fmtTime12(rA.hora) + ') ⇄ ' + escapeHtml(mB.nombre) + ' (' + fmtTime12(rB.hora) + ')</span>' +
+    '<div class="modal-foot" style="margin-top:8px;"><button type="button" class="btn btn-ghost" id="btnAjusteMallaEnroqueCancelar">Cancelar</button><button type="button" class="btn btn-primary" id="btnAjusteMallaEnroqueConfirmar">Confirmar intercambio</button></div>';
+}
+function ajusteMallaConfirmarEnroqueDesdeBanner() {
+  var w = ajusteMallaWizardState;
+  if (!w || !w.pendingConfirm) return;
+  w.cambios.push({ tipo: 'enroque', routeIdA: w.pendingConfirm.routeIdA, routeIdB: w.pendingConfirm.routeIdB });
+  w.pendingConfirm = null;
+  w.origenSeleccionadoId = null;
+  renderAjusteMallaGrid();
+  renderAjusteMallaConfirmPanel();
+  renderAjusteMallaResumen();
+}
+function ajusteMallaCancelarEnroqueDesdeBanner() {
+  var w = ajusteMallaWizardState;
+  if (!w) return;
+  w.pendingConfirm = null;
+  w.origenSeleccionadoId = null;
+  renderAjusteMallaGrid();
+  renderAjusteMallaConfirmPanel();
+}
+function ajusteMallaConfirmarReprogramacion(routeId) {
+  var w = ajusteMallaWizardState;
+  if (!w) return;
+  var input = document.querySelector('.malla-hora-input[data-id="' + routeId + '"]');
+  var nuevaHora = input ? input.value : '';
+  if (!nuevaHora) { toast('warn', 'Elige una hora', 'Selecciona la nueva hora antes de confirmar.'); return; }
+  var route = state.turnos.find(function (r) { return r.id === routeId; });
+  if (!route) return;
+  if (nuevaHora === route.hora) { toast('warn', 'Sin cambios', 'La nueva hora es igual a la actual.'); return; }
+  w.cambios.push({ tipo: 'reprogramacion', routeId: routeId, horaAnterior: route.hora, nuevaHora: nuevaHora });
+  if (w.origenSeleccionadoId === routeId) w.origenSeleccionadoId = null;
+  renderAjusteMallaGrid();
+  renderAjusteMallaResumen();
+}
+/* Quitar desde la propia fila de la grilla (identifica el sub-cambio por la ruta clicada). */
+function ajusteMallaQuitarCambio(routeId) {
+  var w = ajusteMallaWizardState;
+  if (!w) return;
+  w.cambios = w.cambios.filter(function (c) { return !ajusteMallaCambioInvolucraRuta(c, routeId); });
+  renderAjusteMallaGrid();
+  renderAjusteMallaResumen();
+}
+/* Quitar desde el resumen del lote (identifica el sub-cambio por índice -- más simple e inequívoco ahí). */
+function ajusteMallaQuitarCambioIdx(idx) {
+  var w = ajusteMallaWizardState;
+  if (!w) return;
+  w.cambios.splice(idx, 1);
+  renderAjusteMallaGrid();
+  renderAjusteMallaResumen();
+}
+function renderAjusteMallaResumen() {
+  var w = ajusteMallaWizardState;
+  var lista = document.getElementById('ajusteMallaResumenLista');
+  if (!w || !lista) return;
+  if (!w.cambios.length) {
+    lista.innerHTML = '<li class="courier-sub">Todavía no agregaste ningún cambio al lote.</li>';
+  } else {
+    lista.innerHTML = w.cambios.map(function (c, idx) {
+      var txt;
+      if (c.tipo === 'enroque') {
+        var rA = state.turnos.find(function (r) { return r.id === c.routeIdA; });
+        var rB = state.turnos.find(function (r) { return r.id === c.routeIdB; });
+        txt = 'Intercambio: ' + (rA ? getMensajero(rA.mensajeroId).nombre : c.routeIdA) + ' ⇄ ' + (rB ? getMensajero(rB.mensajeroId).nombre : c.routeIdB);
+      } else {
+        var r = state.turnos.find(function (rr) { return rr.id === c.routeId; });
+        txt = 'Reprogramación: ' + (r ? getMensajero(r.mensajeroId).nombre : c.routeId) + ' — ' + fmtTime12(c.horaAnterior) + ' → ' + fmtTime12(c.nuevaHora);
+      }
+      return '<li>' + escapeHtml(txt) + ' <button type="button" class="btn-ghost" data-act="malla-quitar-idx" data-idx="' + idx + '">Quitar</button></li>';
+    }).join('');
+  }
+  var btnEnviar = document.getElementById('btnAjusteMallaEnviar');
+  if (btnEnviar) btnEnviar.disabled = w.cambios.length === 0;
+  var contador = document.getElementById('ajusteMallaResumenContador');
+  if (contador) contador.textContent = w.cambios.length + ' cambio' + (w.cambios.length === 1 ? '' : 's') + ' en el lote';
+}
+function ajusteMallaValidarLoteSinDuplicados(cambios) {
+  var vistos = {};
+  for (var i = 0; i < cambios.length; i++) {
+    var ids = cambios[i].tipo === 'enroque' ? [cambios[i].routeIdA, cambios[i].routeIdB] : [cambios[i].routeId];
+    for (var j = 0; j < ids.length; j++) {
+      if (vistos[ids[j]]) return false;
+      vistos[ids[j]] = true;
+    }
+  }
+  return true;
+}
+/* Envío final: revalida el pool justo antes de enviar (el modal pudo quedar abierto un rato), guarda contra
+   duplicados dentro del propio lote (protección servidor-side, además de la que ya da el wizard en memoria),
+   marca el lock en cada ruta referenciada y empuja ambas tablas con snapshot-antes + rollback si falla la red
+   -- mismo patrón exacto que procesarCargaMasivaTurnos. */
+function submitAjusteMalla() {
+  if (!canDo('solicitud.create.aliado')) return;
+  var w = ajusteMallaWizardState;
+  if (!w || !w.cambios.length) return;
+  if (!ajusteMallaValidarLoteSinDuplicados(w.cambios)) {
+    toast('warn', 'Lote inválido', 'Un mismo turno no puede estar en 2 cambios del mismo lote — revisa el resumen.');
+    return;
+  }
+  var poolVigente = routesEligibleForAliadoSolicitud();
+  var idsInvalidos = [];
+  w.cambios.forEach(function (c) {
+    var ids = c.tipo === 'enroque' ? [c.routeIdA, c.routeIdB] : [c.routeId];
+    ids.forEach(function (id) { if (!poolVigente.some(function (r) { return r.id === id; }) && idsInvalidos.indexOf(id) === -1) idsInvalidos.push(id); });
+  });
+  if (idsInvalidos.length) {
+    toast('warn', 'Algunos turnos ya no están disponibles', idsInvalidos.join(', ') + ' — quítalos del lote e inténtalo de nuevo.');
+    renderAjusteMallaGrid();
+    return;
+  }
+  var rutasIds = [];
+  w.cambios.forEach(function (c) {
+    var ids = c.tipo === 'enroque' ? [c.routeIdA, c.routeIdB] : [c.routeId];
+    ids.forEach(function (id) { if (rutasIds.indexOf(id) === -1) rutasIds.push(id); });
+  });
+  var sol = {
+    id: nextSolicitudGeneralId(), tipo: 'ajuste_malla', estado: 'pendiente', aliado: state.user.aliado,
+    detalle: { sede: w.sede, fecha: w.fecha, cambios: w.cambios },
+    motivo: 'Ajuste de Malla — ' + w.cambios.length + ' cambio' + (w.cambios.length === 1 ? '' : 's') + ' en ' + w.sede + '.',
+    solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), fecha: TODAY_STR, origen: 'aliado'
+  };
+  var rutasAntesSnapshot = rutasIds.map(function (id) {
+    var r = state.turnos.find(function (rr) { return rr.id === id; });
+    return { id: id, ajusteMallaPendienteId: r ? r.ajusteMallaPendienteId : undefined };
+  });
+  var rutasMarcadas = [];
+  rutasIds.forEach(function (id) {
+    var r = state.turnos.find(function (rr) { return rr.id === id; });
+    if (r) { r.ajusteMallaPendienteId = sol.id; rutasMarcadas.push(r); }
+  });
+  state.solicitudesGenerales.push(sol);
+  var cambiosCount = w.cambios.length;
+  var btnEnviar = document.getElementById('btnAjusteMallaEnviar');
+  if (btnEnviar) { btnEnviar.disabled = true; btnEnviar.textContent = 'Enviando…'; }
+  Promise.all([
+    scPushRows('app_solicitudes_generales', [sol]),
+    scPushRows('app_turnos', rutasMarcadas)
+  ]).then(function (results) {
+    if (btnEnviar) { btnEnviar.disabled = false; btnEnviar.textContent = 'Enviar Ajuste de Malla'; }
+    if (results.some(function (r) { return r && r.ok === false; })) {
+      rutasAntesSnapshot.forEach(function (snap) {
+        var r = state.turnos.find(function (rr) { return rr.id === snap.id; });
+        if (r) r.ajusteMallaPendienteId = snap.ajusteMallaPendienteId;
+      });
+      state.solicitudesGenerales = state.solicitudesGenerales.filter(function (s) { return s.id !== sol.id; });
+      toast('warn', 'No se pudo confirmar en la nube', 'El Ajuste de Malla no se guardó — revisa tu conexión e inténtalo de nuevo.');
+      syncAndRender(true);
+      return;
+    }
+    toast('ok', 'Ajuste de Malla enviado', sol.id + ' — ' + cambiosCount + ' cambio' + (cambiosCount === 1 ? '' : 's') + ' a la espera de aprobación de Planner.');
+    ajusteMallaWizardState = null;
+    closeModal();
+    syncAndRender(true);
+  });
 }
 /* Ver requerimiento "Confirmación de Badges y Ejecución de las 5 Mejoras de UX y Arquitectura", punto 1:
    modal contextual para "Reprogramar" desde el menú de Seguimiento (Aliado) -- reemplaza la apertura del
@@ -23437,6 +23842,30 @@ document.addEventListener('DOMContentLoaded', function () {
     if (fila) fila.incluirAdicional = checkbox.checked;
     renderCargaMasivaPreview();
   });
+
+  /* Ver plan "Ajuste de Malla": delegación LOCAL sobre la grilla/resumen/panel de confirmación del wizard --
+     nunca el dispatcher global de [data-act], que es compartido por toda la app (mismo criterio que
+     cargaMasivaPreviewTbody arriba). */
+  document.getElementById('ajusteMallaBodega').addEventListener('change', refreshAjusteMallaFechaYGrilla);
+  document.getElementById('ajusteMallaFecha').addEventListener('change', refreshAjusteMallaFechaYGrilla);
+  document.getElementById('ajusteMallaGridTbody').addEventListener('click', function (e) {
+    var btnFila = e.target.closest('[data-act="malla-fila-click"]');
+    if (btnFila) { ajusteMallaClickFila(btnFila.dataset.id); return; }
+    var btnHora = e.target.closest('[data-act="malla-hora-confirmar"]');
+    if (btnHora) { ajusteMallaConfirmarReprogramacion(btnHora.dataset.id); return; }
+    var btnQuitar = e.target.closest('[data-act="malla-quitar"]');
+    if (btnQuitar) { ajusteMallaQuitarCambio(btnQuitar.dataset.id); return; }
+  });
+  document.getElementById('ajusteMallaResumenLista').addEventListener('click', function (e) {
+    var btnQuitarIdx = e.target.closest('[data-act="malla-quitar-idx"]');
+    if (!btnQuitarIdx) return;
+    ajusteMallaQuitarCambioIdx(parseInt(btnQuitarIdx.dataset.idx, 10));
+  });
+  document.getElementById('ajusteMallaConfirmEnroque').addEventListener('click', function (e) {
+    if (e.target.closest('#btnAjusteMallaEnroqueConfirmar')) { ajusteMallaConfirmarEnroqueDesdeBanner(); return; }
+    if (e.target.closest('#btnAjusteMallaEnroqueCancelar')) { ajusteMallaCancelarEnroqueDesdeBanner(); return; }
+  });
+  document.getElementById('btnAjusteMallaEnviar').addEventListener('click', submitAjusteMalla);
   /* Ver requerimiento "Menú Desplegable de Acciones para Flota Recurrente": Cargar/Guardar/Eliminar ya no son
      botones estáticos con su propio addEventListener -- viven como ítems del menú flotante de #btnProgAcciones
      (data-menu-html armado en cada render de renderProgramacion(), ver ese comentario), disparados por el

@@ -1686,6 +1686,7 @@
                     <option value="reemplazo_cancelacion">Cancelación con Reemplazo Pendiente de Aprobación</option>
                     <option value="ajuste_extraordinario">Ajuste Extraordinario</option>
                     <option value="reprogramacion_masiva">Reprogramación Masiva de Ventana</option>
+                    <option value="ajuste_malla">Ajuste de Malla</option>
                   </select>
                 </div>
                 <!-- Ver requerimiento "Ajustes UX/UI y Estandarización de Componentes" (3): mismo patrón de
@@ -3297,6 +3298,10 @@
           <option value="cambio_mensajero">Cambiar mensajero</option>
           <option value="reprogramacion">Reprogramación de hora</option>
           <option value="enroque">Intercambio de Turno</option>
+          <!-- Ver plan "Ajuste de Malla": abre un modal dedicado (#modalAjusteMalla) en vez de los campos de
+               este formulario -- interceptado en refreshNsFieldsForTipo, mismo patrón que "nuevo_turno" más
+               abajo pero hacia OTRO modal en vez de hacia campos internos de éste. -->
+          <option value="ajuste_malla">Ajuste de Malla (Varios Cambios)</option>
           <!-- Ver requerimiento "Ajustes UI/UX Consolidados...", punto 3: ya no es una opción elegible a mano
                aquí (duplicaba el botón dedicado "+ Solicitar Nuevo Turno" de Programar Flota/Hoy) -- "hidden"
                la saca de la lista desplegable sin romper ese flujo dedicado, que sigue abriendo este MISMO
@@ -3355,6 +3360,37 @@
         <button type="submit" class="btn btn-primary">Enviar solicitud</button>
       </div>
     </form>
+  </div>
+
+  <!-- Ver plan "Ajuste de Malla" (.claude/plans/rippling-imagining-dove.md): modal dedicado del Aliado para
+       armar, sobre los turnos de UNA bodega/fecha, un lote de varios sub-cambios (Intercambio de mensajero
+       entre 2 turnos, Reprogramación de hora de 1 turno) y enviarlos todos juntos como una sola solicitud
+       compuesta (tipo 'ajuste_malla'). Reemplaza al modal genérico #modalNuevaSolicitud cuando se elige ese
+       tipo (ver refreshNsFieldsForTipo). Estado del wizard en app.js: ajusteMallaWizardState. -->
+  <div class="modal modal-wide" id="modalAjusteMalla">
+    <div class="modal-head"><h3>Ajuste de Malla — Varios Cambios</h3><button class="modal-close" data-close>&times;</button></div>
+    <div class="modal-body">
+      <div class="filter-grid" style="grid-template-columns:1fr 1fr;">
+        <div class="field"><label for="ajusteMallaBodega">Bodega</label><select id="ajusteMallaBodega"></select></div>
+        <div class="field"><label for="ajusteMallaFecha">Fecha</label><select id="ajusteMallaFecha"></select></div>
+      </div>
+      <p class="courier-sub">Elige un turno (origen) y luego otro para intercambiar sus mensajeros, o pon una hora nueva directo en la fila para reprogramarla. Cada turno solo puede estar en un cambio del lote.</p>
+      <div class="cutoff-banner" id="ajusteMallaConfirmEnroque" hidden></div>
+      <div class="table-scroll">
+        <table id="ajusteMallaGridTable">
+          <thead><tr><th>Turno / Mensajero</th><th>Hora</th><th>Acción</th></tr></thead>
+          <tbody id="ajusteMallaGridTbody"></tbody>
+        </table>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label>Resumen del lote <span class="courier-sub" id="ajusteMallaResumenContador">0 cambios en el lote</span></label>
+        <ul id="ajusteMallaResumenLista"></ul>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btnAjusteMallaEnviar" disabled>Enviar Ajuste de Malla</button>
+    </div>
   </div>
 
   <!-- Ver requerimiento "Confirmación de Badges y Ejecución de las 5 Mejoras de UX y Arquitectura", punto 1:

@@ -1652,3 +1652,14 @@ button,.btn{font-size:12px !important;font-weight:600;padding:6px 12px;}
    viéndose como varias rayas sueltas entre columna y columna en vez de un único acento limpio en el borde
    izquierdo de la fila completa. */
 .solicitud-grupo-masivo-fila td:first-child{border-left:2px solid var(--lilac-deep);}
+
+/* Ver plan "Ajuste de Malla": estado visual de fila dentro de la grilla del wizard (#ajusteMallaGridTbody) --
+   .malla-row-origen marca el turno elegido como origen de un intercambio (a la espera de que el Aliado elija
+   el segundo); .malla-row-staged marca un turno que YA tiene un sub-cambio confirmado en el lote (deja de ser
+   clickeable para un nuevo sub-cambio, ver renderAjusteMallaGrid/v1: 1 sub-cambio por turno). */
+.malla-row-origen td{background:var(--lilac-soft);border-left:2px solid var(--lilac-deep);}
+.malla-row-staged td{background:var(--muted-soft);color:var(--text-secondary);}
+.malla-row-staged .malla-hora-input,.malla-row-staged input[type="time"]{display:none;}
+#ajusteMallaResumenLista{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;}
+#ajusteMallaResumenLista li{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--muted-soft);border-radius:8px;padding:7px 12px;font-size:12px;}
+.malla-hora-input{width:84px;}
