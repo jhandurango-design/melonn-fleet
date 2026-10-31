@@ -5077,6 +5077,11 @@ function revalidarCambiosAjusteMalla(sol) {
   function rutaValida(route, id) {
     if (!route) { motivos.push(id + ' ya no existe.'); return false; }
     if (route.retirado || route.salida) { motivos.push(route.id + ' ya fue despachado/retirado.'); return false; }
+    /* Ver FIX en routesEligiblesSolicitud (mismo incidente real): el lote pudo quedar pendiente un rato, y
+       Bodega pudo registrar la llegada de alguno de los mensajeros involucrados DESPUÉS de creada la
+       solicitud pero ANTES de que Planner la apruebe -- cierra esa ventana de carrera revalidando aquí
+       también, no solo al armar el pool del wizard. */
+    if (route.llegada) { motivos.push(route.id + ' ya registró llegada a bodega — ya no admite intercambio/reprogramación.'); return false; }
     var code = computeEstado(route).code;
     if (code === 'afectacion_confirmada' || code === 'sin_reemplazo') { motivos.push(route.id + ' ya cerró en Incumplimiento Confirmado / Sin Reemplazo.'); return false; }
     return true;
@@ -10715,12 +10720,25 @@ function closeFranjaFilterMenu() {
   if (existing) {
     existing.remove();
     document.removeEventListener('click', closeFranjaFilterMenuOnce);
-    document.removeEventListener('scroll', closeFranjaFilterMenu, true);
+    document.removeEventListener('scroll', closeFranjaFilterMenuOnScroll, true);
   }
 }
 function closeFranjaFilterMenuOnce(e) {
   var menu = document.getElementById('franjaFilterMenu');
   if (menu && !menu.contains(e.target) && e.target.id !== menu.dataset.forBtn) closeFranjaFilterMenu();
+}
+/* FIX "El menú de Franja se cierra solo apenas se intenta bajar" (reporte real: no dejaba llegar a franjas
+   como 03:30 PM en listas largas): el listener de scroll de abajo (capture:true, ver comentario del FIX
+   anterior "Filtro de Franja queda flotando...") estaba pensado para cerrar el menú cuando SE MUEVE la tabla
+   de fondo -- pero .franja-filter-menu tiene su propio overflow-y:auto (max-height:280px, ver styles.css) para
+   listas de franjas largas, y ese scroll INTERNO también llega aquí (scroll no burbujea, pero sí se propaga en
+   fase de captura desde document hasta el elemento real). Sin este chequeo, intentar bajar la lista cerraba el
+   menú en el primer pixel de scroll, bloqueando cualquier franja fuera de los primeros ~280px (ej. 03:30 PM en
+   Bogotá, con varias franjas antes). Ignora el scroll cuando su target vive DENTRO del propio menú. */
+function closeFranjaFilterMenuOnScroll(e) {
+  var menu = document.getElementById('franjaFilterMenu');
+  if (menu && menu.contains(e.target)) return;
+  closeFranjaFilterMenu();
 }
 function toggleFranjaFilterMenu(btnId, stateKey, renderFn) {
   var existing = document.getElementById('franjaFilterMenu');
@@ -10802,7 +10820,7 @@ function toggleFranjaFilterMenu(btnId, stateKey, renderFn) {
 
   document.body.appendChild(menu);
   setTimeout(function () { document.addEventListener('click', closeFranjaFilterMenuOnce); }, 0);
-  document.addEventListener('scroll', closeFranjaFilterMenu, true);
+  document.addEventListener('scroll', closeFranjaFilterMenuOnScroll, true);
 }
 /* Filtro por Estado del turno (ver mismo requerimiento) -- usa el código de computeEstado()/ESTADOS, EL
    MISMO que ya pinta la columna "Estado"/"Estado Actual" de cada tabla, para que el texto del desplegable
@@ -14529,6 +14547,15 @@ function routesEligiblesSolicitud(filterFn) {
     if (!filterFn(r)) return false;
     if (r.fecha < TODAY_STR) return false;
     if (r.retirado || r.salida) return false;
+    /* FIX "Llegada registrada queda pegada al mensajero equivocado tras un Enroque/Cambio de Mensajero"
+       (incidente real: Bogotá #2 - Montevideo, TUR-1701/TUR-1716, hoy): un turno YA con route.llegada
+       registrada (el mensajero físicamente llegó a bodega -- Check-In, ver registrarLlegadaBodega) no debe
+       admitir ninguna de las 4 solicitudes de este módulo (Reprogramación/Cancelación/Cambio de Mensajero/
+       Enroque, y por extensión Ajuste de Malla, que reutiliza este mismo pool) -- intercambiar o reemplazar
+       el mensajero DESPUÉS de que alguien ya marcó su llegada deja ese timestamp real atribuido a la persona
+       equivocada, sin que ningún flujo lo detecte. Antes de este FIX solo se excluían retirado/salida/
+       afectacion_confirmada/sin_reemplazo -- 'in_dock' (llegada sin salida/retiro) pasaba de largo. */
+    if (r.llegada) return false;
     if (r.solicitud && (r.solicitud.estado === 'pendiente' || (r.solicitud.estado === 'aceptada' && r.solicitud.tipo === 'cancelacion'))) return false;
     /* FIX "Doble Solicitud en Paralelo sobre el Mismo Turno": esta función solo excluía r.solicitud (la
        Reprogramación/Cancelación/Cambio de Mensajero/Enroque de este mismo módulo) -- un turno con una
