@@ -3798,10 +3798,6 @@ var EVENTO_CODES = {
   /* Ver requerimiento "Optimización: Trazabilidad en Historial...", punto 1c: edición DIRECTA de un turno ya
      creado (mensajero/vehículo/hora), fuera del flujo formal de Solicitudes -- ver submitTurno/formRuta. */
   'reasignacion_directa:editado': 'REASIGNACION_DIRECTA', 'reasignacion_directa:mensajero_confirmado': 'CONFIRMACION_MENSAJERO_DIRECTA',
-  /* Ver requerimiento "Reducir Acciones Redundantes en Programar Flota (Hoy)": 'correccion' (solo nombre/
-     teléfono/cédula/placa/correo del mismo mensajero, nunca hora/vehículo) deja su propio código de evento,
-     distinto de 'editado' (que en modo 'edit' sí puede tocar hora/vehículo). */
-  'reasignacion_directa:corregido': 'CORRECCION_DATOS_MENSAJERO',
   /* Ver requerimiento "Bloque Final de Correcciones...", punto 3: transición de estado puramente por regla
      de tiempo/sistema (sin acción humana), ver scanRoutes. */
   'transicion_automatica:cambio_estado': 'TRANSICION_AUTOMATICA',
@@ -13802,6 +13798,10 @@ var SOLICITUD_TIPO_LABEL_TABLA = {
   reprogramacion: 'Reprogramación', cancelacion: 'Cancelación', cambio_mensajero: 'Cambio de Mensajero', enroque: 'Intercambio de Turno',
   cuota_festivo: 'Cuota / Festivo', prolongacion: 'Prolongación de Flota', nuevo_turno: 'Nuevo Turno', cupo_adicional: 'Cupo Adicional', edicion_turno: 'Cambio de Programación',
   edicion_turno_confirmacion: 'Confirmación de Recurso Pendiente',
+  /* Ver ajuste "Cualquier cambio en Hoy debe pasar por Planner": clave de presentación para
+     detalle.modoOriginal==='correccion' (ver unifiedFromGeneral) -- distingue una simple corrección de
+     datos del mensajero (nombre/teléfono/cédula/placa/correo) de un "Cambio de Programación" real. */
+  edicion_turno_correccion: 'Corrección de Datos del Mensajero',
   reemplazo_alerta: 'Reemplazo Pendiente de Aprobación', reemplazo_cancelacion: 'Cancelación con Reemplazo Pendiente de Aprobación', ajuste_extraordinario: 'Ajuste Extraordinario',
   reprogramacion_masiva: 'Reprogramación Masiva de Ventana',
   /* Ver plan "Ajuste de Malla" (.claude/plans/rippling-imagining-dove.md): solicitud compuesta del Aliado con
@@ -13812,7 +13812,7 @@ var SOLICITUD_TIPO_LABEL_TABLA = {
 var SOLICITUD_TIPO_BADGE_CLASS = {
   reprogramacion: 'badge-warn', cancelacion: 'badge-critical', cambio_mensajero: 'badge-dispatched', enroque: 'badge-pending',
   cuota_festivo: 'badge-justified', prolongacion: 'badge-dock', nuevo_turno: 'badge-dock', cupo_adicional: 'badge-dock', edicion_turno: 'badge-warn',
-  edicion_turno_confirmacion: 'badge-dock',
+  edicion_turno_confirmacion: 'badge-dock', edicion_turno_correccion: 'badge-dock',
   reemplazo_alerta: 'badge-critical', reemplazo_cancelacion: 'badge-critical', ajuste_extraordinario: 'badge-dock',
   reprogramacion_masiva: 'badge-warn', ajuste_malla: 'badge-pending'
 };
@@ -13832,6 +13832,7 @@ var SOLICITUD_TIPO_INFO_TIP = {
   cupo_adicional: 'Solicitud de un cupo extra por encima de la cuota ya asignada al Aliado.',
   edicion_turno: 'Cambio de datos de un turno ya confirmado, enviado fuera de la ventana horaria habitual.',
   edicion_turno_confirmacion: 'El Aliado asignó su mensajero real a un cupo que había quedado "Pendiente / Por Confirmar"; pendiente de aprobación por Planner por enviarse fuera de la ventana horaria habitual.',
+  edicion_turno_correccion: 'El Aliado corrigió nombre/teléfono/cédula/placa/correo del mismo mensajero de un turno de hoy — no cambia hora ni identidad operativa, pendiente de aprobación por Planner por tratarse de un turno del día en curso.',
   reemplazo_alerta: 'Reemplazo de mensajero propuesto por el Aliado tras una alerta de incumplimiento, pendiente de aprobación.',
   reemplazo_cancelacion: 'Cancelación con reemplazo propuesto por el Aliado en el mismo envío, pendiente de aprobación.',
   reprogramacion_masiva: 'Solicitud de Planner hacia el Aliado para desplazar en bloque la hora de varias franjas/turnos de un día, pendiente de aprobación del Aliado.',
@@ -14005,7 +14006,14 @@ function unifiedFromGeneral(sol) {
      visual (tipoHtml) usa la clave distinta cuando aplica, ver SOLICITUD_TIPO_LABEL_TABLA/BADGE_CLASS/
      INFO_TIP. */
   var tipoParaBadge = (sol.tipo === 'edicion_turno' && sol.detalle && sol.detalle.modoOriginal === 'confirm')
-    ? 'edicion_turno_confirmacion' : sol.tipo;
+    ? 'edicion_turno_confirmacion'
+    /* Ver ajuste "Cualquier cambio en Hoy debe pasar por Planner": 'correccion' (ver submitTurno/
+       openTurnoModal) sigue siendo tipo real 'edicion_turno' (mismo motor de aprobación, ver
+       aplicarSolicitudGeneral) -- esta clave es puramente de presentación, igual que
+       'edicion_turno_confirmacion', para que Planner distinga de un vistazo una simple corrección de datos
+       de una edición real (hora/vehículo/mensajero). */
+    : (sol.tipo === 'edicion_turno' && sol.detalle && sol.detalle.modoOriginal === 'correccion')
+      ? 'edicion_turno_correccion' : sol.tipo;
   var rec = {
     tipo: sol.tipo, tipoHtml: solicitudTipoBadgeHtml(tipoParaBadge),
     aliado: sol.aliado, aliadoHtml: escapeHtml(sol.aliado),
@@ -15501,16 +15509,18 @@ function openTurnoModal(mode, routeId) {
 
   var ws = progEditWindowState();
   var bloqueado = document.getElementById('turnoBloqueado');
-  /* Ver requerimiento "Reducir Acciones Redundantes en Programar Flota (Hoy)": 'correccion' reemplaza a
-     'edit' para turnos de HOY -- solo corrige nombre/teléfono/cédula/placa/correo del MISMO mensajero (hora/
-     vehículo quedan bloqueados, ver más abajo) y se aplica siempre DIRECTO, sin pasar por Solicitud, sin
-     importar progEditWindowState() -- es una corrección de datos, no una decisión operativa (cambiar hora,
-     cambiar de persona, cancelar) que sí debe seguir pasando por "Solicitudes y Cambios" (Reprogramación/
-     Cambio de Mensajero/Cancelación/Enroque). Mismo banner informativo sin importar ws. */
+  /* Ver requerimiento "Reducir Acciones Redundantes en Programar Flota (Hoy)" + ajuste posterior "Cualquier
+     cambio en Hoy debe pasar por Planner": 'correccion' reemplaza a 'edit' para turnos de HOY -- solo corrige
+     nombre/teléfono/cédula/placa/correo del MISMO mensajero (hora/vehículo quedan bloqueados, ver más abajo)
+     -- pero, igual que cualquier otro cambio de un turno de Hoy, SIGUE pasando por Solicitud de Cambio
+     pendiente de aprobación de Planner (ver el bloque `else` de submitTurno, sin excepción para este modo).
+     La diferencia real es de ETIQUETA, no de flujo: la solicitud queda marcada como "Corrección de Datos del
+     Mensajero" (ver detalle.modoOriginal/unifiedFromGeneral), distinta de "Cambio de Programación", para que
+     Planner la reconozca de un vistazo como un simple ajuste de datos y no como un cambio operativo real. */
   if (mode === 'correccion') {
     bloqueado.hidden = false;
-    bloqueado.className = 'cutoff-banner';
-    bloqueado.innerHTML = ICONS.info + '<span>Esto corrige únicamente los datos del mensajero (nombre, teléfono, cédula, placa, correo) y se aplica de inmediato, sin aprobación. Para <strong>reprogramar la hora</strong>, <strong>cambiar de mensajero</strong> o <strong>cancelar</strong> el turno, usa el módulo <strong>"Solicitudes y Cambios"</strong>.</span>';
+    bloqueado.className = 'cutoff-banner danger';
+    bloqueado.innerHTML = ICONS.alert + '<span>Esto corrige únicamente los datos del mensajero (nombre, teléfono, cédula, placa, correo) — se enviará a Planner como <strong>"Corrección de Datos del Mensajero"</strong> (pendiente de aprobación, igual que cualquier cambio de un turno de hoy). Para <strong>reprogramar la hora</strong>, <strong>cambiar de mensajero</strong> o <strong>cancelar</strong> el turno, usa el módulo <strong>"Solicitudes y Cambios"</strong>.</span>';
   } else if (ws === 'today_solicitud') {
     bloqueado.hidden = false;
     bloqueado.className = 'cutoff-banner danger';
@@ -16220,12 +16230,12 @@ function submitTurno(e) {
     }
   }
 
-  /* Ver requerimiento "Reducir Acciones Redundantes en Programar Flota (Hoy)": 'correccion' aplica SIEMPRE
-     directo (nunca como Solicitud de Cambio), sin importar progEditWindowState()/directo -- ver banner en
-     openTurnoModal. Cae en la misma rama que 'edit' más abajo (route ya existe, hora/vehiculo nunca cambian
-     para este modo, así que las validaciones de franja/secuencia que dependen de route.hora!==hora o
-     route.vehiculo!==vehiculo quedan como no-op automáticamente). */
-  if (directo || modo === 'correccion') {
+  /* Ver ajuste "Cualquier cambio en Hoy debe pasar por Planner": 'correccion' ya NO fuerza aplicación directa
+     -- sigue exactamente el mismo criterio que 'edit'/'confirm' (progEditWindowState()/directo), así que un
+     turno de Hoy siempre cae en la rama `else` de Solicitud más abajo, igual que cualquier otro cambio del
+     día en curso. Solo se distingue por ETIQUETA (detalle.modoOriginal='correccion', ver motivoSol/
+     unifiedFromGeneral), nunca por saltarse la aprobación. */
+  if (directo) {
     if (modo === 'create') {
       var nuevoTurnoDirecto = { id: nextTurnoId(), sede: sede, fecha: fecha, mensajeroId: mensajeroIdCreate, vehiculo: vehiculo, hora: hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: pendiente };
       state.turnos.push(nuevoTurnoDirecto);
@@ -16351,11 +16361,9 @@ function submitTurno(e) {
         if (vehiculoAnteriorDirecto !== vehiculo) cambiosDirecto.push('Vehículo: ' + vehiculoAnteriorDirecto + ' → ' + vehiculo);
         if (horaAnteriorDirecto !== hora) cambiosDirecto.push('Hora: ' + fmtTime12(horaAnteriorDirecto) + ' → ' + fmtTime12(hora));
         if (cambiosDirecto.length) {
-          var accionDirecta = modo === 'confirm' ? 'mensajero_confirmado' : modo === 'correccion' ? 'corregido' : 'editado';
-          var motivoDirecto = (modo === 'correccion' ? 'Corrección de datos del mensajero — ' : '') + cambiosDirecto.join(' · ');
-          registrarHistorialCambio(route, { tipo: 'reasignacion_directa', accion: accionDirecta, motivo: motivoDirecto, horaAnterior: horaAnteriorDirecto, horaPropuesta: hora, por: state.user.nombre });
+          registrarHistorialCambio(route, { tipo: 'reasignacion_directa', accion: modo === 'confirm' ? 'mensajero_confirmado' : 'editado', motivo: cambiosDirecto.join(' · '), horaAnterior: horaAnteriorDirecto, horaPropuesta: hora, por: state.user.nombre });
         }
-        toast('ok', modo === 'correccion' ? 'Datos corregidos' : modo === 'confirm' ? 'Mensajero confirmado' : 'Turno actualizado', route.id + ' fue actualizado.');
+        toast('ok', modo === 'confirm' ? 'Mensajero confirmado' : 'Turno actualizado', route.id + ' fue actualizado.');
         /* Ver requerimiento "Recalculación / Promoción Automática de Adicionales al Eliminar": mover este
            turno a otra hora/vehículo saca su plaza del bucket ANTERIOR exactamente igual que eliminarlo -- si
            ahí quedaba un Adicional esperando, esta edición puede ser justo lo que lo saca de cupo excedido. */
@@ -16384,7 +16392,9 @@ function submitTurno(e) {
       ? 'Alta de nuevo turno enviada fuera del horario de programación.'
       : modo === 'confirm'
         ? 'El Aliado confirmó el mensajero para un cupo que quedó "Pendiente / Por Confirmar"; al enviarse fuera del horario de programación, requiere aprobación de Planner antes de quedar en firme.'
-        : (ws === 'today_solicitud' ? 'Edición de un turno de hoy — toda modificación del día en curso requiere aprobación de Planner.' : 'Edición de turno enviada fuera del horario de programación.');
+        : modo === 'correccion'
+          ? 'Corrección de datos del mensajero (nombre/teléfono/cédula/placa/correo) de un turno de hoy — no cambia hora ni mensajero, pero toda modificación del día en curso requiere aprobación de Planner.'
+          : (ws === 'today_solicitud' ? 'Edición de un turno de hoy — toda modificación del día en curso requiere aprobación de Planner.' : 'Edición de turno enviada fuera del horario de programación.');
     solGeneralCreada = {
       id: nextSolicitudGeneralId(), tipo: tipoSol, estado: 'pendiente', aliado: state.user.aliado,
       solicitadoPor: state.user.nombre, solicitadoEn: fmtClock(state.now), fecha: TODAY_STR,
