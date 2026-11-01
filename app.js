@@ -3798,6 +3798,10 @@ var EVENTO_CODES = {
   /* Ver requerimiento "Optimización: Trazabilidad en Historial...", punto 1c: edición DIRECTA de un turno ya
      creado (mensajero/vehículo/hora), fuera del flujo formal de Solicitudes -- ver submitTurno/formRuta. */
   'reasignacion_directa:editado': 'REASIGNACION_DIRECTA', 'reasignacion_directa:mensajero_confirmado': 'CONFIRMACION_MENSAJERO_DIRECTA',
+  /* Ver requerimiento "Reducir Acciones Redundantes en Programar Flota (Hoy)": 'correccion' (solo nombre/
+     teléfono/cédula/placa/correo del mismo mensajero, nunca hora/vehículo) deja su propio código de evento,
+     distinto de 'editado' (que en modo 'edit' sí puede tocar hora/vehículo). */
+  'reasignacion_directa:corregido': 'CORRECCION_DATOS_MENSAJERO',
   /* Ver requerimiento "Bloque Final de Correcciones...", punto 3: transición de estado puramente por regla
      de tiempo/sistema (sin acción humana), ver scanRoutes. */
   'transicion_automatica:cambio_estado': 'TRANSICION_AUTOMATICA',
@@ -9836,7 +9840,13 @@ function renderProgBanner() {
        modal ya lo advierte con su banner interno (ver turnoBloqueado en openTurnoModal). Este banner
        superior queda estrictamente informativo. */
     banner.className = 'cutoff-banner danger';
-    banner.innerHTML = ICONS.alert + '<span>La Programación de Flota de <strong>hoy</strong> ya cerró; esta vista es de solo lectura. Cualquier adición de turno o cambio debe enviarse como solicitud para aprobación del Planner mediante el botón <strong>"+ Nuevo Turno"</strong>.</span>';
+    /* Ver requerimiento "Reducir Acciones Redundantes en Programar Flota (Hoy)": texto actualizado para
+       distinguir los 3 caminos reales de Hoy -- alta nueva ("+ Nuevo Turno", siempre como Solicitud),
+       corrección de un dato mal escrito del mismo mensajero (botón "Corregir datos" en la fila, directo, sin
+       aprobación), y cualquier cambio real (reprogramar hora, cambiar de mensajero, cancelar, intercambiar)
+       que debe iniciarse desde "Solicitudes y Cambios" -- ya no desde "Editar" (retirado de Hoy, ver
+       rowHtmlProg). */
+    banner.innerHTML = ICONS.alert + '<span>La Programación de Flota de <strong>hoy</strong> ya cerró. Un turno nuevo se envía como solicitud con <strong>"+ Nuevo Turno"</strong>; para <strong>reprogramar, cambiar de mensajero, cancelar o intercambiar</strong> un turno existente, usa el módulo <strong>"Solicitudes y Cambios"</strong>. Si solo necesitas corregir un dato mal escrito del mismo mensajero, usa <strong>"Corregir datos"</strong> en la fila — eso sí se aplica de inmediato.</span>';
     return;
   }
   var ws = progWindowState();
@@ -10265,10 +10275,20 @@ function rowHtmlProg(route) {
       badgeInfoTipHtml(route.id + ' ya está en "Incumplimiento / Requiere Reemplazo". Este cambio ya no se gestiona por aquí — ve a Alertas Activas y usa el botón "Confirmar Reemplazo" sobre esta fila: ese flujo sí reabre el ciclo de llegada/despacho y registra el ausentismo del mensajero saliente correctamente.') +
       '</span>';
   } else if (!yaEnCiclo) {
-    /* Editar ya no depende de state.progDay === 'tomorrow': Hoy y Mañana admiten edición por igual, solo
-       que el resultado (directo vs. Solicitud de Cambio) lo decide progEditWindowState() dentro del modal
-       (ver openTurnoModal/submitTurno) — Hoy siempre exige aprobación, Mañana sigue el cutoff existente. */
-    actions += iconEditButtonHtml('editar-turno', ' data-id="' + route.id + '"');
+    /* Ver requerimiento "Reducir Acciones Redundantes en Programar Flota (Hoy)": HOY ya no ofrece "Editar"
+       completo (hora/vehículo/mensajero juntos) -- ese formulario siempre terminaba en la misma Solicitud de
+       Cambio que ya ofrece "Solicitudes y Cambios" (Reprogramación/Cambio de Mensajero/Cancelación/Enroque),
+       duplicando el mismo resultado por 2 caminos distintos y confundiendo cuál usar. En su lugar, Hoy ofrece
+       "Corregir datos" (modo 'correccion', ver openTurnoModal/submitTurno): solo arregla un dato mal escrito
+       del MISMO mensajero (nombre/teléfono/cédula/placa/correo), se aplica directo sin aprobación, y deja
+       claro en su propio banner que reprogramar/cambiar de mensajero/cancelar debe hacerse desde Solicitudes
+       y Cambios. Mañana conserva "Editar" intacto (sigue siendo la única vía de edición directa pre-cutoff,
+       no redundante con nada). */
+    if (route.fecha === TODAY_STR) {
+      actions += '<button data-act="corregir-turno" data-id="' + route.id + '" data-tip="Solo corrige nombre, teléfono, cédula, placa o correo del mismo mensajero. Para reprogramar, cambiar de mensajero o cancelar, usa Solicitudes y Cambios.">Corregir datos</button>';
+    } else {
+      actions += iconEditButtonHtml('editar-turno', ' data-id="' + route.id + '"');
+    }
     /* FIX "Botón de Desasignación ausente para turnos de Hoy": antes este botón solo se renderizaba para
        state.progDay === 'tomorrow' -- una vez que la fecha de un turno cruza a Hoy (TODAY_STR), la vista no
        ofrecía NINGUNA forma de desasignar un mensajero ya confirmado, ni directa ni por solicitud (Editar sí
@@ -15476,12 +15496,22 @@ function openTurnoModal(mode, routeId) {
   }
   document.getElementById('turnoModo').value = mode;
   document.getElementById('turnoRouteId').value = routeId || '';
-  document.getElementById('modalTurnoTitle').textContent = mode === 'confirm' ? 'Confirmar datos de mensajero' : mode === 'edit' ? 'Editar turno' : 'Nuevo turno';
-  document.getElementById('turnoSubmitBtn').textContent = mode === 'confirm' ? 'Confirmar mensajero' : 'Guardar turno';
+  document.getElementById('modalTurnoTitle').textContent = mode === 'correccion' ? 'Corregir datos del mensajero' : mode === 'confirm' ? 'Confirmar datos de mensajero' : mode === 'edit' ? 'Editar turno' : 'Nuevo turno';
+  document.getElementById('turnoSubmitBtn').textContent = mode === 'correccion' ? 'Guardar corrección' : mode === 'confirm' ? 'Confirmar mensajero' : 'Guardar turno';
 
   var ws = progEditWindowState();
   var bloqueado = document.getElementById('turnoBloqueado');
-  if (ws === 'today_solicitud') {
+  /* Ver requerimiento "Reducir Acciones Redundantes en Programar Flota (Hoy)": 'correccion' reemplaza a
+     'edit' para turnos de HOY -- solo corrige nombre/teléfono/cédula/placa/correo del MISMO mensajero (hora/
+     vehículo quedan bloqueados, ver más abajo) y se aplica siempre DIRECTO, sin pasar por Solicitud, sin
+     importar progEditWindowState() -- es una corrección de datos, no una decisión operativa (cambiar hora,
+     cambiar de persona, cancelar) que sí debe seguir pasando por "Solicitudes y Cambios" (Reprogramación/
+     Cambio de Mensajero/Cancelación/Enroque). Mismo banner informativo sin importar ws. */
+  if (mode === 'correccion') {
+    bloqueado.hidden = false;
+    bloqueado.className = 'cutoff-banner';
+    bloqueado.innerHTML = ICONS.info + '<span>Esto corrige únicamente los datos del mensajero (nombre, teléfono, cédula, placa, correo) y se aplica de inmediato, sin aprobación. Para <strong>reprogramar la hora</strong>, <strong>cambiar de mensajero</strong> o <strong>cancelar</strong> el turno, usa el módulo <strong>"Solicitudes y Cambios"</strong>.</span>';
+  } else if (ws === 'today_solicitud') {
     bloqueado.hidden = false;
     bloqueado.className = 'cutoff-banner danger';
     bloqueado.innerHTML = ICONS.alert + '<span><strong>Turno de HOY.</strong> Este cambio se registrará como Solicitud de Cambio (Pendiente de Aprobación por Planner) — no se aplicará en vivo hasta que Planner la apruebe.</span>';
@@ -15549,6 +15579,8 @@ function openTurnoModal(mode, routeId) {
        el Aliado pueda reservar manualmente una franja sin datos de mensajero. */
     pendienteField.hidden = cuotasActivoPais(myCountry);
     sedeSel.disabled = false;
+    vehSel.disabled = false;
+    document.getElementById('turnoHora').disabled = false;
     sedeSel.value = sedesAliado[0];
     vehSel.value = vehiculosAliado[0];
     document.getElementById('turnoHora').value = '08:00';
@@ -15560,6 +15592,8 @@ function openTurnoModal(mode, routeId) {
   } else if (mode === 'confirm') {
     pendienteField.hidden = true;
     sedeSel.disabled = true;
+    vehSel.disabled = false;
+    document.getElementById('turnoHora').disabled = false;
     sedeSel.value = route.sede;
     vehSel.value = route.vehiculo;
     document.getElementById('turnoHora').value = route.hora;
@@ -15572,6 +15606,11 @@ function openTurnoModal(mode, routeId) {
     var m2 = getMensajero(route.mensajeroId);
     pendienteField.hidden = true;
     sedeSel.disabled = true;
+    /* Ver requerimiento "Reducir Acciones Redundantes en Programar Flota (Hoy)": 'correccion' bloquea
+       Vehículo y Hora -- solo los datos propios del mensajero son editables por esta vía (ver banner arriba
+       y la rama modo==='correccion' en submitTurno, que nunca lee estos 2 campos para mutar la ruta). */
+    vehSel.disabled = mode === 'correccion';
+    document.getElementById('turnoHora').disabled = mode === 'correccion';
     sedeSel.value = route.sede;
     vehSel.value = route.vehiculo;
     document.getElementById('turnoHora').value = route.hora;
@@ -16178,7 +16217,12 @@ function submitTurno(e) {
     }
   }
 
-  if (directo) {
+  /* Ver requerimiento "Reducir Acciones Redundantes en Programar Flota (Hoy)": 'correccion' aplica SIEMPRE
+     directo (nunca como Solicitud de Cambio), sin importar progEditWindowState()/directo -- ver banner en
+     openTurnoModal. Cae en la misma rama que 'edit' más abajo (route ya existe, hora/vehiculo nunca cambian
+     para este modo, así que las validaciones de franja/secuencia que dependen de route.hora!==hora o
+     route.vehiculo!==vehiculo quedan como no-op automáticamente). */
+  if (directo || modo === 'correccion') {
     if (modo === 'create') {
       var nuevoTurnoDirecto = { id: nextTurnoId(), sede: sede, fecha: fecha, mensajeroId: mensajeroIdCreate, vehiculo: vehiculo, hora: hora, llegada: null, salida: null, justificado: false, maleta: null, retirado: false, observaciones: null, pendienteAsignacion: pendiente };
       state.turnos.push(nuevoTurnoDirecto);
@@ -16261,7 +16305,8 @@ function submitTurno(e) {
            Solicitudes) no dejaba NINGÚN rastro en route.historialCambios -- se captura el snapshot ANTES de
            mutar para loguear exactamente qué cambió. */
         var mensajeroAnteriorIdDirecto = route.mensajeroId;
-        var mensajeroAnteriorNombre = getMensajero(route.mensajeroId).nombre;
+        var mensajeroAnteriorDatos = getMensajero(route.mensajeroId);
+        var mensajeroAnteriorNombre = mensajeroAnteriorDatos.nombre;
         var vehiculoAnteriorDirecto = route.vehiculo, horaAnteriorDirecto = route.hora;
         /* Ver FIX "Bug Crítico de Edición y Persistencia en Supabase": snapshot completo de la ruta ANTES de
            mutarla -- único punto de rollback si la confirmación de Supabase falla más abajo. */
@@ -16289,15 +16334,25 @@ function submitTurno(e) {
           mensajeroNuevoCreado = getMensajero(route.mensajeroId);
           mensajeroSupersededDirecto = getMensajero(mensajeroAnteriorIdDirecto);
         }
-        var mensajeroNuevoNombre = getMensajero(route.mensajeroId).nombre;
+        var mensajeroNuevoDatos = getMensajero(route.mensajeroId);
         var cambiosDirecto = [];
-        if (mensajeroAnteriorNombre !== mensajeroNuevoNombre) cambiosDirecto.push('Mensajero: ' + mensajeroAnteriorNombre + ' → ' + mensajeroNuevoNombre);
+        if (mensajeroAnteriorNombre !== mensajeroNuevoDatos.nombre) cambiosDirecto.push('Nombre: ' + mensajeroAnteriorNombre + ' → ' + mensajeroNuevoDatos.nombre);
+        /* Ver requerimiento "Reducir Acciones Redundantes en Programar Flota (Hoy)": 'correccion' solo toca
+           estos 4 campos (nunca vehículo/hora, ver banner/campos deshabilitados en openTurnoModal) -- antes
+           esta comparación solo miraba el nombre, así que corregir SOLO el teléfono/cédula/placa/correo
+           (sin tocar el nombre) no dejaba ningún rastro en historialCambios pese a haber cambiado algo real. */
+        if (mensajeroAnteriorDatos.telefono !== mensajeroNuevoDatos.telefono) cambiosDirecto.push('Teléfono: ' + (mensajeroAnteriorDatos.telefono || '—') + ' → ' + (mensajeroNuevoDatos.telefono || '—'));
+        if (mensajeroAnteriorDatos.cedula !== mensajeroNuevoDatos.cedula) cambiosDirecto.push('CÉDULA/INE: ' + (mensajeroAnteriorDatos.cedula || '—') + ' → ' + (mensajeroNuevoDatos.cedula || '—'));
+        if (mensajeroAnteriorDatos.placa !== mensajeroNuevoDatos.placa) cambiosDirecto.push('Placa: ' + (mensajeroAnteriorDatos.placa || '—') + ' → ' + (mensajeroNuevoDatos.placa || '—'));
+        if ((mensajeroAnteriorDatos.correo || '') !== (mensajeroNuevoDatos.correo || '')) cambiosDirecto.push('Correo: ' + (mensajeroAnteriorDatos.correo || '—') + ' → ' + (mensajeroNuevoDatos.correo || '—'));
         if (vehiculoAnteriorDirecto !== vehiculo) cambiosDirecto.push('Vehículo: ' + vehiculoAnteriorDirecto + ' → ' + vehiculo);
         if (horaAnteriorDirecto !== hora) cambiosDirecto.push('Hora: ' + fmtTime12(horaAnteriorDirecto) + ' → ' + fmtTime12(hora));
         if (cambiosDirecto.length) {
-          registrarHistorialCambio(route, { tipo: 'reasignacion_directa', accion: modo === 'confirm' ? 'mensajero_confirmado' : 'editado', motivo: cambiosDirecto.join(' · '), horaAnterior: horaAnteriorDirecto, horaPropuesta: hora, por: state.user.nombre });
+          var accionDirecta = modo === 'confirm' ? 'mensajero_confirmado' : modo === 'correccion' ? 'corregido' : 'editado';
+          var motivoDirecto = (modo === 'correccion' ? 'Corrección de datos del mensajero — ' : '') + cambiosDirecto.join(' · ');
+          registrarHistorialCambio(route, { tipo: 'reasignacion_directa', accion: accionDirecta, motivo: motivoDirecto, horaAnterior: horaAnteriorDirecto, horaPropuesta: hora, por: state.user.nombre });
         }
-        toast('ok', modo === 'confirm' ? 'Mensajero confirmado' : 'Turno actualizado', route.id + ' fue actualizado.');
+        toast('ok', modo === 'correccion' ? 'Datos corregidos' : modo === 'confirm' ? 'Mensajero confirmado' : 'Turno actualizado', route.id + ' fue actualizado.');
         /* Ver requerimiento "Recalculación / Promoción Automática de Adicionales al Eliminar": mover este
            turno a otra hora/vehículo saca su plaza del bucket ANTERIOR exactamente igual que eliminarlo -- si
            ahí quedaba un Adicional esperando, esta edición puede ser justo lo que lo saca de cupo excedido. */
@@ -24315,6 +24370,7 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'justificar') openJustificarModal(id);
     else if (act === 'editar') openRutaModal(id);
     else if (act === 'editar-turno') openTurnoModal('edit', id);
+    else if (act === 'corregir-turno') openTurnoModal('correccion', id);
     else if (act === 'editar-observacion-bodega') openObservacionBodegaModal(id);
     else if (act === 'desasignar-mensajero') desasignarMensajero(id);
     else if (act === 'confirmar-mensajero') openTurnoModal('confirm', id);
