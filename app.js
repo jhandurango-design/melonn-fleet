@@ -15623,10 +15623,13 @@ function openTurnoModal(mode, routeId) {
   /* Ver requerimiento "Corrección de Feedback Visual al Crear Mensajero" (reporte de Fabian Meneses/Cabify):
      reseteo defensivo del botón "Guardar turno" -- si una apertura anterior del modal quedó con el botón
      deshabilitado/en espera (p. ej. el Aliado cerró el modal manualmente mientras un intento previo seguía
-     esperando la confirmación de Supabase), la siguiente apertura no debe heredar ese estado. */
+     esperando la confirmación de Supabase), la siguiente apertura no debe heredar ese estado.
+     FIX: solo reseteaba `disabled`, pero el texto se forzaba siempre a 'Guardar turno' -- pisando por
+     completo el texto específico de modo ya fijado más arriba ('Confirmar mensajero' en 'confirm',
+     'Guardar corrección' en 'correccion'). Se reescribe aquí mismo con el mismo texto correcto por modo. */
   var turnoSubmitBtnReset = document.getElementById('turnoSubmitBtn');
   turnoSubmitBtnReset.disabled = false;
-  turnoSubmitBtnReset.textContent = 'Guardar turno';
+  turnoSubmitBtnReset.textContent = mode === 'correccion' ? 'Guardar corrección' : mode === 'confirm' ? 'Confirmar mensajero' : 'Guardar turno';
   openModal('modalTurno');
 }
 function openRechazarSolicitudModal(routeId) {
