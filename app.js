@@ -3441,20 +3441,25 @@ function isVanCategory(vehiculo) { return vehiculo === 'Van´s' || vehiculo === 
 function cancelacionThresholds() {
   var g = (state.configSettings && state.configSettings.gravity) || {};
   var moto = typeof g.cancelacionMotoHoras === 'number' && g.cancelacionMotoHoras >= 0 ? g.cancelacionMotoHoras : 1;
+  /* Ver ajuste "Umbral único de Vans (12h, sin tope máximo)": antes exigía una VENTANA cerrada (mínimo Y
+     máximo horas antes), penalizando absurdamente una cancelación con MÁS anticipación todavía que el
+     máximo -- más aviso nunca debería ser peor. Mismo criterio que Motos ahora: un solo umbral, sin tope. */
   var vanMin = typeof g.cancelacionVanHorasMin === 'number' && g.cancelacionVanHorasMin >= 0 ? g.cancelacionVanHorasMin : 12;
-  var vanMax = typeof g.cancelacionVanHorasMax === 'number' && g.cancelacionVanHorasMax >= 0 ? g.cancelacionVanHorasMax : 24;
-  return { moto: moto, vanMin: vanMin, vanMax: vanMax };
+  return { moto: moto, vanMin: vanMin };
 }
 function computeCancelPenalty(route) {
   var progDT = parseDT(route.fecha, route.hora);
   var horasAntes = minutesDiff(progDT, state.now) / 60;
   var esVan = isVanCategory(route.vehiculo);
   var th = cancelacionThresholds();
-  var sinPenalizacion = esVan ? (horasAntes >= th.vanMin && horasAntes <= th.vanMax) : (horasAntes >= th.moto);
+  var sinPenalizacion = esVan ? (horasAntes >= th.vanMin) : (horasAntes >= th.moto);
   /* Ver requerimiento "Regla Definitiva para Recursos Adicionales": NINGUNA exención automática -- un turno
      Adicional sigue exactamente la misma regla de penalización por cancelación que cualquier otro (punto B,
      "Traza End-to-End"). esAdicional viaja solo como DATO informativo (ver esTurnoAdicional/
-     turnoAdicionalRowBadgeHtml), para que Auditoría de Cobros lo muestre en pantalla y el Auditor decida. */
+     turnoAdicionalRowBadgeHtml), para que Auditoría de Cobros lo muestre en pantalla y el Auditor decida.
+     Ver además la nueva elegibilidad en refreshNsFieldsForTipo: desde ahora un turno de Cuota/Base ni
+     siquiera puede llegar a "Cancelar sin reemplazo" por esta vía -- esAdicional sigue viajando aquí solo
+     como dato de Auditoría, nunca se borra. */
   var esAdicional = esTurnoAdicional(route);
   return {
     categoria: route.vehiculo,
@@ -3462,7 +3467,7 @@ function computeCancelPenalty(route) {
     horasAntesCargue: Math.round(horasAntes * 10) / 10,
     aplicaPenalizacion: !sinPenalizacion,
     esAdicional: esAdicional,
-    regla: esVan ? ('Vans: sin penalización entre ' + th.vanMin + ' y ' + th.vanMax + ' horas antes del cargue.') : ('Motos: sin penalización hasta ' + th.moto + ' hora(s) antes del cargue.')
+    regla: esVan ? ('Vans: sin penalización desde ' + th.vanMin + ' horas antes del cargue.') : ('Motos: sin penalización desde ' + th.moto + ' hora(s) antes del cargue.')
   };
 }
 /* Clasificación de antelación de una solicitud de Reprogramación enviada por el Aliado (ver
@@ -14684,6 +14689,45 @@ function refreshNsFieldsForTipo() {
   } else {
     bannerCmNs.hidden = true;
   }
+  /* Ver ajuste "Elegibilidad de Cancelación por Cuota/Adicional y Minutos Restantes": no toda ruta elegible
+     en #nsRuta debe poder usar "Cancelar el turno (sin reemplazo)" -- 2 casos, mismo patrón de banner +
+     segunda barrera en submit que ya usa Cambio de Mensajero arriba:
+     1) Turno de CUOTA/Base (no esTurnoAdicional): cancelarlo sin reemplazo deja un cupo CONTRATADO sin
+        cubrir -- un daño operativo real para Melonn sin importar cuánta antelación dé el Aliado (a
+        diferencia de la penalización económica de computeCancelPenalty, que SÍ depende del tiempo). Nunca
+        elegible por esta vía.
+     2) Turno Adicional (esTurnoAdicional): sigue siendo elegible, pero solo con 60 min o más antes de la
+        hora pactada -- por debajo de eso ya no tiene sentido "cancelar sin reemplazo" en frío, el camino
+        correcto pasa a ser Alertas Activas (igual que Cambio de Mensajero en 'critical'). */
+  var esCancelacionNs = tipo === 'cancelacion';
+  var noSanaCancelacionNs = false;
+  var bannerCancelacionNs = document.getElementById('nsCancelacionNoSanaBanner');
+  if (esCancelacionNs) {
+    var routeCancNs = state.turnos.find(function (r) { return r.id === document.getElementById('nsRuta').value; });
+    if (routeCancNs) {
+      if (!esTurnoAdicional(routeCancNs)) {
+        noSanaCancelacionNs = true;
+        bannerCancelacionNs.hidden = false;
+        bannerCancelacionNs.innerHTML = ICONS.alert + '<span><strong>' + routeCancNs.id + ' es un turno de Cupo/Cuota contratada.</strong> ' +
+          'Cancelar sin reemplazo no está disponible para turnos de cuota -- un cupo contratado sin cubrir sí afecta la operación. ' +
+          'Si de verdad no puedes cubrirlo, usa <strong>"Cambiar mensajero"</strong> para buscar un reemplazo, o espera a que el ciclo normal de Alertas lo gestione.</span>';
+      } else {
+        var minRestantesCancNs = minutesDiff(parseDT(routeCancNs.fecha, routeCancNs.hora), state.now);
+        if (minRestantesCancNs < 60) {
+          noSanaCancelacionNs = true;
+          bannerCancelacionNs.hidden = false;
+          bannerCancelacionNs.innerHTML = ICONS.alert + '<span><strong>Faltan menos de 60 minutos para la hora pactada de ' + routeCancNs.id + '.</strong> ' +
+            'Cancelar sin reemplazo ya no está disponible por esta vía -- gestiona este turno desde <strong>Alertas Activas</strong> cuando corresponda.</span>';
+        } else {
+          bannerCancelacionNs.hidden = true;
+        }
+      }
+    } else {
+      bannerCancelacionNs.hidden = true;
+    }
+  } else {
+    bannerCancelacionNs.hidden = true;
+  }
   document.getElementById('nsCambioMensajeroFields').hidden = !esCambioMensajero || noSanoCmNs;
   if (esCambioMensajero && !noSanoCmNs) {
     var countryCmNs = routeCmNs ? countryForSede(routeCmNs.sede) : countryForAliado(state.user.aliado);
@@ -21170,7 +21214,7 @@ function configDefaults() {
          reemplazo ni el Planner autoriza una excepción dentro de este plazo, el ciclo cierra solo como
          Incumplimiento Confirmado y Bodega solo conserva "Se Retira" (ver computeEstado/rowHtmlDespacho). */
       slaNovedadElementos: 60,
-      cancelacionMotoHoras: 1, cancelacionVanHorasMin: 12, cancelacionVanHorasMax: 24,
+      cancelacionMotoHoras: 1, cancelacionVanHorasMin: 12,
       alertaCierre: '21:00', cierreProgramacion: '22:00', limiteProlongacion: '00:00'
     },
     notificaciones: { incumplimientosSla: true, solicitudesPendientes: true, bloqueosSeguridad: true, cierreProgramacion: true },
@@ -21570,9 +21614,8 @@ function renderConfiguracionBuild() {
       '<input type="number" class="config-input" id="cfgSlaNovedadElementos" min="0" step="5" value="' + cfg.gravity.slaNovedadElementos + '"> min') +
     configRowInputHtml('Cancelación Melonn — Motos', 'Horas mínimas de anticipación antes del cargue para que una cancelación de Melonn NO genere Standby a favor del Aliado.',
       '<input type="number" class="config-input" id="cfgCancelacionMotoHoras" min="0" step="1" value="' + cfg.gravity.cancelacionMotoHoras + '"> h') +
-    configRowInputHtml('Cancelación Melonn — Vans (ventana sin penalización)', 'Rango de horas de anticipación (mínimo y máximo) antes del cargue dentro del cual una cancelación de Melonn NO genera Standby.',
-      '<input type="number" class="config-input" id="cfgCancelacionVanHorasMin" min="0" step="1" value="' + cfg.gravity.cancelacionVanHorasMin + '" style="width:60px;"> a ' +
-      '<input type="number" class="config-input" id="cfgCancelacionVanHorasMax" min="0" step="1" value="' + cfg.gravity.cancelacionVanHorasMax + '" style="width:60px;"> h') +
+    configRowInputHtml('Cancelación Melonn — Vans', 'Horas mínimas de anticipación antes del cargue para que una cancelación de Melonn NO genere Standby a favor del Aliado.',
+      '<input type="number" class="config-input" id="cfgCancelacionVanHorasMin" min="0" step="1" value="' + cfg.gravity.cancelacionVanHorasMin + '"> h') +
     configRowInputHtml('SLA de despacho en bodega', 'Tiempo máximo en bodega desde la llegada efectiva hasta el despacho.',
       '<input type="number" class="config-input" id="cfgSlaDespacho" min="0" step="5" value="' + cfg.gravity.slaDespacho + '"> min') +
     configRowInputHtml('Alerta preventiva de cierre — Programación de Flota', 'Hora a la que se muestra el aviso de "cierre en 1 hora" al Aliado.',
@@ -21602,7 +21645,6 @@ function saveConfigTab(tab) {
       slaNovedadElementos: parseInt(document.getElementById('cfgSlaNovedadElementos').value, 10) || 0,
       cancelacionMotoHoras: parseInt(document.getElementById('cfgCancelacionMotoHoras').value, 10) || 0,
       cancelacionVanHorasMin: parseInt(document.getElementById('cfgCancelacionVanHorasMin').value, 10) || 0,
-      cancelacionVanHorasMax: parseInt(document.getElementById('cfgCancelacionVanHorasMax').value, 10) || 0,
       slaDespacho: parseInt(document.getElementById('cfgSlaDespacho').value, 10) || 0,
       alertaCierre: document.getElementById('cfgAlertaCierre').value || cfg.gravity.alertaCierre,
       cierreProgramacion: document.getElementById('cfgCierreProgramacion').value || cfg.gravity.cierreProgramacion,
@@ -23240,7 +23282,7 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('nsTipo').addEventListener('change', refreshNsFieldsForTipo);
   document.getElementById('nsRuta').addEventListener('change', function () {
     var tipoNsRutaChange = document.getElementById('nsTipo').value;
-    if (tipoNsRutaChange === 'enroque' || tipoNsRutaChange === 'cambio_mensajero') refreshNsFieldsForTipo();
+    if (tipoNsRutaChange === 'enroque' || tipoNsRutaChange === 'cambio_mensajero' || tipoNsRutaChange === 'cancelacion') refreshNsFieldsForTipo();
   });
   document.getElementById('nsNtPendiente').addEventListener('change', function (e) {
     document.getElementById('nsNtDatosMensajero').hidden = e.target.checked;
@@ -23300,6 +23342,20 @@ document.addEventListener('DOMContentLoaded', function () {
     if (esCambioMensajeroNs && codeNs === 'critical') {
       toast('warn', 'Usa Confirmar Reemplazo en Alertas', route.id + ' ya está en Incumplimiento / Requiere Reemplazo — asigna el reemplazo desde Alertas Activas, no desde aquí.');
       return;
+    }
+    /* Tercera barrera (ver #nsCancelacionNoSanaBanner/refreshNsFieldsForTipo, que ya bloquea esto en vivo):
+       mismo criterio que la de Cambio de Mensajero arriba -- cubre al Aliado que seleccionó el turno/tipo
+       antes de que dejara de ser elegible (p. ej. se le fueron los minutos mientras tenía el modal abierto)
+       y envía el formulario sin volver a tocar #nsRuta/#nsTipo. */
+    if (tipo === 'cancelacion') {
+      if (!esTurnoAdicional(route)) {
+        toast('warn', 'No disponible para turnos de Cuota', route.id + ' es un turno de Cupo/Cuota contratada — cancelar sin reemplazo no está disponible por esta vía.');
+        return;
+      }
+      if (minutesDiff(parseDT(route.fecha, route.hora), state.now) < 60) {
+        toast('warn', 'Fuera de ventana', 'Faltan menos de 60 minutos para la hora pactada de ' + route.id + ' — gestiona este turno desde Alertas Activas.');
+        return;
+      }
     }
     var mensajeroPropuesto = null;
     var motivo;
