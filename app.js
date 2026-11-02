@@ -4605,13 +4605,55 @@ function continuarTrasRegularizacion() {
         extraordinario): SLA explícito de 1 hora (gravityThresholds().slaAlertaBodega) desde
         solicitadaDesdeHM (ancla fijada al crear la solicitud, ver los 3 formularios que asignan
         route.solicitud) -- vence ANTES de medianoche si no hay respuesta. */
+/* Ver ajuste "Cierre automático de Solicitudes sobre turnos que dejaron de estar sanos" (hallazgo real:
+   resolverSolicitud nunca revalidaba el estado vivo del turno al aprobar -- una Reprogramación/Cancelación/
+   Cambio de Mensajero/Enroque que quedó pendiente podía aprobarse a ciegas aunque el turno ya hubiera
+   despachado, cerrado, o registrado llegada mientras tanto. En vez de bloquear recién en el clic de "Aceptar"
+   (dejando la solicitud viva en la bandeja de Planner hasta ese momento, confundiendo qué hay realmente por
+   gestionar), se cierra SOLA en cuanto deja de estar sana -- mismo mecanismo de archivo "No Gestionada —
+   Sistema Gravity" que ya usa el vencimiento por SLA de 1h, unas líneas más abajo.
+   Alcance: despachado/retirado/cerrado (afectación confirmada o sin reemplazo)/llegada ya registrada aplica
+   a los 4 tipos por igual -- son estados terminales o de integridad de datos, sin margen de criterio.
+   'critical' (pasó la tolerancia, aún gestionable) SOLO cierra Cambio de Mensajero y Enroque: esos 2 cambian
+   de mensajero sin pasar por el registro de ausentismo que sí hace "Confirmar Reemplazo" en Alertas -- un
+   hueco real de datos, no una decisión de negocio. Reprogramación y Cancelación siguen disponibles en
+   crítico: ahí sigue siendo criterio de Planner (p. ej. cancelar formalmente un turno ya crítico antes de
+   que escale a Incumplimiento Confirmado), nunca se le retira esa decisión. */
+function motivoCierreSolicitudNoSana(route, s, motivoCodigo) {
+  if (motivoCodigo === 'despachado') return 'El turno ya fue despachado/retirado antes de que se resolviera esta solicitud — queda archivada en Historial sin aplicarse.';
+  if (motivoCodigo === 'llegada') return 'El mensajero ya registró llegada a bodega antes de que se resolviera esta solicitud — queda archivada en Historial sin aplicarse.';
+  if (motivoCodigo === 'cerrado') return 'El turno ya cerró en Incumplimiento Confirmado antes de que se resolviera esta solicitud — queda archivada en Historial sin aplicarse.';
+  return 'El turno entró en Incumplimiento / Requiere Reemplazo antes de que se resolviera esta solicitud de ' + (SOLICITUD_TIPO_LABEL[s.tipo] || s.tipo) + ' — gestiona el reemplazo desde Alertas Activas ("Confirmar Reemplazo"), que sí registra el ausentismo correctamente. Queda archivada en Historial sin aplicarse.';
+}
 function scanSolicitudesSla() {
   var th = gravityThresholds();
   var motivoHot = 'Solicitud operativa sin resolver tras el SLA de 1 hora — queda archivada en Historial.';
   state.turnos.forEach(function (route) {
     if (route.fecha !== TODAY_STR) return;
     var s = route.solicitud;
-    if (!s || s.estado !== 'pendiente' || !s.solicitadaDesdeHM) return;
+    if (!s || s.estado !== 'pendiente') return;
+    /* FIX "computeEstado enmascara el atraso real mientras hay solicitud pendiente": computeEstado(route)
+       corta en seco y devuelve el código *_pending (ver línea ~3262) ANTES de llegar a la lógica de atraso
+       por tiempo -- NUNCA puede devolver 'critical'/'afectacion_confirmada' para una ruta que todavía tiene
+       route.solicitud.estado==='pendiente' (la condición misma de este forEach). Se calcula el atraso real
+       aquí mismo, en paralelo, con la misma fórmula exacta que usa computeEstado más abajo en el archivo. */
+    var lateReal = minutesDiff(state.now, parseDT(route.fecha, route.hora));
+    var motivoCodigo = null;
+    if (route.retirado || route.salida) motivoCodigo = 'despachado';
+    else if (route.llegada) motivoCodigo = 'llegada';
+    else if (lateReal > th.tolerancia + th.gestion) motivoCodigo = 'cerrado';
+    else if (lateReal > th.tolerancia && (s.tipo === 'cambio_mensajero' || s.tipo === 'enroque')) motivoCodigo = 'critical';
+    if (motivoCodigo) {
+      s.estado = 'no_gestionada';
+      s.resueltoPor = 'Sistema Gravity'; s.resueltoPorRol = 'SYSTEM';
+      s.resueltoEn = fmtClock(state.now); s.resueltoFecha = route.fecha;
+      registrarHistorialCambio(route, {
+        tipo: s.tipo, accion: 'no_gestionada', motivo: motivoCierreSolicitudNoSana(route, s, motivoCodigo),
+        horaAnterior: s.horaAnterior || null, horaPropuesta: s.nuevaHora || null, por: 'Sistema Gravity', rol: 'SYSTEM'
+      });
+      return;
+    }
+    if (!s.solicitadaDesdeHM) return;
     var elapsed = minutesDiff(state.now, parseDT(s.fecha || route.fecha, s.solicitadaDesdeHM));
     if (elapsed <= th.slaAlertaBodega) return;
     s.estado = 'no_gestionada';
