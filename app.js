@@ -713,21 +713,16 @@ function deduplicarUsuariosPorEmail(rows) {
   var sinEmail = rows.filter(function (row) { return !row.value.email; }).map(function (row) { return row.value; });
   return Object.keys(porEmail).map(function (k) { return porEmail[k].value; }).concat(sinEmail);
 }
-/* Ver requerimiento "Auditoría: Sincronización en Vivo y Persistencia de Programación de Flota", punto 3:
-   mismo criterio que deduplicarUsuariosPorEmail, pero por asignación (sede+fecha+hora+mensajeroId) en vez de
-   correo -- cubre el caso de 2 filas con id distinto (TUR-XXXX) que terminan representando exactamente el
-   mismo turno, típicamente residuo de colisiones de nextTurnoId() o doble clic antes de que existiera la
-   validación de duplicados en submitTurno/#formRuta. Se queda con la de updated_at más reciente. */
-function deduplicarTurnosPorAsignacion(rows) {
-  var porAsignacion = {};
-  rows.forEach(function (row) {
-    var t = row.value;
-    var key = [t.sede, t.fecha, t.hora, t.mensajeroId].join('|');
-    var existente = porAsignacion[key];
-    if (!existente || new Date(row.updatedAt || 0) > new Date(existente.updatedAt || 0)) porAsignacion[key] = row;
-  });
-  return Object.keys(porAsignacion).map(function (k) { return porAsignacion[k].value; });
-}
+/* FIX "Turno pendiente genuino desaparece en silencio" (reporte real: TUR-1761, Easyway/Bogotá #2 -
+   Montevideo): existía aquí una deduplicarTurnosPorAsignacion() que fusionaba cualquier par de turnos que
+   compartieran sede+fecha+hora+mensajeroId, asumiendo que solo podían ser residuo de una colisión de
+   nextTurnoId()/doble clic -- se quedaba con el de updated_at más reciente y descartaba el otro en silencio.
+   Esa suposición ya no se sostiene: un Aliado puede reintentar, horas después, programar al mismo mensajero
+   en el mismo slot tras un rechazo de Planner (2 turnos reales, con su propio historialCambios e id) -- caso
+   real: TUR-1752 (rechazado por cupo) y TUR-1761 (reintento posterior, pendiente genuino) compartían la misma
+   clave; como TUR-1752 tenía el updated_at más reciente en Supabase, el merge se quedaba con el turno YA
+   CANCELADO y ocultaba por completo el pendiente real de la bandeja de Planner. La validación de duplicados
+   que esta función buscaba cubrir ya vive en submitTurno/#formRuta -- se retira sin reemplazo. */
 /* Ver requerimiento "Persistencia inmediata obligatoria / corrección de guardado congelado": antes, un push
    fallido (RLS/GRANT mal configurado, red caída, o simplemente un fetch() que se cuelga sin error -- fetch
    no trae timeout propio) quedaba en absoluto silencio para el usuario: scPushRows solo hacía console.warn y
@@ -1080,7 +1075,7 @@ function scPullAll() {
          mismo instante -- sin esto, un pull de foco/visibilitychange que gane la carrera contra un
          scDeleteRows() todavía sin confirmar resucita la fila que el usuario acaba de eliminar. */
       var turnosBorrandose = scTablasConBorradoEnVuelo['app_turnos'] || {};
-      var turnosRemotos = deduplicarTurnosPorAsignacion(turnos).filter(function (t) { return !turnosBorrandose[t.id]; });
+      var turnosRemotos = turnos.map(function (row) { return row.value; }).filter(function (t) { return !turnosBorrandose[t.id]; });
       /* FIX "Solicitud de Adicional reaparece tras Aprobar/Rechazar" (reporte Planner): el comentario de esta
          protección siempre dijo "creado/editado", pero el código de abajo solo cubría el caso ALTA (un turno
          NUEVO, ausente del pull remoto porque su INSERT todavía no comprometía) -- nunca el caso EDICIÓN de un
