@@ -639,7 +639,13 @@ function verificarSessionToken(token) {
    scPullAll, así que una tabla reintentando no bloquea a las demás, solo alarga lo que scPullAll espera en
    conjunto si esa tabla puntual tuvo que reintentar). */
 var SC_PULL_RETRY_DELAYS_MS = [1000, 3000, 5000];
-function scPullTable(table) {
+/* Ver FIX "Egress de Supabase agotado por re-sync completo" (reporte real: 35 MB de base de datos generaron
+   5.66/5 GB de Egress en un ciclo de facturación -- ver gravityTick/scPullAll): sinceUpdatedAt es el sync
+   INCREMENTAL -- cuando viene informado, cada página agrega ".gt('updated_at', sinceUpdatedAt)" ADEMÁS del
+   cursor por id ya existente, así que solo viajan las filas que de verdad cambiaron desde la última vez, no
+   la tabla completa. undefined/null (el caso de siempre, usado por login/foco/cualquier acción directa del
+   usuario) se comporta EXACTAMENTE igual que antes -- ningún llamador existente necesita cambiar. */
+function scPullTable(table, sinceUpdatedAt) {
   var client = clienteParaTabla(table);
   if (!client) return Promise.resolve(null);
   /* Ver requerimiento "Duplicación de Nelly Molano en Gestión de Usuarios": se trae también updated_at (no
@@ -678,6 +684,7 @@ function scPullTable(table) {
     try {
       var q = client.from(table).select('id, data, updated_at').order('id', { ascending: true }).limit(SC_PULL_PAGE_SIZE);
       if (ultimoId !== null) q = q.gt('id', ultimoId);
+      if (sinceUpdatedAt) q = q.gt('updated_at', sinceUpdatedAt);
       return q.then(function (res) {
         if (res.error || !res.data) return null;
         var pagina = res.data.map(function (row) { return { value: row.data, updatedAt: row.updated_at }; });
@@ -955,11 +962,15 @@ function scPushFlotaHabitual(aliado) {
    para cuando el .then() se ejecutaba, y el guardia de abajo saltaba TODAS las tablas salvo app_users (las
    trataba como si ningún rol tuviera permiso, en vez de respetar el rol real de la sesión que se está
    cerrando) -- mismo patrón de carrera que el cliente, debía capturarse igual. */
-function scPushAll() {
+/* modo: pasa tal cual a scPullAll -- 'incremental' SOLO lo usa el ciclo de fondo de gravityTick cuando no le
+   toca reconciliación completa (ver SC_FULL_SYNC_CADA_N_CICLOS); cualquier otro llamador (login/logout, o
+   cualquier acción directa que dispare su propio scPushAll) sigue sin pasar nada, que scPullAll ya trata como
+   'full' por defecto -- cero cambio de comportamiento para ellos. */
+function scPushAll(modo) {
   var clienteAuthCapturado = supabaseAuthClient;
   var rolCapturado = Auth.getUserRole();
   (scPullEnVuelo || Promise.resolve()).then(function () {
-    return scPullAll();
+    return scPullAll(modo);
   }).then(function () {
     var role = rolCapturado;
     /* Ver scPushRows: `silencioso=true` aquí -- este es el ÚNICO empuje puramente de fondo (login/logout/
@@ -1005,7 +1016,37 @@ var cuotasVigenteHoySincronizadaReal = false;
    exactamente el patrón que agota el pool de conexiones/límite de PostgREST de un proyecto Supabase real,
    descrito como "colapso" en el reporte. Ahora, si ya hay un pull en vuelo, scPullAll() REUTILIZA esa misma
    promesa en vez de lanzar un segundo lote de consultas -- dedup real, no solo una bandera decorativa. */
-function scPullAll() {
+/* Ver FIX "Egress de Supabase agotado por re-sync completo" (reporte real: 35 MB de base de datos generaron
+   5.66/5 GB de Egress en un ciclo de facturación -- ver gravityTick): registro del mayor updated_at ya visto
+   por tabla, para poder pedir sync incremental ("dame solo lo que cambió desde esto") -- arranca vacío en
+   cada carga de página (nunca persistido), así que la PRIMERA llamada de cualquier sesión siempre es
+   efectivamente completa sin importar qué modo se le pida (scPullTable ignora el filtro sin un valor real). */
+var scUltimoUpdatedAtPorTabla = {};
+function scActualizarUltimoUpdatedAt(tabla, filas) {
+  if (!filas || !filas.length) return;
+  var actual = scUltimoUpdatedAtPorTabla[tabla] || '';
+  filas.forEach(function (f) { if (f.updatedAt && f.updatedAt > actual) actual = f.updatedAt; });
+  scUltimoUpdatedAtPorTabla[tabla] = actual;
+}
+/* Fusiona por id dentro del arreglo YA EXISTENTE en memoria -- a diferencia del reemplazo completo que usa el
+   modo 'full' (state.X = remotos.concat(...)), esto NUNCA borra una fila que no vino en esta respuesta (es
+   justo el punto: en modo incremental, lo que no cambió simplemente no viaja, así que debe quedar intacto tal
+   como estaba). Las protecciones de "alta/borrado en vuelo" del modo 'full' dejan de hacer falta aquí: una
+   fila recién creada en ESTA pestaña y aún sin confirmar nunca puede aparecer en una respuesta incremental
+   (su updated_at es posterior al filtro, pero el INSERT todavía no comprometió del lado del servidor) -- se
+   queda tal cual en el arreglo local sin que nada la toque. Mismo razonamiento para un DELETE en vuelo: no
+   hay forma de que un upsert "resucite" una fila que este merge nunca borra en primer lugar. */
+function scMergeIncrementalPorId(arrLocal, remotos) {
+  var indicePorId = {};
+  arrLocal.forEach(function (item, idx) { indicePorId[item.id] = idx; });
+  remotos.forEach(function (r) {
+    var idx = indicePorId[r.id];
+    if (idx !== undefined) arrLocal[idx] = r; else { arrLocal.push(r); indicePorId[r.id] = arrLocal.length - 1; }
+  });
+  return arrLocal;
+}
+function scPullAll(modo) {
+  var esIncremental = modo === 'incremental';
   if (scPullEnVuelo) return scPullEnVuelo;
   /* Ver scTablasConAltaEnVuelo/scPushRows (FIX "Ruta desaparece y reaparece sola", reporte Cabify): se
      captura una FOTO de qué ids están en vuelo justo AHORA, antes de siquiera disparar las 8 consultas --
@@ -1029,11 +1070,22 @@ function scPullAll() {
      transacción -- esa solicitud desaparecía de la pantalla y, si nada la reenviaba, se perdía para
      siempre sin ningún aviso visible. Mismo criterio exacto que altaMensajerosEnVueloFoto/altaTurnosEnVueloFoto. */
   var altaSolicitudesEnVueloFoto = Object.assign({}, scTablasConAltaEnVuelo['app_solicitudes_generales']);
-  scPullEnVuelo = Promise.all([scPullTable('app_users'), scPullTable('app_mensajeros'), scPullTable('app_turnos'), scPullTable('app_solicitudes_generales'), scPullTable('app_cuotas_config'), scPullTable('app_flota_habitual'), scPullTable('app_config_settings'), scPullTable('app_security_events')]).then(function (res) {
+  var TABLAS_SYNC = ['app_users', 'app_mensajeros', 'app_turnos', 'app_solicitudes_generales', 'app_cuotas_config', 'app_flota_habitual', 'app_config_settings', 'app_security_events'];
+  var since = esIncremental ? scUltimoUpdatedAtPorTabla : {};
+  scPullEnVuelo = Promise.all(TABLAS_SYNC.map(function (t) { return scPullTable(t, since[t]); })).then(function (res) {
     var users = res[0], mensajeros = res[1], turnos = res[2], solicitudesGenerales = res[3], cuotasConfig = res[4], flotaHabitualRows = res[5], configSettingsRows = res[6], securityEventRows = res[7];
+    TABLAS_SYNC.forEach(function (t, i) { scActualizarUltimoUpdatedAt(t, res[i]); });
     var changed = false;
     if (users && users.length) {
-      state.users = deduplicarUsuariosPorEmail(users);
+      /* deduplicarUsuariosPorEmail necesita el set COMPLETO para decidir cuál fila prevalece entre 2 ids con
+         el mismo correo -- en modo incremental, 'users' son solo los cambiados, así que el upsert por id basta
+         (un duplicado nuevo real se termina de limpiar en la siguiente pasada completa de reconciliación, ver
+         SC_FULL_SYNC_CADA_N_CICLOS). */
+      if (esIncremental) {
+        scMergeIncrementalPorId(state.users, users.map(function (row) { return row.value; }));
+      } else {
+        state.users = deduplicarUsuariosPorEmail(users);
+      }
       changed = true;
       /* Ver requerimiento "Bug de Persistencia: Cambio de Contraseña Voluntario": state.users se REEMPLAZA
          aquí por un arreglo completamente nuevo, pero state.user (la sesión activa, asignada una sola vez en
@@ -1064,10 +1116,14 @@ function scPullAll() {
          scPushRows() todavía no se haya confirmado y que el pull remoto todavía no traiga -- sin esto, el
          reemplazo en bloque de abajo lo hacía desaparecer hasta el siguiente pull. */
       var mensajerosRemotos = mensajeros.map(function (row) { return row.value; });
-      var idsMensajerosRemotos = {};
-      mensajerosRemotos.forEach(function (m) { idsMensajerosRemotos[m.id] = true; });
-      var mensajerosLocalesEnVuelo = state.mensajeros.filter(function (m) { return altaMensajerosEnVueloFoto[m.id] && !idsMensajerosRemotos[m.id]; });
-      state.mensajeros = mensajerosRemotos.concat(mensajerosLocalesEnVuelo);
+      if (esIncremental) {
+        scMergeIncrementalPorId(state.mensajeros, mensajerosRemotos);
+      } else {
+        var idsMensajerosRemotos = {};
+        mensajerosRemotos.forEach(function (m) { idsMensajerosRemotos[m.id] = true; });
+        var mensajerosLocalesEnVuelo = state.mensajeros.filter(function (m) { return altaMensajerosEnVueloFoto[m.id] && !idsMensajerosRemotos[m.id]; });
+        state.mensajeros = mensajerosRemotos.concat(mensajerosLocalesEnVuelo);
+      }
       changed = true;
     }
     if (turnos && turnos.length) {
@@ -1076,33 +1132,44 @@ function scPullAll() {
          scDeleteRows() todavía sin confirmar resucita la fila que el usuario acaba de eliminar. */
       var turnosBorrandose = scTablasConBorradoEnVuelo['app_turnos'] || {};
       var turnosRemotos = turnos.map(function (row) { return row.value; }).filter(function (t) { return !turnosBorrandose[t.id]; });
-      /* FIX "Solicitud de Adicional reaparece tras Aprobar/Rechazar" (reporte Planner): el comentario de esta
-         protección siempre dijo "creado/editado", pero el código de abajo solo cubría el caso ALTA (un turno
-         NUEVO, ausente del pull remoto porque su INSERT todavía no comprometía) -- nunca el caso EDICIÓN de un
-         turno YA existente (ej. aprobarCuotaPlanner/rechazarCuotaPlanner mutando pendienteAprobacionPlanner):
-         ahí el id SÍ aparece en turnosRemotos (con el valor VIEJO, porque el UPDATE en vuelo todavía no
-         comprometía), así que el filtro "!idsTurnosRemotos[t.id]" nunca disparaba y el reemplazo en bloque de
-         abajo adoptaba la copia remota desactualizada -- la fila "resucitaba" en la Bandeja de Solicitudes
-         unos segundos después, obligando a un segundo clic. Ahora, para cualquier id con un push todavía en
-         vuelo, se usa la copia LOCAL (la más reciente -- es literalmente lo que se está subiendo) en lugar de
-         la que trajo este pull, sin importar si ese id ya existía remotamente o no. */
-      var turnosLocalesPorId = {};
-      state.turnos.forEach(function (t) { turnosLocalesPorId[t.id] = t; });
-      var turnosRemotosResueltos = turnosRemotos.map(function (t) {
-        return (altaTurnosEnVueloFoto[t.id] && turnosLocalesPorId[t.id]) ? turnosLocalesPorId[t.id] : t;
-      });
-      var idsTurnosRemotos = {};
-      turnosRemotosResueltos.forEach(function (t) { idsTurnosRemotos[t.id] = true; });
-      var turnosLocalesEnVuelo = state.turnos.filter(function (t) { return altaTurnosEnVueloFoto[t.id] && !idsTurnosRemotos[t.id]; });
-      state.turnos = turnosRemotosResueltos.concat(turnosLocalesEnVuelo);
+      if (esIncremental) {
+        /* Modo incremental: ningún id "en vuelo" (alta/borrado) puede aparecer realmente en esta respuesta --
+           ver comentario de scMergeIncrementalPorId -- un upsert directo basta, sin las protecciones de abajo
+           (pensadas exclusivamente para el reemplazo completo del modo 'full'). */
+        scMergeIncrementalPorId(state.turnos, turnosRemotos);
+      } else {
+        /* FIX "Solicitud de Adicional reaparece tras Aprobar/Rechazar" (reporte Planner): el comentario de esta
+           protección siempre dijo "creado/editado", pero el código de abajo solo cubría el caso ALTA (un turno
+           NUEVO, ausente del pull remoto porque su INSERT todavía no comprometía) -- nunca el caso EDICIÓN de un
+           turno YA existente (ej. aprobarCuotaPlanner/rechazarCuotaPlanner mutando pendienteAprobacionPlanner):
+           ahí el id SÍ aparece en turnosRemotos (con el valor VIEJO, porque el UPDATE en vuelo todavía no
+           comprometía), así que el filtro "!idsTurnosRemotos[t.id]" nunca disparaba y el reemplazo en bloque de
+           abajo adoptaba la copia remota desactualizada -- la fila "resucitaba" en la Bandeja de Solicitudes
+           unos segundos después, obligando a un segundo clic. Ahora, para cualquier id con un push todavía en
+           vuelo, se usa la copia LOCAL (la más reciente -- es literalmente lo que se está subiendo) en lugar de
+           la que trajo este pull, sin importar si ese id ya existía remotamente o no. */
+        var turnosLocalesPorId = {};
+        state.turnos.forEach(function (t) { turnosLocalesPorId[t.id] = t; });
+        var turnosRemotosResueltos = turnosRemotos.map(function (t) {
+          return (altaTurnosEnVueloFoto[t.id] && turnosLocalesPorId[t.id]) ? turnosLocalesPorId[t.id] : t;
+        });
+        var idsTurnosRemotos = {};
+        turnosRemotosResueltos.forEach(function (t) { idsTurnosRemotos[t.id] = true; });
+        var turnosLocalesEnVuelo = state.turnos.filter(function (t) { return altaTurnosEnVueloFoto[t.id] && !idsTurnosRemotos[t.id]; });
+        state.turnos = turnosRemotosResueltos.concat(turnosLocalesEnVuelo);
+      }
       changed = true;
     }
     if (solicitudesGenerales && solicitudesGenerales.length) {
       var solicitudesRemotas = solicitudesGenerales.map(function (row) { return row.value; });
-      var idsSolicitudesRemotas = {};
-      solicitudesRemotas.forEach(function (s) { idsSolicitudesRemotas[s.id] = true; });
-      var solicitudesLocalesEnVuelo = state.solicitudesGenerales.filter(function (s) { return altaSolicitudesEnVueloFoto[s.id] && !idsSolicitudesRemotas[s.id]; });
-      state.solicitudesGenerales = solicitudesRemotas.concat(solicitudesLocalesEnVuelo);
+      if (esIncremental) {
+        scMergeIncrementalPorId(state.solicitudesGenerales, solicitudesRemotas);
+      } else {
+        var idsSolicitudesRemotas = {};
+        solicitudesRemotas.forEach(function (s) { idsSolicitudesRemotas[s.id] = true; });
+        var solicitudesLocalesEnVuelo = state.solicitudesGenerales.filter(function (s) { return altaSolicitudesEnVueloFoto[s.id] && !idsSolicitudesRemotas[s.id]; });
+        state.solicitudesGenerales = solicitudesRemotas.concat(solicitudesLocalesEnVuelo);
+      }
       changed = true;
     }
     if (cuotasConfig && cuotasConfig.length) {
@@ -1151,10 +1218,19 @@ function scPullAll() {
        el unshift() de registrarEventoSeguridad (más nuevo primero). */
     if (securityEventRows && securityEventRows.length) {
       var eventosRemotos = securityEventRows.map(function (row) { return row.value; });
-      var idsRemotos = {};
-      eventosRemotos.forEach(function (ev) { idsRemotos[ev.id] = true; });
-      var localesSinConfirmar = state.securityEvents.filter(function (ev) { return !idsRemotos[ev.id]; });
-      state.securityEvents = eventosRemotos.concat(localesSinConfirmar).sort(function (a, b) { return (b.id || '').localeCompare(a.id || ''); });
+      if (esIncremental) {
+        /* A diferencia del modo 'full' (donde eventosRemotos SÍ es el set completo y por eso puede reconstruir
+           state.securityEvents desde cero), en incremental solo trae los eventos NUEVOS/cambiados -- un
+           reemplazo igual perdería todo el historial ya sincronizado que no vino en esta respuesta puntual.
+           Upsert por id + mismo orden descendente de siempre. */
+        scMergeIncrementalPorId(state.securityEvents, eventosRemotos);
+        state.securityEvents.sort(function (a, b) { return (b.id || '').localeCompare(a.id || ''); });
+      } else {
+        var idsRemotos = {};
+        eventosRemotos.forEach(function (ev) { idsRemotos[ev.id] = true; });
+        var localesSinConfirmar = state.securityEvents.filter(function (ev) { return !idsRemotos[ev.id]; });
+        state.securityEvents = eventosRemotos.concat(localesSinConfirmar).sort(function (a, b) { return (b.id || '').localeCompare(a.id || ''); });
+      }
       changed = true;
     }
     if (changed && state.user) syncAndRender(true);
@@ -6239,9 +6315,13 @@ function initTimezone() {
    conserva solo como interruptor interno (sin UI) para que las pruebas automatizadas puedan congelarlo
    (state.clockRunning = false) y fijar state.now a un instante determinístico, igual que antes. */
 let clockInterval = null;
-/* Contador de ticks reales (1/seg) para el autoguardado periódico a Supabase -- ver scPushAll/gravityTick.
-   30 ticks ≈ 30s de sesión activa entre cada empuje, sin necesidad de instrumentar cada mutación. */
+/* Contador de ticks reales (1/seg) para el autoguardado periódico a Supabase -- ver scPushAll/gravityTick. */
 var scAutosaveTickCount = 0;
+/* Ver FIX "Egress de Supabase agotado por re-sync completo" junto a gravityTick: cuántos ciclos de fondo
+   (incrementales) pasan entre cada pasada COMPLETA de reconciliación -- la única forma de detectar borrados
+   bajo sync incremental. 6 ciclos × 5 min de intervalo = 30 min entre reconciliaciones completas. */
+var SC_FULL_SYNC_CADA_N_CICLOS = 6;
+var scCiclosDeFondoDesdeFull = 0;
 function gravityTick() {
   if (!state.clockRunning || !state.user) return;
   state.now = new Date();
@@ -6270,14 +6350,23 @@ function gravityTick() {
   syncAndRender(false);
   scAutosaveTickCount++;
   /* FIX "Egress de Supabase agotado por re-sync completo cada 30s" (reporte real: 35 MB de base de datos
-     generaron 5.66/5 GB de Egress en un ciclo de facturación): scPushAll()->scPullAll() descarga las 8 tablas
-     COMPLETAS en cada ciclo (sin sync incremental, ver scPullTable) -- con esto disparando cada 30 segundos en
-     CUALQUIER pestaña abierta, una sola sesión de 8 horas ya superaba el límite mensual completo del plan
-     gratuito. Subido a 300 ticks (5 minutos) como mitigación inmediata de bajo riesgo mientras se evalúa un
-     sync incremental real (que requiere resolver aparte cómo detectar borrados, ver comentario de scPullAll) --
-     reduce el consumo ~10x sin tocar la lógica de merge/race-conditions que ya depende de un reemplazo
-     completo del array por tabla. */
-  if (scAutosaveTickCount >= 300) { scAutosaveTickCount = 0; scPushAll(); }
+     generaron 5.66/5 GB de Egress en un ciclo de facturación): el autoguardado de fondo pasó de 30 ticks (30s)
+     a 300 (5 min) como mitigación inmediata de bajo riesgo -- ver commit anterior. Ahora, además, el ciclo de
+     fondo usa sync INCREMENTAL (scPullAll('incremental'), ver scPullTable/scMergeIncrementalPorId) casi
+     siempre -- solo trae filas nuevas/modificadas desde la última vez, no las 8 tablas completas. Cada
+     SC_FULL_SYNC_CADA_N_CICLOS ciclos (30 min con el intervalo de 5 min) se intercala una pasada COMPLETA de
+     reconciliación: el sync incremental nunca puede detectar un DELETE por sí solo (una fila borrada
+     simplemente deja de tener updated_at que consultar, no aparece como "cambiada") -- esta pasada periódica
+     es la que de verdad limpia cualquier borrado que haya ocurrido en otra sesión mientras tanto. Login,
+     recuperar foco/visibilidad y cualquier acción directa del usuario (crear/editar un turno, resolver una
+     solicitud, etc.) siguen siendo SIEMPRE 'full' -- ningún otro llamador de scPullAll/scPushAll cambia. */
+  if (scAutosaveTickCount >= 300) {
+    scAutosaveTickCount = 0;
+    scCiclosDeFondoDesdeFull++;
+    var tocaFull = scCiclosDeFondoDesdeFull >= SC_FULL_SYNC_CADA_N_CICLOS;
+    if (tocaFull) scCiclosDeFondoDesdeFull = 0;
+    scPushAll(tocaFull ? undefined : 'incremental');
+  }
 }
 /* Sin botón ni barra visible (ver arriba) -- se conserva solo para que las pruebas automatizadas puedan
    pausar el refresco a hora real (state.clockRunning=false) antes de fijar state.now a un instante fijo. */
