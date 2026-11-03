@@ -9012,9 +9012,11 @@ function renderDespachoMetrics(routes) {
 function observacionesDespachoCellHtml(route, editable) {
   var auto = route.excepcionDespachoNota || route.observaciones || '';
   var manual = route.observacionBodega || '';
+  var comentarioAliado = route.comentarioAliado || '';
   var lineas = [];
   if (auto) lineas.push('<div class="obs-linea obs-linea-auto" data-tip="' + escapeHtml(auto) + '">' + escapeHtml(auto) + '</div>');
   if (manual) lineas.push('<div class="obs-linea obs-linea-manual" data-tip="' + escapeHtml('Nota manual: ' + manual) + '"><strong>Nota manual:</strong> ' + escapeHtml(manual) + '</div>');
+  if (comentarioAliado) lineas.push('<div class="obs-linea obs-linea-manual" data-tip="' + escapeHtml('Comentario del Aliado: ' + comentarioAliado) + '"><strong>Comentario del Aliado:</strong> ' + escapeHtml(comentarioAliado) + '</div>');
   var textoHtml = lineas.length ? lineas.join('') : '<span class="courier-sub">—</span>';
   var botonHtml = editable ? iconEditButtonHtml('editar-observacion-bodega', ' data-id="' + route.id + '"') : '';
   return '<div class="obs-cell"><div class="obs-cell-text">' + textoHtml + '</div>' + botonHtml + '</div>';
@@ -9049,6 +9051,42 @@ function guardarObservacionBodega(routeId, texto) {
   toast('ok', 'Observación guardada', route.id + ' — observación de Bodega actualizada.');
   syncAndRender(true);
   pushRouteConAviso(route, 'Observación no confirmada en la nube');
+}
+/* Ver "Capacitación Aliados V1", Programación en Vivo: "Agregar comentarios" -- nota de seguimiento que el
+   Aliado puede dejar sobre su propio turno (ej. "Mensajero canceló", "Mensajero a 20 minutos de llegar") para
+   dar visibilidad al equipo (Planner/Bodega la ven en el mismo .obs-cell que ya usa Despacho, ver
+   observacionesDespachoCellHtml). Decisión del usuario: NO disponible en cualquier momento -- solo mientras el
+   turno está en "Incumplimiento / Requiere Reemplazo" (code 'critical', ver computeEstado), hasta que ese
+   evento se cierre (Confirmar Reemplazo, llegada registrada, o escalada a Incumplimiento Confirmado). Fuera de
+   esa ventana el botón no aparece (ver rowHtmlSeguimiento) -- esta función revalida la misma condición como
+   segunda barrera, igual criterio que el resto de modales de esta vista. */
+function elegibleComentarioAliado(route) {
+  return computeEstado(route).code === 'critical';
+}
+function openComentarioAliadoModal(routeId) {
+  if (!canDo('comentario.aliado.manage')) return;
+  var route = state.turnos.find(function (r) { return r.id === routeId; });
+  if (!route || !elegibleComentarioAliado(route)) return;
+  var m = getMensajero(route.mensajeroId);
+  document.getElementById('comentarioAliadoRouteId').value = routeId;
+  document.getElementById('comentarioAliadoNote').textContent = route.id + ' · ' + m.nombre + ' · ' + route.sede;
+  document.getElementById('comentarioAliadoTexto').value = route.comentarioAliado || '';
+  openModal('modalComentarioAliado');
+}
+function guardarComentarioAliado(routeId, texto) {
+  if (!canDo('comentario.aliado.manage')) return;
+  var route = state.turnos.find(function (r) { return r.id === routeId; });
+  if (!route || !elegibleComentarioAliado(route)) return;
+  var previa = route.comentarioAliado;
+  route.comentarioAliado = texto || null;
+  registrarHistorialCambio(route, {
+    tipo: 'comentario_aliado', accion: previa ? 'editado' : 'registrado',
+    motivo: texto ? ('Comentario del Aliado: ' + texto) : 'Comentario del Aliado eliminado.',
+    horaAnterior: null, horaPropuesta: null, por: state.user.nombre
+  });
+  toast('ok', 'Comentario guardado', route.id + ' — visible para el equipo de Melonn.');
+  syncAndRender(true);
+  pushRouteConAviso(route, 'Comentario no confirmado en la nube');
 }
 /* Ver requerimiento "Corrección Puntual: Reversión y Lógica Simplificada de Flota Propia (México)": Bodega
    cierra el turno de Flota Propia con solo 2 acciones directas (Se Despacha / No Se Despacha) -- sin Llegada,
@@ -10129,6 +10167,16 @@ function rowHtmlSeguimiento(route) {
        la Fase 3: el botón de fila "Reportar Novedad" que existió brevemente aquí se revirtió para mantener
        esta tabla operativa despejada -- ver openNuevaSolicitudModal/#nsTipo). */
     primaryActions.push('<button data-act="notificar-llegada" data-id="' + route.id + '">Notificar Ya Llegó</button>');
+  }
+  /* Ver "Capacitación Aliados V1": "Agregar comentarios" -- disponible EXCLUSIVAMENTE mientras el turno está
+     en Incumplimiento / Requiere Reemplazo (ver elegibleComentarioAliado), sin importar cuál de las ramas de
+     arriba haya disparado (p. ej. 'critical' puede coincidir con el badge de "Notificado"/"Sin Llegar" si el
+     Aliado ya había notificado antes de que escalara) -- se agrega aparte, no reemplaza ninguna acción
+     existente. Se cierra sola cuando el evento se resuelve (Confirmar Reemplazo, llegada registrada, o
+     escalada a Incumplimiento Confirmado), porque deja de cumplir la condición en el siguiente render. */
+  if (elegibleComentarioAliado(route)) {
+    var tipComentarioAliado = route.comentarioAliado ? (' data-tip="' + escapeHtml(route.comentarioAliado) + '"') : '';
+    primaryActions.push('<button data-act="agregar-comentario-aliado" data-id="' + route.id + '"' + tipComentarioAliado + '>' + (route.comentarioAliado ? 'Editar Comentario' : 'Agregar Comentario') + '</button>');
   }
   /* Ver requerimiento "Mejoras de UI, Auditoría de Trazabilidad y Control de Acceso...", punto 4: el "ojito"
      (Historial del Turno) queda reservado a roles internos operativos (Planner, Bodega, Auditor) -- ALIADO
@@ -14787,45 +14835,6 @@ function refreshNsFieldsForTipo() {
     }
   } else {
     bannerCmNs.hidden = true;
-  }
-  /* Ver ajuste "Elegibilidad de Cancelación por Cuota/Adicional y Minutos Restantes": no toda ruta elegible
-     en #nsRuta debe poder usar "Cancelar el turno (sin reemplazo)" -- 2 casos, mismo patrón de banner +
-     segunda barrera en submit que ya usa Cambio de Mensajero arriba:
-     1) Turno de CUOTA/Base (no esTurnoAdicional): cancelarlo sin reemplazo deja un cupo CONTRATADO sin
-        cubrir -- un daño operativo real para Melonn sin importar cuánta antelación dé el Aliado (a
-        diferencia de la penalización económica de computeCancelPenalty, que SÍ depende del tiempo). Nunca
-        elegible por esta vía.
-     2) Turno Adicional (esTurnoAdicional): sigue siendo elegible, pero solo con 60 min o más antes de la
-        hora pactada -- por debajo de eso ya no tiene sentido "cancelar sin reemplazo" en frío, el camino
-        correcto pasa a ser Alertas Activas (igual que Cambio de Mensajero en 'critical'). */
-  var esCancelacionNs = tipo === 'cancelacion';
-  var noSanaCancelacionNs = false;
-  var bannerCancelacionNs = document.getElementById('nsCancelacionNoSanaBanner');
-  if (esCancelacionNs) {
-    var routeCancNs = state.turnos.find(function (r) { return r.id === document.getElementById('nsRuta').value; });
-    if (routeCancNs) {
-      if (!esTurnoAdicional(routeCancNs)) {
-        noSanaCancelacionNs = true;
-        bannerCancelacionNs.hidden = false;
-        bannerCancelacionNs.innerHTML = ICONS.alert + '<span><strong>' + routeCancNs.id + ' es un turno de Cupo/Cuota contratada.</strong> ' +
-          'Cancelar sin reemplazo no está disponible para turnos de cuota -- un cupo contratado sin cubrir sí afecta la operación. ' +
-          'Si de verdad no puedes cubrirlo, usa <strong>"Cambiar mensajero"</strong> para buscar un reemplazo, o espera a que el ciclo normal de Alertas lo gestione.</span>';
-      } else {
-        var minRestantesCancNs = minutesDiff(parseDT(routeCancNs.fecha, routeCancNs.hora), state.now);
-        if (minRestantesCancNs < 60) {
-          noSanaCancelacionNs = true;
-          bannerCancelacionNs.hidden = false;
-          bannerCancelacionNs.innerHTML = ICONS.alert + '<span><strong>Faltan menos de 60 minutos para la hora pactada de ' + routeCancNs.id + '.</strong> ' +
-            'Cancelar sin reemplazo ya no está disponible por esta vía -- gestiona este turno desde <strong>Alertas Activas</strong> cuando corresponda.</span>';
-        } else {
-          bannerCancelacionNs.hidden = true;
-        }
-      }
-    } else {
-      bannerCancelacionNs.hidden = true;
-    }
-  } else {
-    bannerCancelacionNs.hidden = true;
   }
   document.getElementById('nsCambioMensajeroFields').hidden = !esCambioMensajero || noSanoCmNs;
   if (esCambioMensajero && !noSanoCmNs) {
@@ -23397,7 +23406,7 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('nsTipo').addEventListener('change', refreshNsFieldsForTipo);
   document.getElementById('nsRuta').addEventListener('change', function () {
     var tipoNsRutaChange = document.getElementById('nsTipo').value;
-    if (tipoNsRutaChange === 'enroque' || tipoNsRutaChange === 'cambio_mensajero' || tipoNsRutaChange === 'cancelacion') refreshNsFieldsForTipo();
+    if (tipoNsRutaChange === 'enroque' || tipoNsRutaChange === 'cambio_mensajero') refreshNsFieldsForTipo();
   });
   document.getElementById('nsNtPendiente').addEventListener('change', function (e) {
     document.getElementById('nsNtDatosMensajero').hidden = e.target.checked;
@@ -23458,20 +23467,6 @@ document.addEventListener('DOMContentLoaded', function () {
       toast('warn', 'Usa Confirmar Reemplazo en Alertas', route.id + ' ya está en Incumplimiento / Requiere Reemplazo — asigna el reemplazo desde Alertas Activas, no desde aquí.');
       return;
     }
-    /* Tercera barrera (ver #nsCancelacionNoSanaBanner/refreshNsFieldsForTipo, que ya bloquea esto en vivo):
-       mismo criterio que la de Cambio de Mensajero arriba -- cubre al Aliado que seleccionó el turno/tipo
-       antes de que dejara de ser elegible (p. ej. se le fueron los minutos mientras tenía el modal abierto)
-       y envía el formulario sin volver a tocar #nsRuta/#nsTipo. */
-    if (tipo === 'cancelacion') {
-      if (!esTurnoAdicional(route)) {
-        toast('warn', 'No disponible para turnos de Cuota', route.id + ' es un turno de Cupo/Cuota contratada — cancelar sin reemplazo no está disponible por esta vía.');
-        return;
-      }
-      if (minutesDiff(parseDT(route.fecha, route.hora), state.now) < 60) {
-        toast('warn', 'Fuera de ventana', 'Faltan menos de 60 minutos para la hora pactada de ' + route.id + ' — gestiona este turno desde Alertas Activas.');
-        return;
-      }
-    }
     var mensajeroPropuesto = null;
     var motivo;
     /* 'cambio_mensajero' (ver comentario de #nsTipo en index.html): el motivo que ve Planner se autogenera --
@@ -23514,7 +23509,7 @@ document.addEventListener('DOMContentLoaded', function () {
     var toastMsgReprog = solicitud.evaluacionAntelacion ? (' (' + solicitud.evaluacionAntelacion.label + ')') : '';
     var tipoToastLabel = {
       reprogramacion: 'Solicitud de reprogramación enviada', enroque: 'Solicitud de intercambio de turno enviada',
-      cambio_mensajero: 'Solicitud de cambio de mensajero enviada', cancelacion: 'Solicitud de cancelación enviada'
+      cambio_mensajero: 'Solicitud de cambio de mensajero enviada'
     }[tipo];
     toast('warn', tipoToastLabel, route.id + toastMsgReprog + ' — a la espera de respuesta del equipo Melonn.');
     closeModal();
@@ -24189,6 +24184,13 @@ document.addEventListener('DOMContentLoaded', function () {
     guardarObservacionBodega(routeId, texto);
     closeModal();
   });
+  document.getElementById('formComentarioAliado').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var routeId = document.getElementById('comentarioAliadoRouteId').value;
+    var texto = document.getElementById('comentarioAliadoTexto').value.trim();
+    guardarComentarioAliado(routeId, texto);
+    closeModal();
+  });
 
   document.getElementById('formRechazarSolicitud').addEventListener('submit', function (e) {
     e.preventDefault();
@@ -24556,6 +24558,7 @@ document.addEventListener('DOMContentLoaded', function () {
     else if (act === 'editar-turno') openTurnoModal('edit', id);
     else if (act === 'corregir-turno') openTurnoModal('correccion', id);
     else if (act === 'editar-observacion-bodega') openObservacionBodegaModal(id);
+    else if (act === 'agregar-comentario-aliado') openComentarioAliadoModal(id);
     else if (act === 'desasignar-mensajero') desasignarMensajero(id);
     else if (act === 'confirmar-mensajero') openTurnoModal('confirm', id);
     else if (act === 'prog-cargar-flota-habitual') cargarFlotaHabitual();

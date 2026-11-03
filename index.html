@@ -2714,6 +2714,22 @@
     </form>
   </div>
 
+  <!-- Ver "Capacitación Aliados V1", Programación en Vivo: comentario del Aliado sobre su propio turno --
+       mismo patrón que #modalObservacionBodega, pero exclusivo de ALIADO (comentario.aliado.manage) y solo
+       mientras el turno está en Incumplimiento / Requiere Reemplazo (ver elegibleComentarioAliado en app.js). -->
+  <div class="modal" id="modalComentarioAliado">
+    <div class="modal-head"><h3>Agregar Comentario</h3><button class="modal-close" data-close>&times;</button></div>
+    <form id="formComentarioAliado" class="modal-body">
+      <input type="hidden" id="comentarioAliadoRouteId">
+      <p class="modal-note" id="comentarioAliadoNote"></p>
+      <div class="field"><label for="comentarioAliadoTexto">Comentario</label><textarea id="comentarioAliadoTexto" rows="3" placeholder="Ej. Mensajero a 20 minutos de llegar"></textarea></div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" data-close>Cancelar</button>
+        <button type="submit" class="btn btn-primary">Guardar Comentario</button>
+      </div>
+    </form>
+  </div>
+
   <!-- Ver plan "Estandarización de Solicitudes del Aliado", Fase 3, y el ajuste de arquitectura posterior:
        modal único para los 2 modos que dependen de un turno YA en alerta/retirado, disparados ÚNICAMENTE
        desde Alertas Activas ("Confirmar Reemplazo"/"Reasignar") -- reemplaza los antiguos #modalAlertaReemplazo
@@ -3284,17 +3300,20 @@
       <div class="field" id="nsBodegaField"><label for="nsBodega">Bodega</label><select id="nsBodega"></select></div>
       <div class="field" id="nsRutaField"><label for="nsRuta">Mensajero / Turno</label><select id="nsRuta" required></select></div>
       <!-- Ver ajuste de arquitectura posterior a la Fase 3 del plan "Estandarización de Solicitudes del
-           Aliado": 'cambio_mensajero'/'cancelacion' volvieron a este selector -- TODA novedad del Aliado
-           (cambiar mensajero, cancelar, reprogramar, intercambiar) se canaliza ÚNICAMENTE por "+ Nueva
-           Solicitud", sin botones de fila dedicados en Seguimiento/Programar Flota. Conservan el set de
-           campos "enriquecido" (Vehículo/Correo) que se definió para el modal unificado "Novedad de
-           Transporte" (#nsCambioMensajeroFields, ver refreshNsFieldsForTipo) -- ese modal unificado sigue
-           existiendo pero SOLO para los 2 modos que dependen de un turno YA en alerta/retirado (ver
-           openModalNovedadTransporte: 'reemplazo_alerta'/'reemplazo_cancelacion', disparados desde Alertas
-           Activas, sin tocar). -->
+           Aliado": 'cambio_mensajero' volvió a este selector -- TODA novedad del Aliado (cambiar mensajero,
+           reprogramar, intercambiar) se canaliza ÚNICAMENTE por "+ Nueva Solicitud", sin botones de fila
+           dedicados en Seguimiento/Programar Flota. Conservan el set de campos "enriquecido" (Vehículo/Correo)
+           que se definió para el modal unificado "Novedad de Transporte" (#nsCambioMensajeroFields, ver
+           refreshNsFieldsForTipo) -- ese modal unificado sigue existiendo pero SOLO para los 2 modos que
+           dependen de un turno YA en alerta/retirado (ver openModalNovedadTransporte: 'reemplazo_alerta'/
+           'reemplazo_cancelacion', disparados desde Alertas Activas, sin tocar).
+           Ver "Capacitación Aliados V1": se retiró de nuevo la opción manual de cancelar (sin reemplazo) por
+           parte del Aliado -- el documento de capacitación oficial no la contempla; el sistema ejecuta la
+           penalización automáticamente al cumplirse el ciclo de vida del turno (ver Ciclo de vida del turno).
+           La cancelación directa del Planner (#solicitudTipo, origen:'admin') es un flujo totalmente aparte,
+           sin tocar. -->
       <div class="field"><label for="nsTipo">Tipo de solicitud</label>
         <select id="nsTipo" required>
-          <option value="cancelacion">Cancelar el turno (sin reemplazo)</option>
           <option value="cambio_mensajero">Cambiar mensajero</option>
           <option value="reprogramacion">Reprogramación de hora</option>
           <option value="enroque">Intercambio de Turno</option>
@@ -3341,11 +3360,6 @@
            registra ausentismo y reabre el ciclo de llegada; "Cambiar mensajero" no hace nada de eso). Ver
            refreshNsFieldsForTipo. -->
       <div class="cutoff-banner danger" id="nsCambioMensajeroNoSanoBanner" hidden></div>
-      <!-- Ver ajuste "Elegibilidad de Cancelación por Cuota/Adicional y Minutos Restantes": un turno de
-           Cuota/Base contratada nunca puede cancelarse sin reemplazo por esta vía (afecta cobertura real,
-           sin importar antelación); un turno Adicional sí puede, pero solo con 60 min o más antes de la
-           hora pactada -- por debajo de eso debe resolverse por Alertas Activas. Ver refreshNsFieldsForTipo. -->
-      <div class="cutoff-banner danger" id="nsCancelacionNoSanaBanner" hidden></div>
       <!-- 'cambio_mensajero' (ver comentario de #nsTipo arriba): datos del mensajero propuesto, mismo set
            de campos (Vehículo/Correo incluidos) que ya usaba el modal unificado "Novedad de Transporte". -->
       <div id="nsCambioMensajeroFields" class="filter-grid" style="grid-template-columns:1fr 1fr;" hidden>

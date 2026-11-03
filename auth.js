@@ -46,6 +46,10 @@
     'despacho.manage': ['BODEGA'],
     'flotaPropia.manage': ['BODEGA'],
     'schedule.aliado.manage': ['ALIADO'],
+    /* Ver "Capacitación Aliados V1" -- comentario de seguimiento que el Aliado puede dejar en Programación en
+       Vivo (Seguimiento) mientras un turno suyo está en Incumplimiento / Requiere Reemplazo ('critical'),
+       hasta que ese evento se cierre -- ver elegibleComentarioAliado en app.js. */
+    'comentario.aliado.manage': ['ALIADO'],
     'users.manage': ['ADMIN'],
     /* Visibilidad de selectores del formulario de filtros de Alertas (por rol). */
     'alertas.filter.bodega': ['ADMIN', 'PLANNER', 'ALIADO'],
