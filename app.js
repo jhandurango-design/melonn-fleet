@@ -11314,16 +11314,23 @@ function alertRowHtml(a) {
       acciones.push('<button data-act="arribo-sin-llegar" data-id="' + route.id + '" class="danger">Sin Llegar</button>');
     }
     fotoParaVer = route.notificacionFotoEvidencia || null;
-  } else if (code === 'pendiente_asignacion' || code === 'cancelado_pendiente_reemplazo' || code === 'sustitucion_riesgo' || code === 'sin_reemplazo') {
-    /* FIX "Reasignar visible para Planner sin acción real en Pendiente/Por Confirmar": pendiente_asignacion y
-       cancelado_pendiente_reemplazo son resorte exclusivo del Aliado (ver alertaEsAccionInmediata, que ya
-       excluye estos 2 códigos del set accionable de PLANNER/ADMIN) -- reasignarAlerta nunca abre para Planner
-       el modal de "Confirmar mensajero" (esa rama exige schedule.aliado.manage, exclusivo de ALIADO), así que
-       el botón caía siempre en "Solicitar reprogramación de hora", un modal que además asume un mensajero ya
-       asignado (usa m.nombre) y no aplica a un cupo todavía sin cubrir. Para estos 2 códigos el botón ahora es
-       exclusivo de schedule.aliado.manage; sustitucion_riesgo/sin_reemplazo (turno con mensajero real en
-       riesgo) siguen ofreciéndolo también a Planner vía consolidado.manage, que sí es una acción válida ahí. */
-    var reasignarEsAliadoOnly = code === 'pendiente_asignacion' || code === 'cancelado_pendiente_reemplazo';
+  } else if (code === 'pendiente_asignacion') {
+    /* Ver decisión del usuario "Capacitación Aliados V1": se retira el botón "Reasignar" de este código --
+       dejaba 2 caminos distintos al MISMO modal (openTurnoModal, modo 'confirm'): este botón y "Confirmar
+       recurso" en Programar Flota (ver rowHtmlProg). La acción vive exclusivamente en Programar Flota de
+       ahora en adelante; esta fila de Alertas se queda informativa (visibilidad del pendiente), sin acción
+       propia. */
+    acciones.push('<span class="courier-sub">Confírmalo desde Programar Flota (Hoy)</span>');
+  } else if (code === 'cancelado_pendiente_reemplazo' || code === 'sustitucion_riesgo' || code === 'sin_reemplazo') {
+    /* FIX "Reasignar visible para Planner sin acción real en Pendiente/Por Confirmar": cancelado_pendiente_reemplazo
+       es resorte exclusivo del Aliado (ver alertaEsAccionInmediata, que ya lo excluye del set accionable de
+       PLANNER/ADMIN) -- reasignarAlerta nunca abre para Planner el modal correspondiente (esa rama exige
+       schedule.aliado.manage, exclusivo de ALIADO), así que el botón caía siempre en "Solicitar reprogramación
+       de hora", un modal que además asume un mensajero ya asignado (usa m.nombre) y no aplica a un cupo
+       todavía sin cubrir. Para este código el botón es exclusivo de schedule.aliado.manage; sustitucion_riesgo/
+       sin_reemplazo (turno con mensajero real en riesgo) siguen ofreciéndolo también a Planner vía
+       consolidado.manage, que sí es una acción válida ahí. */
+    var reasignarEsAliadoOnly = code === 'cancelado_pendiente_reemplazo';
     if (canDo('schedule.aliado.manage') || (!reasignarEsAliadoOnly && canDo('consolidado.manage'))) acciones.push('<button data-act="alerta-reasignar" data-id="' + route.id + '" data-code="' + code + '" class="raised">Reasignar</button>');
   } else if (code === 'critical') {
     /* "Incumplimiento / Requiere Reemplazo": el mensajero aún no llegó pero sigue dentro de la ventana de
@@ -11999,7 +12006,6 @@ function resolverAlertaConMotivo(routeId, code, motivoTipo, reemplazoData) {
 }
 function reasignarAlerta(routeId, code) {
   if (canDo('schedule.aliado.manage')) {
-    if (code === 'pendiente_asignacion') { openTurnoModal('confirm', routeId); return; }
     if (code === 'cancelado_pendiente_reemplazo' || code === 'sustitucion_riesgo' || code === 'sin_reemplazo') { openModalNovedadTransporte(routeId, 'reemplazo_cancelacion'); return; }
   }
   if (canDo('consolidado.manage')) { openSolicitudModal(routeId, 'reprogramacion'); return; }
