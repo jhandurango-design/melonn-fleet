@@ -206,6 +206,31 @@ const CO_FESTIVOS_TODOS = CO_FESTIVOS_2026.concat(CO_FESTIVOS_2027);
 const MX_FESTIVOS_TODOS = MX_FESTIVOS_2026.concat(MX_FESTIVOS_2027);
 function esFestivo(fechaStr, country) { return (country === 'MX' ? MX_FESTIVOS_TODOS : CO_FESTIVOS_TODOS).indexOf(fechaStr) !== -1; }
 function fmtDateYMD(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function diaCalendarioAnteriorStr(fechaStr) {
+  var d = new Date(fechaStr + 'T00:00:00');
+  d.setDate(d.getDate() - 1);
+  return fmtDateYMD(d);
+}
+/* Traslado Automático de Cuota en Festivos (reporte real: festivo CO 2026-11-02, la cuota del Lunes nunca se
+   movió al Martes y los Aliados tuvieron que marcar como Adicional todo lo que excedía el cupo normal del
+   martes). Día de cuota EFECTIVO para una fecha+país -- normalmente es su propio día de la semana
+   (diaSemanaKey), pero si el día calendario INMEDIATAMENTE ANTERIOR fue festivo en ESE país y además era un
+   día operativo (Lunes-Sábado -- un festivo en Domingo nunca tuvo cuota que mover), la demanda de ese festivo
+   se traslada aquí: se usa el día de la semana del festivo en su lugar. Encadena hacia atrás por festivos
+   consecutivos del mismo país hasta la primera fecha no festiva de la racha -- en cuanto se sale de ella, el
+   día siguiente retoma su propio día de la semana normal (decisión del usuario: "si es festivo la cuota pasa
+   al siguiente día como cuota lunes, ya después retomar cuotas normales"). Nunca devuelve un día distinto al
+   propio para una fecha que cae en Domingo (diaSemanaKey ya la excluye -- jamás tuvo cuota que recibir).
+   SOLO para LECTURA de cuota (cuotaAsignada/cuotaGlobalAsignada/checkCuotaExceso/etc., nunca para la matriz
+   editable en Configuración, que sigue siendo el día de la semana crudo) -- evaluarAprobacionCuota sigue
+   usando esFestivo(fecha) tal cual para exigir aprobación en el propio día festivo, sin relación con esto. */
+function diaCuotaEfectivoKey(fechaStr, country) {
+  var diaPropio = diaSemanaKey(fechaStr);
+  if (!diaPropio) return null;
+  var anterior = diaCalendarioAnteriorStr(fechaStr);
+  if (diaSemanaKey(anterior) && esFestivo(anterior, country)) return diaCuotaEfectivoKey(anterior, country);
+  return diaPropio;
+}
 /* Lunes de la semana operativa "vigente" a partir de una fecha: si esa fecha cae en Domingo (no operativo,
    fuera de CUOTAS_DIAS), se toma el Lunes siguiente (la semana que arranca mañana); en cualquier otro día,
    el Lunes de esa misma semana. */
@@ -636,9 +661,18 @@ function scPullTable(table) {
      + app_security_events se benefician por igual (todas pasan por esta misma función); hoy solo app_turnos
      supera las 1000 filas, pero ninguna queda expuesta al mismo tope silencioso el día que crezca. */
   var SC_PULL_PAGE_SIZE = 1000;
+  /* FIX "Pérdida silenciosa de filas en tablas con tráfico concurrente" (reporte real: TUR-1761 en
+     app_turnos -- 1320 filas en Supabase, pero una sesión recién logueada solo traía 1302, 18 de menos,
+     invisible en cualquier bandeja que dependiera de state.turnos). .range() sin .order() no tiene ninguna
+     garantía de orden estable entre dos páginas separadas -- Postgres puede devolver las filas en el orden
+     físico de un scan, que SÍ puede desplazarse entre la página 1 y la página 2 si hay INSERTs/UPDATEs
+     concurrentes de por medio (exactamente el escenario de un día con mucho tráfico real, como hoy). Sin
+     .order(), una fila puede "saltarse" entre ambas páginas sin que ninguna de las dos la traiga -- nunca un
+     error, solo una fila menos, silenciosamente. Ordenar por 'id' (PK real de la tabla, indexado) ancla un
+     orden determinístico idéntico en ambas consultas, sin importar qué se inserte/actualice entre medio. */
   function traerPagina(offset, acumulado) {
     try {
-      return client.from(table).select('data, updated_at').range(offset, offset + SC_PULL_PAGE_SIZE - 1).then(function (res) {
+      return client.from(table).select('data, updated_at').order('id', { ascending: true }).range(offset, offset + SC_PULL_PAGE_SIZE - 1).then(function (res) {
         if (res.error || !res.data) return null;
         var pagina = res.data.map(function (row) { return { value: row.data, updatedAt: row.updated_at }; });
         var combinado = acumulado.concat(pagina);
@@ -3579,9 +3613,10 @@ function turnoAdicionalRowBadgeHtml(route) {
    fecha (futura) sí usa la matriz en vivo: ese día todavía no llegó, así que lo que Admin configure ahora ya
    es "lo vigente" para cuando llegue. */
 function checkCuotaExceso(sede, aliado, vehiculo, hora, fecha) {
-  if (!cuotasActivoPais(countryForSede(sede)) || esFlotaPropia(aliado)) return { excedida: false };
-  var dia = diaSemanaKey(fecha);
-  var franja = franjaForHora(hora, countryForSede(sede));
+  var country = countryForSede(sede);
+  if (!cuotasActivoPais(country) || esFlotaPropia(aliado)) return { excedida: false };
+  var dia = diaCuotaEfectivoKey(fecha, country);
+  var franja = franjaForHora(hora, country);
   if (!dia || !franja) return { excedida: false, dia: dia, franja: franja, cantidad: 0, actuales: 0 };
   var cantidad = fecha === TODAY_STR ? cuotaAsignadaVigenteHoy(sede, aliado, dia, franja, vehiculo) : cuotaAsignada(sede, aliado, dia, franja, vehiculo);
   if (cantidad <= 0) return { excedida: false, dia: dia, franja: franja, cantidad: 0, actuales: turnosProgramadosCount(sede, aliado, fecha, franja, vehiculo) };
@@ -3597,7 +3632,7 @@ function checkCuotaExceso(sede, aliado, vehiculo, hora, fecha) {
    más abajo) -- un exceso puntual de UNA franja ya no basta por sí solo para exigir aprobación de Planner
    mientras el total contratado siga teniendo espacio. */
 function cuotaGlobalAsignada(sede, aliado, fecha) {
-  var dia = diaSemanaKey(fecha);
+  var dia = diaCuotaEfectivoKey(fecha, countryForSede(sede));
   if (!dia) return 0;
   var fuente = fecha === TODAY_STR ? state.cuotasMatrizVigenteHoy : state.cuotasMatriz;
   return fuente.filter(function (c) { return c.sede === sede && c.aliado === aliado && c.dia === dia; })
@@ -3703,7 +3738,7 @@ function tipologiaHabilitada(sede, aliado, vehiculo) {
 function horaPerteneceAFranjaContratada(sede, aliado, vehiculo, hora, fecha) {
   var country = countryForSede(sede);
   if (!cuotasActivoPais(country) || esFlotaPropia(aliado)) return true;
-  var dia = diaSemanaKey(fecha);
+  var dia = diaCuotaEfectivoKey(fecha, country);
   if (!dia) return true;
   var matriz = fecha === TODAY_STR ? state.cuotasMatrizVigenteHoy : state.cuotasMatriz;
   var filasVehiculo = matriz.filter(function (c) { return c.sede === sede && c.aliado === aliado && c.vehiculo === vehiculo; });
@@ -4262,12 +4297,12 @@ function cierreCuotasPuedeEscribirMensajeroDe(sede, aliado) {
   return false;
 }
 function cierreCuotasCompletarDeficit(fechaObjetivo, motivoEtiqueta) {
-  var dia = diaSemanaKey(fechaObjetivo);
-  if (!dia) return [];
+  if (!diaSemanaKey(fechaObjetivo)) return [];
   var pendientesCreados = [];
   var mensajerosCreados = [];
   var vistos = {};
   state.cuotasMatriz.forEach(function (c) {
+    var dia = diaCuotaEfectivoKey(fechaObjetivo, countryForSede(c.sede));
     if (c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (esFlotaPropia(c.aliado)) return;
@@ -9606,7 +9641,7 @@ function calculadorHuerfanas(sede, fecha, franja, perfil) { return calculadorRou
 function calculadorTarget(sede, fecha, franja, perfil) {
   var country = countryForSede(sede);
   if (!cuotasActivoPais(country)) return calculadorProgramado(sede, fecha, franja, perfil);
-  var dia = diaSemanaKey(fecha);
+  var dia = diaCuotaEfectivoKey(fecha, country);
   if (!dia) return 0;
   var total = 0;
   var vehiculosScope = perfil ? perfil.vehiculos : cuotasVehiculosForSede(sede);
@@ -15883,7 +15918,7 @@ function initTimePicker(inputId) {
     var country = countryForSede(sedeSelVal);
     if (!cuotasActivoPais(country) || esFlotaPropia(state.user.aliado)) return null;
     var fechaPicker = state.progDay === 'tomorrow' ? TOMORROW_STR : TODAY_STR;
-    var dia = diaSemanaKey(fechaPicker);
+    var dia = diaCuotaEfectivoKey(fechaPicker, country);
     if (!dia) return null; // domingo: sin matriz ese día, Recurso Adicional libre como siempre
     var matrizPicker = fechaPicker === TODAY_STR ? state.cuotasMatrizVigenteHoy : state.cuotasMatriz;
     var filasVehiculo = matrizPicker.filter(function (c) { return c.sede === sedeSelVal && c.aliado === state.user.aliado && c.vehiculo === vehSelVal; });
@@ -17360,9 +17395,10 @@ function confirmarCargaMasiva() {
    aquí: su causal no depende del número de recursos, así que liberar una plaza no cambia su condición -- solo
    Planner puede resolverlos (aprobarCuotaPlanner/rechazarCuotaPlanner). */
 function recalcularPromocionCupo(sede, aliado, vehiculo, hora, fecha) {
-  if (!cuotasActivoPais(countryForSede(sede)) || esFlotaPropia(aliado)) return;
-  var dia = diaSemanaKey(fecha);
-  var franja = franjaForHora(hora, countryForSede(sede));
+  var country = countryForSede(sede);
+  if (!cuotasActivoPais(country) || esFlotaPropia(aliado)) return;
+  var dia = diaCuotaEfectivoKey(fecha, country);
+  var franja = franjaForHora(hora, country);
   var tocados = [];
   if (dia && franja) {
     var cantidad = cuotaAsignada(sede, aliado, dia, franja, vehiculo);
@@ -20606,12 +20642,13 @@ function cuotasAgregarFranjasFueraDeMatriz(franjas, sede, aliado, fecha) {
   Object.keys(fueraDeMatriz).forEach(function (k) { franjas.push(fueraDeMatriz[k]); });
 }
 function cuotasProgresoPorSede(aliado, fecha) {
-  var dia = diaSemanaKey(fecha);
-  if (!dia) return [];
+  if (!diaSemanaKey(fecha)) return [];
   var matriz = fecha === TODAY_STR ? state.cuotasMatrizVigenteHoy : state.cuotasMatriz;
   var porSede = {};
   matriz.forEach(function (c) {
-    if (c.aliado !== aliado || c.dia !== dia || c.cantidad <= 0) return;
+    if (c.aliado !== aliado || c.cantidad <= 0) return;
+    var dia = diaCuotaEfectivoKey(fecha, countryForSede(c.sede));
+    if (c.dia !== dia) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (!porSede[c.sede]) porSede[c.sede] = { sede: c.sede, cuota: 0, actuales: 0, pendientes: 0, pendienteAsignacionCount: 0, franjas: [] };
     var actualesFranja = turnosProgramadosCount(c.sede, aliado, fecha, c.franja, c.vehiculo);
@@ -20666,11 +20703,11 @@ function cuotasProgresoPorSede(aliado, fecha) {
    congelada de HOY) -- mismo criterio que ya usa Programar Flota para su propio "Mañana" (ver
    cuotasProgresoPorSede/calculadorFechaEfectiva). sedeFiltro acota a una bodega puntual (vacío = todas). */
 function cuotasProgresoPorAliadoManana(sedeFiltro) {
-  var dia = diaSemanaKey(TOMORROW_STR);
-  if (!dia) return [];
+  if (!diaSemanaKey(TOMORROW_STR)) return [];
   var porAliado = {};
   var sedesPorAliado = {};
   state.cuotasMatriz.forEach(function (c) {
+    var dia = diaCuotaEfectivoKey(TOMORROW_STR, countryForSede(c.sede));
     if (c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (sedeFiltro && c.sede !== sedeFiltro) return;
@@ -20712,10 +20749,10 @@ function cuotasProgresoPorAliadoManana(sedeFiltro) {
    Planner pueda distinguir de un vistazo en qué bodega puntual está el descalce/déficit de cada aliado, en
    vez de un único total ciego a través de todas sus sedes. */
 function cuotasProgresoPorBodegaYAliadoManana() {
-  var dia = diaSemanaKey(TOMORROW_STR);
-  if (!dia) return [];
+  if (!diaSemanaKey(TOMORROW_STR)) return [];
   var porSede = {};
   state.cuotasMatriz.forEach(function (c) {
+    var dia = diaCuotaEfectivoKey(TOMORROW_STR, countryForSede(c.sede));
     if (c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (!porSede[c.sede]) porSede[c.sede] = {};
@@ -20751,11 +20788,11 @@ function cuotasProgresoPorBodegaYAliadoManana() {
    (la instantánea congelada para hoy, nunca cuotasMatriz en vivo) y TODAY_STR, mismo criterio que ya usa
    cuotasProgresoPorSede para no desalinearse de checkCuotaExceso (ver ese comentario). */
 function cuotasProgresoPorAliadoHoy(sedeFiltro) {
-  var dia = diaSemanaKey(TODAY_STR);
-  if (!dia) return [];
+  if (!diaSemanaKey(TODAY_STR)) return [];
   var porAliado = {};
   var sedesPorAliado = {};
   state.cuotasMatrizVigenteHoy.forEach(function (c) {
+    var dia = diaCuotaEfectivoKey(TODAY_STR, countryForSede(c.sede));
     if (c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (sedeFiltro && c.sede !== sedeFiltro) return;
@@ -20783,10 +20820,10 @@ function cuotasProgresoPorAliadoHoy(sedeFiltro) {
   return Object.keys(porAliado).sort().map(function (a) { return porAliado[a]; });
 }
 function cuotasProgresoPorBodegaYAliadoHoy() {
-  var dia = diaSemanaKey(TODAY_STR);
-  if (!dia) return [];
+  if (!diaSemanaKey(TODAY_STR)) return [];
   var porSede = {};
   state.cuotasMatrizVigenteHoy.forEach(function (c) {
+    var dia = diaCuotaEfectivoKey(TODAY_STR, countryForSede(c.sede));
     if (c.dia !== dia || c.cantidad <= 0) return;
     if (!cuotasActivoPais(countryForSede(c.sede))) return;
     if (!porSede[c.sede]) porSede[c.sede] = {};
