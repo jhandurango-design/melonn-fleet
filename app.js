@@ -9629,10 +9629,21 @@ function calculadorEsHuerfanaRetiro(route) { return !!route.retirado && !!route.
 /* 'perfil' (uno de CALCULADOR_PERFILES_VEHICULO) es opcional en las funciones de conteo puro (Programado/Bajas/
    Huérfanas), pero SIEMPRE se pasa desde el render — el Calculador ya no ofrece una vista sin desglosar por
    tipo de vehículo (ver requerimiento "Evita agrupar todas las rutas en una sola suma global"). */
+/* FIX "Calculador de Rutas cuenta turnos rechazados/cancelados como programados" (reporte real: Alexander
+   López Rojas, Bogotá #2 - Montevideo, Moto xs -- TUR-1752 fue rechazado por Planner por cupo excedido, pero
+   seguía contando como mensajero programado en el Calculador, inflando el total de 8 a 9). A diferencia de
+   turnosProgramadosCount/turnosProgramadosGlobalCount (el conteo que SÍ bloquea cupos, ver checkCuotaExceso),
+   esta función nunca tuvo las mismas 2 exclusiones -- un turno rechazado por Planner (cuotaAprobacion.estado
+   === 'rechazada') o cancelado por el propio Aliado antes de operar (solicitud.tipo==='cancelacion' &&
+   estado==='aceptada' && origen==='aliado') nunca llegó a ser una ruta real, así que tampoco debe contar aquí
+   -- mismo criterio exacto, para que Programado/Bajas/Huérfanas del Calculador coincidan con lo que de verdad
+   está operando. */
 function calculadorRoutesForSedeFranja(sede, fecha, franja, perfil) {
   return state.turnos.filter(function (r) {
     if (r.sede !== sede || r.fecha !== fecha || calculadorFranjaForHora(r.hora) !== franja) return false;
     if (perfil && perfil.vehiculos.indexOf(r.vehiculo) === -1) return false;
+    if (r.solicitud && r.solicitud.tipo === 'cancelacion' && r.solicitud.estado === 'aceptada' && r.solicitud.origen === 'aliado') return false;
+    if (r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada') return false;
     return true;
   });
 }
