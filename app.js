@@ -15599,6 +15599,17 @@ function openRutaModal(routeId) {
 }
 function openTurnoModal(mode, routeId) {
   if (!canDo('schedule.aliado.manage')) return;
+  /* FIX "Mismo mensajero programado varias veces el mismo día sin que la ventana de retorno lo detecte"
+     (reporte real: Alexander López Rojas, Easyway/Bogotá #2 - Montevideo, 3 intentos en una hora a las 09:00
+     y 09:30 -- turnoEnVentanaRetorno es correcta y YA bloquea esto, verificado en vivo, pero lee
+     state.turnos tal como esté en ese momento en el navegador. Sin ninguna sincronización en tiempo real
+     (ver scPullAll, "Cargar al iniciar sesión + guardar en puntos clave"), una pestaña que lleva un rato
+     abierta puede no reflejar todavía un turno que el propio Aliado acaba de crear en un intento anterior
+     reciente -- el chequeo corre igual, solo que contra datos desactualizados. Disparar un scPullAll() aquí
+     (al ABRIR el modal, no al enviar) le da tiempo de sobra a resolver mientras el Aliado llena el
+     formulario -- turnoEnVentanaRetorno/duplicadoAliado en submitTurno ya leen state.turnos en vivo en el
+     momento del envío, así que no necesitan ningún cambio propio para beneficiarse de este refresco. */
+  if (mode === 'create') scPullAll();
   var route = routeId ? state.turnos.find(function (r) { return r.id === routeId; }) : null;
   if (routeId && !route) return;
   /* Hallazgo de Auditoría #1: histórico inmutable, y un turno ya despachado/retirado, con una Solicitud de
@@ -17247,6 +17258,9 @@ function generarPlantillaCargaMasivaDemo() {
 function abrirModalCargaMasiva() {
   if (!canDo('schedule.aliado.manage')) return;
   if (state.progDay !== 'tomorrow') return;
+  /* Mismo criterio que openTurnoModal (ver su comentario completo): refresca state.turnos al abrir, para que
+     la validación de ventana de retorno del archivo ya corra contra datos reales en vez de memoria vieja. */
+  scPullAll();
   cargaMasivaPreviewState = null;
   document.getElementById('cargaMasivaArchivo').value = '';
   document.getElementById('cargaMasivaResumenRapido').hidden = true;
