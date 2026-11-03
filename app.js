@@ -6269,7 +6269,15 @@ function gravityTick() {
   }
   syncAndRender(false);
   scAutosaveTickCount++;
-  if (scAutosaveTickCount >= 30) { scAutosaveTickCount = 0; scPushAll(); }
+  /* FIX "Egress de Supabase agotado por re-sync completo cada 30s" (reporte real: 35 MB de base de datos
+     generaron 5.66/5 GB de Egress en un ciclo de facturación): scPushAll()->scPullAll() descarga las 8 tablas
+     COMPLETAS en cada ciclo (sin sync incremental, ver scPullTable) -- con esto disparando cada 30 segundos en
+     CUALQUIER pestaña abierta, una sola sesión de 8 horas ya superaba el límite mensual completo del plan
+     gratuito. Subido a 300 ticks (5 minutos) como mitigación inmediata de bajo riesgo mientras se evalúa un
+     sync incremental real (que requiere resolver aparte cómo detectar borrados, ver comentario de scPullAll) --
+     reduce el consumo ~10x sin tocar la lógica de merge/race-conditions que ya depende de un reemplazo
+     completo del array por tabla. */
+  if (scAutosaveTickCount >= 300) { scAutosaveTickCount = 0; scPushAll(); }
 }
 /* Sin botón ni barra visible (ver arriba) -- se conserva solo para que las pruebas automatizadas puedan
    pausar el refresco a hora real (state.clockRunning=false) antes de fijar state.now a un instante fijo. */
@@ -24828,10 +24836,14 @@ document.addEventListener('DOMContentLoaded', function () {
      casi siempre disparan juntos al volver a esta pestaña -- sin amortiguar, cada regreso duplicaba el
      tráfico (2 lotes de 8 consultas en vez de 1). scPullAll() ya deduplica un pull genuinamente en vuelo,
      pero esto es una segunda capa, más barata: ignora un segundo disparo de recuperar foco/visibilidad
-     dentro de la misma ventana de 4s (alternar de aplicación/pestaña repetidamente no debe seguir generando
+     dentro de la misma ventana (alternar de aplicación/pestaña repetidamente no debe seguir generando
      una consulta nueva cada vez), sin afectar NINGÚN otro llamador de scPullAll (login, autoguardado,
-     acciones directas del usuario) -- esos siguen disparando siempre, sin este throttle. */
-  var SC_PULL_VISIBILIDAD_MIN_INTERVAL_MS = 4000;
+     acciones directas del usuario) -- esos siguen disparando siempre, sin este throttle.
+     Ver FIX "Egress de Supabase agotado por re-sync completo" (mismo reporte que el ajuste de 30s->5min en
+     gravityTick): subido de 4s a 60s -- alternar de pestaña/aplicación con frecuencia (revisar correo, volver,
+     revisar otra cosa, volver) ya no dispara una descarga completa de las 8 tablas en cada regreso, mientras
+     sigue siendo "fresco" para el caso real que motivó este requerimiento (volver tras una ausencia genuina). */
+  var SC_PULL_VISIBILIDAD_MIN_INTERVAL_MS = 60000;
   var scUltimoPullPorVisibilidadEn = 0;
   function scPullPorRecuperarVisibilidad() {
     if (!state.user) return;
