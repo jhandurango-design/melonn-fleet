@@ -2976,11 +2976,18 @@ function scopeSedes() {
   if (role === 'AUDITOR') return state.activeSede ? [state.activeSede] : SEDES.slice();
   return SEDES.slice();
 }
+/* Ver requerimiento "Un turno con excepción de Cuota/Festivo/Tipología RECHAZADA no debe aparecer en las
+   tablas de programación en vivo" (reporte Planner): mismo criterio exacto que routesForConsolidadoDate
+   (Despacho/Seguimiento/Consolidado, ya protegidos) -- este función (Programación de Rutas, Hoy/Mañana)
+   nunca lo tuvo. Un turno rechazado nunca pasó de estado pendiente de aprobación a ruta real; mostrarlo aquí
+   como si fuera una cancelación operativa genera confusión sin aportar nada que Historial de Solicitudes
+   (unifiedFromCuota/solicitudesHistorialUnificado) no muestre ya con más detalle. */
 function routesInScope(day) {
   var fecha = day === 'tomorrow' ? TOMORROW_STR : TODAY_STR;
   var scope = userEffectiveScope();
   return state.turnos.filter(function (r) {
     if (r.fecha !== fecha) return false;
+    if (r.cuotaAprobacion && r.cuotaAprobacion.estado === 'rechazada') return false;
     if (scope.type === 'LOCAL' && scope.aliadoId) return getMensajero(r.mensajeroId).aliado === scope.aliadoId;
     return scopeSedes().indexOf(r.sede) !== -1;
   });
@@ -3582,11 +3589,14 @@ function turnosPendientesAprobacionCount(sede, aliado, fecha, franja, vehiculo) 
 function cuotasActivoPais(country) { return country === 'MX' ? !!state.configSettings.cuotasActivoMX : !!state.configSettings.cuotasActivoCO; }
 /* Ver requerimiento "Regla Definitiva para Recursos Adicionales (Visibilidad y Auditoría)": un turno es
    "Adicional" cuando se creó por encima de la cuota BASE contratada (causal 'cupo', ver
-   evaluarAprobacionCuota/checkCuotaGlobalExceso) o como recurso sin cuota operativa de Domingo (causal
-   'domingo') -- NO festivo/tipología, que son excepciones de un tipo distinto (día/vehículo), no de cantidad.
-   Con Cuotas INACTIVAS para el país de la sede, NUNCA es Adicional (no hay meta contratada contra la cual
-   exceder -- "Programación Standard"). route.pendienteAprobacionMotivo nunca se borra tras aprobar/rechazar
-   (ver aprobarCuotaPlanner/rechazarCuotaPlanner) -- queda como marca permanente, así que este predicado sigue
+   evaluarAprobacionCuota/checkCuotaGlobalExceso), como recurso sin cuota operativa de Domingo (causal
+   'domingo'), o con un vehículo sin tipología habilitada en la matriz del Aliado (causal 'tipologia', ver
+   tipologiaHabilitada) -- AJUSTE (decisión del usuario, 2026-11-03): tipología se suma aquí porque
+   operativamente SÍ es un recurso fuera del plan de flota contratado, igual que cupo/domingo -- a diferencia
+   de festivo (causal del DÍA completo, no del recurso puntual), que sigue sin contar como Adicional. Con
+   Cuotas INACTIVAS para el país de la sede, NUNCA es Adicional (no hay meta contratada contra la cual exceder
+   -- "Programación Standard"). route.pendienteAprobacionMotivo nunca se borra tras aprobar/rechazar (ver
+   aprobarCuotaPlanner/rechazarCuotaPlanner) -- queda como marca permanente, así que este predicado sigue
    siendo válido durante todo el ciclo de vida del turno, aprobado o no.
    IMPORTANTE (ver requerimiento, punto B "Traza End-to-End"): esta función es EXCLUSIVAMENTE de identificación/
    visibilidad -- un turno Adicional sigue EXACTAMENTE el mismo flujo operativo que cualquier otro (asistencia,
@@ -3595,14 +3605,14 @@ function cuotasActivoPais(country) { return country === 'MX' ? !!state.configSet
    visible en pantalla como insumo, nunca como un bloqueo o descuento aplicado de antemano. */
 function esTurnoAdicional(route) {
   if (!cuotasActivoPais(countryForSede(route.sede))) return false;
-  return route.pendienteAprobacionMotivo === 'cupo' || route.pendienteAprobacionMotivo === 'domingo';
+  return route.pendienteAprobacionMotivo === 'cupo' || route.pendienteAprobacionMotivo === 'domingo' || route.pendienteAprobacionMotivo === 'tipologia';
 }
 /* Badge "+1 Adicional" visible en la fila del turno, en TODOS los tableros que la muestran (Programación,
    Consolidado, Despacho, Seguimiento, Cumplimiento/Calidad, Auditoría de Cobros) -- mismo estilo .badge-
    sobrecupo que ya usa el widget agregado de Avance de Cuotas (ver cuotasSobrecupoBadgeHtml). */
 function turnoAdicionalRowBadgeHtml(route) {
   if (!esTurnoAdicional(route)) return '';
-  var causaTxt = route.pendienteAprobacionMotivo === 'domingo' ? 'Recurso Adicional de Domingo' : 'Cupo Excedido';
+  var causaTxt = cuotaCausalLabel(route.pendienteAprobacionMotivo);
   return ' <span class="badge-sobrecupo" data-tip="Turno fuera de la cuota base contratada (' + causaTxt + '); sigue el mismo flujo operativo normal -- el Auditor decide cobros/exoneraciones con esta información visible.">+1 Adicional</span>';
 }
 /* Único punto de control de excesos de cupo (ver evaluarAprobacionCuota/submitTurno) — sin cuota asignada
