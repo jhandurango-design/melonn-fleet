@@ -663,25 +663,31 @@ function scPullTable(table) {
   var SC_PULL_PAGE_SIZE = 1000;
   /* FIX "Pérdida silenciosa de filas en tablas con tráfico concurrente" (reporte real: TUR-1761 en
      app_turnos -- 1320 filas en Supabase, pero una sesión recién logueada solo traía 1302, 18 de menos,
-     invisible en cualquier bandeja que dependiera de state.turnos). .range() sin .order() no tiene ninguna
-     garantía de orden estable entre dos páginas separadas -- Postgres puede devolver las filas en el orden
-     físico de un scan, que SÍ puede desplazarse entre la página 1 y la página 2 si hay INSERTs/UPDATEs
-     concurrentes de por medio (exactamente el escenario de un día con mucho tráfico real, como hoy). Sin
-     .order(), una fila puede "saltarse" entre ambas páginas sin que ninguna de las dos la traiga -- nunca un
-     error, solo una fila menos, silenciosamente. Ordenar por 'id' (PK real de la tabla, indexado) ancla un
-     orden determinístico idéntico en ambas consultas, sin importar qué se inserte/actualice entre medio. */
-  function traerPagina(offset, acumulado) {
+     invisible en cualquier bandeja que dependiera de state.turnos). Un primer intento ordenó por 'id' pero
+     SIGUIÓ .range(offset, offset+999) (paginación por OFFSET) -- eso resuelve el orden dentro de una misma
+     consulta, pero no el problema real: OFFSET/LIMIT no es estable frente a INSERTs concurrentes entre una
+     página y la siguiente. Si una fila nueva se inserta con un 'id' que ordena ANTES de la posición 1000
+     mientras la página 2 todavía no se pide, TODO se corre una posición -- la fila que antes estaba en 1000
+     ahora está en 999 (ya entregada en la página 1) y la que estaba en offset 1000 pasó a 999, dejando un
+     hueco de exactamente 1 fila por cada inserción concurrente entre páginas (verificado en vivo: seguían
+     faltando filas incluso después de agregar el .order()). La solución real es paginación por CURSOR
+     (keyset): en vez de "dame las filas en la posición 1000-1999", se pide "dame las filas con id mayor al
+     último id ya visto" -- inmune a cualquier INSERT/DELETE en cualquier otra posición de la tabla, porque
+     nunca depende de una posición numérica que pueda correrse. */
+  function traerPagina(ultimoId, acumulado) {
     try {
-      return client.from(table).select('data, updated_at').order('id', { ascending: true }).range(offset, offset + SC_PULL_PAGE_SIZE - 1).then(function (res) {
+      var q = client.from(table).select('id, data, updated_at').order('id', { ascending: true }).limit(SC_PULL_PAGE_SIZE);
+      if (ultimoId !== null) q = q.gt('id', ultimoId);
+      return q.then(function (res) {
         if (res.error || !res.data) return null;
         var pagina = res.data.map(function (row) { return { value: row.data, updatedAt: row.updated_at }; });
         var combinado = acumulado.concat(pagina);
-        if (pagina.length < SC_PULL_PAGE_SIZE) return combinado;
-        return traerPagina(offset + SC_PULL_PAGE_SIZE, combinado);
+        if (res.data.length < SC_PULL_PAGE_SIZE) return combinado;
+        return traerPagina(res.data[res.data.length - 1].id, combinado);
       }, function () { return null; });
     } catch (e) { return Promise.resolve(null); }
   }
-  function intentoUnico() { return traerPagina(0, []); }
+  function intentoUnico() { return traerPagina(null, []); }
   /* null distingue un fallo real (reintentable) de una tabla genuinamente vacía (res.data === [], .map ya
      devuelve [] -- nunca null) -- solo se reintenta el primer caso. */
   function conReintentos(numeroIntento) {
